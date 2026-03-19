@@ -39,9 +39,12 @@ public:
     AxisAlignedBB addCoord(double x, double y, double z) const {
         double nx0 = minX, ny0 = minY, nz0 = minZ;
         double nx1 = maxX, ny1 = maxY, nz1 = maxZ;
-        if (x < 0.0) nx0 += x; if (x > 0.0) nx1 += x;
-        if (y < 0.0) ny0 += y; if (y > 0.0) ny1 += y;
-        if (z < 0.0) nz0 += z; if (z > 0.0) nz1 += z;
+        if (x < 0.0) nx0 += x; 
+        if (x > 0.0) nx1 += x;
+        if (y < 0.0) ny0 += y; 
+        if (y > 0.0) ny1 += y;
+        if (z < 0.0) nz0 += z; 
+        if (z > 0.0) nz1 += z;
         return AxisAlignedBB(nx0, ny0, nz0, nx1, ny1, nz1);
     }
 
@@ -112,9 +115,12 @@ public:
     AxisAlignedBB shrink(double x, double y, double z) const {
         double nx0 = minX, ny0 = minY, nz0 = minZ;
         double nx1 = maxX, ny1 = maxY, nz1 = maxZ;
-        if (x < 0.0) nx0 -= x; if (x > 0.0) nx1 -= x;
-        if (y < 0.0) ny0 -= y; if (y > 0.0) ny1 -= y;
-        if (z < 0.0) nz0 -= z; if (z > 0.0) nz1 -= z;
+        if (x < 0.0) nx0 -= x; 
+        if (x > 0.0) nx1 -= x;
+        if (y < 0.0) ny0 -= y; 
+        if (y > 0.0) ny1 -= y;
+        if (z < 0.0) nz0 -= z; 
+        if (z > 0.0) nz1 -= z;
         return AxisAlignedBB(nx0, ny0, nz0, nx1, ny1, nz1);
     }
 

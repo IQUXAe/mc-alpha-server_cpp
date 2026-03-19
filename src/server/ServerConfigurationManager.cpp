@@ -60,16 +60,34 @@ EntityPlayerMP* ServerConfigurationManager::login(NetLoginHandler* handler, cons
 
 void ServerConfigurationManager::playerLoggedIn(EntityPlayerMP* player) {
     playerEntities.push_back(player);
-    // TODO: load player data from disk
-    // TODO: add to world
+
+    // Simplistic text-based save format for now
+    std::string saveFile = "player_states/" + toLower(player->username) + ".pos";
+    std::ifstream file(saveFile);
+    if (file.is_open()) {
+        double x, y, z;
+        float yaw, pitch;
+        if (file >> x >> y >> z >> yaw >> pitch) {
+            player->setPositionAndRotation(x, y, z, yaw, pitch);
+            std::cout << "[INFO] Loaded player position for " << player->username << std::endl;
+        }
+    }
 }
 
 void ServerConfigurationManager::playerLoggedOut(EntityPlayerMP* player) {
-    // TODO: save player data
+    std::string saveDir = "player_states";
+    std::system(("mkdir -p " + saveDir).c_str());
+    
+    std::string saveFile = saveDir + "/" + toLower(player->username) + ".pos";
+    std::ofstream file(saveFile);
+    if (file.is_open()) {
+        file << player->posX << " " << player->posY << " " << player->posZ << " " 
+             << player->rotationYaw << " " << player->rotationPitch << "\n";
+    }
+
     playerEntities.erase(
         std::remove(playerEntities.begin(), playerEntities.end(), player),
         playerEntities.end());
-    // TODO: remove from world and entity tracker
 }
 
 void ServerConfigurationManager::broadcastPacket(std::unique_ptr<Packet> pkt) {
@@ -161,8 +179,16 @@ bool ServerConfigurationManager::isOp(const std::string& name) const {
 }
 
 void ServerConfigurationManager::savePlayerStates() {
+    std::string saveDir = "player_states";
+    std::system(("mkdir -p " + saveDir).c_str());
+
     for (auto* player : playerEntities) {
-        // TODO: save NBT player data
+        std::string saveFile = saveDir + "/" + toLower(player->username) + ".pos";
+        std::ofstream file(saveFile);
+        if (file.is_open()) {
+            file << player->posX << " " << player->posY << " " << player->posZ << " " 
+                 << player->rotationYaw << " " << player->rotationPitch << "\n";
+        }
     }
 }
 
