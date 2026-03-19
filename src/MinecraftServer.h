@@ -16,10 +16,12 @@ public:
     std::unique_ptr<PropertyManager> propertyManager;
     std::unique_ptr<NetworkListenThread> networkListenThread;
     std::unique_ptr<ServerConfigurationManager> configManager;
+    std::unique_ptr<World> worldMngr;
 
     bool onlineMode = true;
     bool spawnAnimals = true;
     bool pvpEnabled = true;
+    int viewDistance = 10;
 
     MinecraftServer();
     ~MinecraftServer();

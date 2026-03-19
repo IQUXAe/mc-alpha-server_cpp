@@ -16,6 +16,12 @@ public:
     // Chunk tracking
     int managedPosX = 0;
     int managedPosZ = 0;
+    
+    // Mining state
+    int miningStartX = 0;
+    int miningStartY = 0;
+    int miningStartZ = 0;
+    int miningTicks = -1;
 
     EntityPlayerMP(MinecraftServer* server, World* world, const std::string& name)
         : mcServer(server) {

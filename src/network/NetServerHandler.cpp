@@ -1,6 +1,9 @@
+#include "../world/World.h"
 #include "NetServerHandler.h"
 #include "../MinecraftServer.h"
 #include "../entity/EntityPlayerMP.h"
+#include "../world/Chunk.h"
+#include "../block/Block.h"
 
 #include <iostream>
 #include <algorithm>
@@ -20,6 +23,36 @@ void NetServerHandler::tick() {
     netManager_->processReadPackets();
     if (++tickCounter_ % 20 == 0) {
         sendPacket(std::make_unique<Packet0KeepAlive>());
+    }
+
+    int cx = static_cast<int>(player_->posX) >> 4;
+    int cz = static_cast<int>(player_->posZ) >> 4;
+    if (lastChunkX_ != cx || lastChunkZ_ != cz) {
+        int r = mcServer_->viewDistance;
+        std::vector<std::pair<int, int>> chunksToLoad;
+        for (int i = cx - r; i <= cx + r; ++i) {
+            for (int j = cz - r; j <= cz + r; ++j) {
+                if (std::abs(i - lastChunkX_) > r || std::abs(j - lastChunkZ_) > r) {
+                    chunksToLoad.push_back({i, j});
+                }
+            }
+        }
+        
+        std::sort(chunksToLoad.begin(), chunksToLoad.end(), [cx, cz](const std::pair<int, int>& a, const std::pair<int, int>& b) {
+            int distA = (a.first - cx) * (a.first - cx) + (a.second - cz) * (a.second - cz);
+            int distB = (b.first - cx) * (b.first - cx) + (b.second - cz) * (b.second - cz);
+            return distA < distB;
+        });
+
+        for (const auto& coords : chunksToLoad) {
+            auto* chunk = mcServer_->worldMngr->getChunk(coords.first, coords.second);
+            if (chunk) {
+                sendPacket(std::make_unique<Packet50PreChunk>(coords.first, coords.second, true));
+                sendPacket(std::make_unique<Packet51MapChunk>(coords.first * 16, 0, coords.second * 16, 16, 128, 16, chunk->getChunkData()));
+            }
+        }
+        lastChunkX_ = cx;
+        lastChunkZ_ = cz;
     }
 }
 
@@ -49,31 +82,41 @@ void NetServerHandler::teleport(double x, double y, double z, float yaw, float p
     sendPacket(std::make_unique<Packet13PlayerLookMove>(x, y + 1.6200000047683716, y, z, yaw, pitch, false));
 }
 
-#include "../world/ChunkGenerator.h"
-
 void NetServerHandler::sendChunks() {
     int chunkX = static_cast<int>(player_->posX) >> 4;
     int chunkZ = static_cast<int>(player_->posZ) >> 4;
+    int r = mcServer_->viewDistance;
 
-    auto rawChunk = ChunkGenerator::generateFlatChunk();
-    auto compressedChunk = ChunkGenerator::compressChunkData(rawChunk);
-
-    for (int cx = chunkX - 2; cx <= chunkX + 2; ++cx) {
-        for (int cz = chunkZ - 2; cz <= chunkZ + 2; ++cz) {
-            // Tell client to allocate chunk
-            sendPacket(std::make_unique<Packet50PreChunk>(cx, cz, true));
-            // Send chunk data (16x128x16 starting at cx*16, 0, cz*16)
-            sendPacket(std::make_unique<Packet51MapChunk>(
-                cx * 16,     // x
-                0,           // y
-                cz * 16,     // z
-                16,          // sizeX
-                128,         // sizeY
-                16,          // sizeZ
-                compressedChunk
-            ));
+    std::vector<std::pair<int, int>> chunksToLoad;
+    for (int cx = chunkX - r; cx <= chunkX + r; ++cx) {
+        for (int cz = chunkZ - r; cz <= chunkZ + r; ++cz) {
+            chunksToLoad.push_back({cx, cz});
         }
     }
+    
+    // Sort chunks by distance to player so they load center-outwards
+    std::sort(chunksToLoad.begin(), chunksToLoad.end(), [chunkX, chunkZ](const std::pair<int, int>& a, const std::pair<int, int>& b) {
+        int distA = (a.first - chunkX) * (a.first - chunkX) + (a.second - chunkZ) * (a.second - chunkZ);
+        int distB = (b.first - chunkX) * (b.first - chunkX) + (b.second - chunkZ) * (b.second - chunkZ);
+        return distA < distB;
+    });
+
+    for (const auto& coords : chunksToLoad) {
+        int cx = coords.first;
+        int cz = coords.second;
+        auto* chunk = mcServer_->worldMngr->getChunk(cx, cz);
+        if (!chunk) continue;
+
+        // Tell client to allocate chunk
+        sendPacket(std::make_unique<Packet50PreChunk>(cx, cz, true));
+        // Send compressed chunk data
+        sendPacket(std::make_unique<Packet51MapChunk>(
+            cx * 16, 0, cz * 16, 16, 128, 16, chunk->getChunkData()
+        ));
+    }
+    
+    lastChunkX_ = chunkX;
+    lastChunkZ_ = chunkZ;
 }
 
 // ======= Packet handlers =======
@@ -141,9 +184,37 @@ void NetServerHandler::handlePlayerLookMove(Packet13PlayerLookMove& pkt) {
 }
 
 void NetServerHandler::handleBlockDig(Packet14BlockDig& pkt) {
-    // TODO: Implement block digging with ItemInWorldManager
-    std::cout << "[DEBUG] Block dig at " << pkt.x << ", " << (int)pkt.y << ", " << pkt.z
-              << " face=" << (int)pkt.face << " status=" << (int)pkt.status << std::endl;
+    if (pkt.status == 0) {
+        player_->miningStartX = pkt.x;
+        player_->miningStartY = pkt.y;
+        player_->miningStartZ = pkt.z;
+        player_->miningTicks = 0;
+    } else if (pkt.status == 2) {
+        player_->miningTicks = -1;
+    } else if (pkt.status == 1) {
+        if (player_->miningTicks >= 0 && pkt.x == player_->miningStartX && pkt.y == player_->miningStartY && pkt.z == player_->miningStartZ) {
+            player_->miningTicks++;
+            
+            uint8_t id = mcServer_->worldMngr->getBlockId(pkt.x, pkt.y, pkt.z);
+            if (id > 0) {
+                // Determine target ticks
+                int reqTicks = 15; // default 0.75s
+                if (id == 18 || id == 20) reqTicks = 4; // leaves, glass fast
+                else if (id == 3 || id == 12 || id == 13) reqTicks = 10; // dirt, sand
+                else if (id >= 1 && id != 7) reqTicks = 20; // stone etc.
+
+                if (player_->miningTicks >= reqTicks) {
+                    mcServer_->worldMngr->setBlockWithNotify(pkt.x, pkt.y, pkt.z, 0);
+                    if (Block::blocksList[id]) {
+                        Block::blocksList[id]->dropBlockAsItem(mcServer_->worldMngr.get(), pkt.x, pkt.y, pkt.z, 0);
+                    }
+                    player_->miningTicks = -1;
+                }
+            }
+        }
+    } else if (pkt.status == 4) { // Drop held item
+        // Not implemented yet
+    }
 }
 
 void NetServerHandler::handlePlace(Packet15Place& pkt) {

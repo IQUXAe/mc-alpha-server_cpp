@@ -46,4 +46,8 @@ private:
     // Anti-cheat: track last known position
     double lastX_ = 0.0, lastY_ = 0.0, lastZ_ = 0.0;
     bool hasMoved_ = false;
+    
+    // Chunk generation tracking
+    int lastChunkX_ = -999999;
+    int lastChunkZ_ = -999999;
 };

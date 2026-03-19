@@ -3,6 +3,8 @@
 #include "network/Packet.h"
 #include "network/packets/AllPackets.h"
 #include "entity/EntityPlayerMP.h"
+#include "world/World.h"
+#include "block/Block.h"
 
 #include <iostream>
 #include <chrono>
@@ -28,6 +30,9 @@ bool MinecraftServer::initialize() {
     onlineMode = propertyManager->getBooleanProperty("online-mode", true);
     spawnAnimals = propertyManager->getBooleanProperty("spawn-animals", true);
     pvpEnabled = propertyManager->getBooleanProperty("pvp", true);
+    viewDistance = propertyManager->getIntProperty("view-distance", 10);
+    if (viewDistance < 3) viewDistance = 3;
+    if (viewDistance > 15) viewDistance = 15;
     int port = propertyManager->getIntProperty("server-port", 25565);
 
     std::string displayAddr = bindAddress.empty() ? "*" : bindAddress;
@@ -66,13 +71,17 @@ bool MinecraftServer::initialize() {
 
     std::cout << "[INFO] Preparing level \"" << levelName << "\"" << std::endl;
 
-    // For now, just set a simple spawn position
-    spawnX_ = 0;
-    spawnY_ = 64;
-    spawnZ_ = 0;
+    // Initialize block properties
+    Block::initBlocks();
+
+    // Initialize world
+    worldMngr = std::make_unique<World>(this, levelName);
 
     std::cout << "[INFO] Preparing start region" << std::endl;
-    // TODO: pre-generate spawn chunks when chunk system is implemented
+    // Spawn position is already set by World constructor, but we ensure it here
+    spawnX_ = worldMngr->spawnX;
+    spawnY_ = worldMngr->spawnY;
+    spawnZ_ = worldMngr->spawnZ;
 
     std::cout << "[INFO] Done! For help, type \"help\" or \"?\"" << std::endl;
     return true;

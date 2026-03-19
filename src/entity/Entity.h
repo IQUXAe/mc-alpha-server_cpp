@@ -53,6 +53,12 @@ public:
                                      x + hw, y - yOffset + height, z + hw);
     }
 
+    virtual void setPositionAndRotation(double x, double y, double z, float yaw, float pitch) {
+        setPosition(x, y, z);
+        rotationYaw = yaw;
+        rotationPitch = pitch;
+    }
+
     virtual void moveEntity(double dx, double dy, double dz) {
         posX += dx;
         posY += dy;
