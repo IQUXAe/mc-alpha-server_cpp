@@ -29,30 +29,55 @@ void NetServerHandler::tick() {
     int cz = static_cast<int>(player_->posZ) >> 4;
     if (lastChunkX_ != cx || lastChunkZ_ != cz) {
         int r = mcServer_->viewDistance;
-        std::vector<std::pair<int, int>> chunksToLoad;
-        for (int i = cx - r; i <= cx + r; ++i) {
-            for (int j = cz - r; j <= cz + r; ++j) {
-                if (std::abs(i - lastChunkX_) > r || std::abs(j - lastChunkZ_) > r) {
-                    chunksToLoad.push_back({i, j});
+        std::vector<std::pair<int, int>> newChunks;
+        int genR = r + 2; // Generate 2 extra rings to guarantee r+1 chunks populate and spill over into r before we send r to client
+        for (int i = cx - genR; i <= cx + genR; ++i) {
+            for (int j = cz - genR; j <= cz + genR; ++j) {
+                if (std::abs(i - lastChunkX_) > genR || std::abs(j - lastChunkZ_) > genR) {
+                    newChunks.push_back({i, j});
                 }
             }
         }
         
-        std::sort(chunksToLoad.begin(), chunksToLoad.end(), [cx, cz](const std::pair<int, int>& a, const std::pair<int, int>& b) {
+        std::sort(newChunks.begin(), newChunks.end(), [cx, cz](const std::pair<int, int>& a, const std::pair<int, int>& b) {
             int distA = (a.first - cx) * (a.first - cx) + (a.second - cz) * (a.second - cz);
             int distB = (b.first - cx) * (b.first - cx) + (b.second - cz) * (b.second - cz);
             return distA < distB;
         });
 
-        for (const auto& coords : chunksToLoad) {
-            auto* chunk = mcServer_->worldMngr->getChunk(coords.first, coords.second);
-            if (chunk) {
-                sendPacket(std::make_unique<Packet50PreChunk>(coords.first, coords.second, true));
-                sendPacket(std::make_unique<Packet51MapChunk>(coords.first * 16, 0, coords.second * 16, 16, 128, 16, chunk->getChunkData()));
-            }
-        }
+        chunksToLoad_.insert(chunksToLoad_.end(), newChunks.begin(), newChunks.end());
         lastChunkX_ = cx;
         lastChunkZ_ = cz;
+    }
+
+    int chunksProcessedThisTick = 0;
+    for (auto it = chunksToLoad_.begin(); it != chunksToLoad_.end() && chunksProcessedThisTick < 10; ) {
+        int px = it->first;
+        int pz = it->second;
+        
+        bool existed = mcServer_->worldMngr->chunkExists(px, pz);
+        auto* chunk = mcServer_->worldMngr->getChunk(px, pz);
+        if (!existed && chunk) {
+            chunksProcessedThisTick++; // Heavy work (generation) done
+        }
+        
+        bool isPadding = (std::abs(px - cx) > mcServer_->viewDistance || std::abs(pz - cz) > mcServer_->viewDistance);
+        
+        if (isPadding) {
+            // It's just a padding chunk to help borders populate. Remove it.
+            it = chunksToLoad_.erase(it);
+        } else {
+            // Visible chunk. We ONLY send it to the client AFTER the terrain is populated with trees/ores!
+            if (chunk && chunk->isTerrainPopulated) {
+                sendPacket(std::make_unique<Packet50PreChunk>(px, pz, true));
+                sendPacket(std::make_unique<Packet51MapChunk>(px * 16, 0, pz * 16, 16, 128, 16, chunk->getChunkData()));
+                it = chunksToLoad_.erase(it);
+                chunksProcessedThisTick++; // Sending a chunk is also work
+            } else {
+                // Needs neighbors to generate before it can populate. Leave in queue.
+                ++it;
+            }
+        }
     }
 }
 
@@ -88,8 +113,9 @@ void NetServerHandler::sendChunks() {
     int r = mcServer_->viewDistance;
 
     std::vector<std::pair<int, int>> chunksToLoad;
-    for (int cx = chunkX - r; cx <= chunkX + r; ++cx) {
-        for (int cz = chunkZ - r; cz <= chunkZ + r; ++cz) {
+    int genR = r + 2; // Generate 2 extra rings for full population guarantee
+    for (int cx = chunkX - genR; cx <= chunkX + genR; ++cx) {
+        for (int cz = chunkZ - genR; cz <= chunkZ + genR; ++cz) {
             chunksToLoad.push_back({cx, cz});
         }
     }
@@ -101,20 +127,8 @@ void NetServerHandler::sendChunks() {
         return distA < distB;
     });
 
-    for (const auto& coords : chunksToLoad) {
-        int cx = coords.first;
-        int cz = coords.second;
-        auto* chunk = mcServer_->worldMngr->getChunk(cx, cz);
-        if (!chunk) continue;
-
-        // Tell client to allocate chunk
-        sendPacket(std::make_unique<Packet50PreChunk>(cx, cz, true));
-        // Send compressed chunk data
-        sendPacket(std::make_unique<Packet51MapChunk>(
-            cx * 16, 0, cz * 16, 16, 128, 16, chunk->getChunkData()
-        ));
-    }
-    
+    // Replace the queue entirely
+    chunksToLoad_ = chunksToLoad;
     lastChunkX_ = chunkX;
     lastChunkZ_ = chunkZ;
 }

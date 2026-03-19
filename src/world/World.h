@@ -1,0 +1,66 @@
+#pragma once
+
+#include <unordered_map>
+#include <memory>
+#include <cstdint>
+#include <vector>
+#include "Chunk.h"
+#include "gen/ChunkProviderGenerate.h"
+#include "biome/WorldChunkManager.h"
+#include "../forward.h"
+
+class ChunkProviderGenerate;
+
+class World {
+public:
+    int spawnX = 0;
+    int spawnY = 64;
+    int spawnZ = 0;
+    int64_t randomSeed = 0;
+    int64_t worldTime = 0;
+
+    std::unique_ptr<ChunkProviderGenerate> chunkProvider;
+    std::unique_ptr<WorldChunkManager> worldChunkManager;
+
+    MinecraftServer* mcServer;
+
+    World(MinecraftServer* server, const std::string& savePath);
+    ~World();
+
+    void tick();
+
+    // WorldChunkManager access (func_4077_a in Java)
+    WorldChunkManager* func_4077_a() { return worldChunkManager.get(); }
+
+    // Chunk management
+    Chunk* getChunk(int chunkX, int chunkZ, bool generate = true);
+    Chunk* getChunkFromBlockCoords(int x, int z, bool generate = false);
+    bool chunkExists(int chunkX, int chunkZ) const;
+
+    // Block access and modification
+    uint8_t getBlockId(int x, int y, int z);
+    uint8_t getBlockMetadata(int x, int y, int z);
+    bool setBlock(int x, int y, int z, uint8_t blockId);
+    bool setBlockWithNotify(int x, int y, int z, uint8_t blockId);
+    bool setBlockAndMetadata(int x, int y, int z, uint8_t blockId, uint8_t metadata);
+    bool setBlockAndMetadataWithNotify(int x, int y, int z, uint8_t blockId, uint8_t metadata);
+    void markBlockNeedsUpdate(int x, int y, int z);
+    void notifyBlocksOfNeighborChange(int x, int y, int z, uint8_t neighborId);
+
+    // Height and terrain queries
+    int getHeightValue(int x, int z);
+    int func_4075_e(int x, int z) { return getHeightValue(x, z); }
+    bool isBlockSolid(int x, int y, int z);
+
+    // Entity integration
+    void getCollidingBoundingBoxes(Entity* entity, const AxisAlignedBB& mask, std::vector<AxisAlignedBB>& result);
+
+private:
+    std::unordered_map<uint64_t, std::unique_ptr<Chunk>> chunks_;
+    std::string worldPath_;
+
+    inline uint64_t getChunkKey(int chunkX, int chunkZ) const {
+        return (static_cast<uint64_t>(static_cast<uint32_t>(chunkX)) << 32) |
+                static_cast<uint32_t>(chunkZ);
+    }
+};

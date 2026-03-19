@@ -50,4 +50,5 @@ private:
     // Chunk generation tracking
     int lastChunkX_ = -999999;
     int lastChunkZ_ = -999999;
+    std::vector<std::pair<int, int>> chunksToLoad_;
 };
