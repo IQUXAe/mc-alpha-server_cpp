@@ -8,6 +8,12 @@
 #include "gen/ChunkProviderGenerate.h"
 #include "biome/WorldChunkManager.h"
 #include "../forward.h"
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <atomic>
+#include <leveldb/db.h>
 
 class ChunkProviderGenerate;
 
@@ -56,8 +62,25 @@ public:
     void getCollidingBoundingBoxes(Entity* entity, const AxisAlignedBB& mask, std::vector<AxisAlignedBB>& result);
 
 private:
+    void findSafeSpawnPoint();
+    void saveWorker();
+    std::vector<uint8_t> compressChunkData(Chunk* chunk);
+    void decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data);
+
     std::unordered_map<uint64_t, std::unique_ptr<Chunk>> chunks_;
     std::string worldPath_;
+
+    // Asynchronous saving queue
+    struct SaveTask {
+        uint64_t key;
+        std::vector<uint8_t> data;
+    };
+    std::queue<SaveTask> saveQueue_;
+    std::mutex saveMutex_;
+    std::condition_variable saveCondition_;
+    std::thread saveThread_;
+    std::atomic<bool> stopSaving_{false};
+    leveldb::DB* db_ = nullptr;
 
     inline uint64_t getChunkKey(int chunkX, int chunkZ) const {
         return (static_cast<uint64_t>(static_cast<uint32_t>(chunkX)) << 32) |

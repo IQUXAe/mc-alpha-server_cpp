@@ -3,12 +3,32 @@
 #include "../entity/Entity.h"
 #include "../core/AxisAlignedBB.h"
 #include "../MinecraftServer.h"
+#include "core/NBT.h"
+#include <zlib.h>
 #include <iostream>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <ctime>
 
 World::World(MinecraftServer* server, const std::string& savePath)
     : mcServer(server), worldPath_(savePath) {
     randomSeed = time(nullptr); // Basic seed
+    worldTime = 0;
+
+    // Create world directory
+    std::filesystem::create_directories(worldPath_);
+
+    // Initialize LevelDB
+    leveldb::Options options;
+    options.create_if_missing = true;
+    leveldb::Status status = leveldb::DB::Open(options, worldPath_ + "/db", &db_);
+    if (!status.ok()) {
+        std::cerr << "[ERROR] Failed to open LevelDB: " << status.ToString() << std::endl;
+        db_ = nullptr;
+    } else {
+        std::cout << "[INFO] LevelDB world storage initialized at " << worldPath_ << "/db" << std::endl;
+    }
 
     // Initialize WorldChunkManager (biome system)
     worldChunkManager = std::make_unique<WorldChunkManager>(randomSeed);
@@ -16,10 +36,25 @@ World::World(MinecraftServer* server, const std::string& savePath)
     // Initialize exactly same as alpha
     chunkProvider = std::make_unique<ChunkProviderGenerate>(this, randomSeed);
 
+    // Initialize background saving
+    saveThread_ = std::thread(&World::saveWorker, this);
+
     std::cout << "[INFO] World initialized with seed " << randomSeed << std::endl;
+
+    findSafeSpawnPoint();
 }
 
-World::~World() = default;
+World::~World() {
+    stopSaving_ = true;
+    saveCondition_.notify_all();
+    if (saveThread_.joinable()) {
+        saveThread_.join();
+    }
+    if (db_) {
+        delete db_;
+        db_ = nullptr;
+    }
+}
 
 void World::tick() {
     worldTime++;
@@ -62,7 +97,18 @@ void World::tick() {
         }
 
         for (uint64_t key : toUnload) {
-            chunks_.erase(key);
+            auto it = chunks_.find(key);
+            if (it != chunks_.end()) {
+                // Queue for saving before unloading
+                std::vector<uint8_t> data = compressChunkData(it->second.get());
+                {
+                    std::lock_guard<std::mutex> lock(saveMutex_);
+                    saveQueue_.push({key, data});
+                }
+                saveCondition_.notify_one();
+
+                chunks_.erase(it);
+            }
         }
     }
 }
@@ -72,6 +118,21 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
     auto it = chunks_.find(key);
     if (it != chunks_.end()) return it->second.get();
 
+    // Try loading from LevelDB
+    if (db_) {
+        std::string val;
+        leveldb::Slice keySlice(reinterpret_cast<const char*>(&key), sizeof(uint64_t));
+        leveldb::Status status = db_->Get(leveldb::ReadOptions(), keySlice, &val);
+        if (status.ok()) {
+            auto chunk = std::make_unique<Chunk>(this, chunkX, chunkZ);
+            std::vector<uint8_t> data(val.begin(), val.end());
+            decompressChunkData(chunk.get(), data);
+            Chunk* ptr = chunk.get();
+            chunks_[key] = std::move(chunk);
+            return ptr;
+        }
+    }
+
     if (!generate) return nullptr;
 
     // Use ChunkProviderGenerate instead of inline procedural generator
@@ -80,12 +141,6 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
 
     // Instead of forcing THIS chunk to populate immediately,
     // we evaluate if any of the surrounding chunks are now ready to populate.
-    // A chunk (px, pz) is ready to populate if:
-    // (px, pz), (px+1, pz), (px, pz+1), (px+1, pz+1) all exist.
-    // AND (px, pz) is NOT populated yet.
-    // When (chunkX, chunkZ) generates, it might complete the 2x2 square for:
-    // (chunkX, chunkZ), (chunkX-1, chunkZ), (chunkX, chunkZ-1), (chunkX-1, chunkZ-1)
-
     auto checkPopulate = [&](int px, int pz) {
         auto itP = chunks_.find(getChunkKey(px, pz));
         if (itP == chunks_.end()) return;
@@ -94,8 +149,12 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
             if (chunkExists(px + 1, pz) && chunkExists(px, pz + 1) && chunkExists(px + 1, pz + 1)) {
                 c->isTerrainPopulated = true;
                 chunkProvider->populate(px, pz);
-                // Recalculate lighting for the chunk AFTER trees/ores are placed
+                
+                // Recalculate lighting for the entire 2x2 area AFTER trees/ores are placed
                 c->generateSkylightMap();
+                if (Chunk* c1 = getChunk(px + 1, pz, false)) c1->generateSkylightMap();
+                if (Chunk* c2 = getChunk(px, pz + 1, false)) c2->generateSkylightMap();
+                if (Chunk* c3 = getChunk(px + 1, pz + 1, false)) c3->generateSkylightMap();
             }
         }
     };
@@ -170,10 +229,25 @@ bool World::setBlockAndMetadataWithNotify(int x, int y, int z, uint8_t blockId, 
 }
 
 void World::markBlockNeedsUpdate(int x, int y, int z) {
-    if (mcServer && mcServer->configManager) {
-        mcServer->configManager->broadcastPacket(
-            std::make_unique<Packet53BlockChange>(x, y, z, getBlockId(x, y, z), getBlockMetadata(x, y, z))
-        );
+    if (!mcServer || !mcServer->configManager) return;
+
+    int chunkX = x >> 4;
+    int chunkZ = z >> 4;
+    
+    // Key format same as in NetServerHandler
+    int64_t key = ((int64_t)(static_cast<uint32_t>(chunkX))) | (((int64_t)(static_cast<uint32_t>(chunkZ))) << 32);
+
+    Packet53BlockChange pkt(x, static_cast<int8_t>(y), z, 
+                            static_cast<int8_t>(getBlockId(x, y, z)), 
+                            static_cast<int8_t>(getBlockMetadata(x, y, z)));
+
+    // Send only to players who have this chunk loaded
+    for (auto* player : mcServer->configManager->playerEntities) {
+        if (player->netHandler) {
+            if (player->netHandler->hasChunkLoaded(key)) {
+                player->netHandler->sendPacket(std::make_unique<Packet53BlockChange>(pkt));
+            }
+        }
     }
 }
 
@@ -231,4 +305,156 @@ void World::getCollidingBoundingBoxes(Entity* entity, const AxisAlignedBB& mask,
             }
         }
     }
+}
+
+void World::findSafeSpawnPoint() {
+    bool found = false;
+    int searchChunkX = 0;
+    int searchChunkZ = 0;
+
+    std::cout << "[INFO] Searching for safe spawn point..." << std::endl;
+
+    while (!found) {
+        // Load/generate chunk to check
+        Chunk* chunk = getChunk(searchChunkX, searchChunkZ, true);
+        
+        for (int x = 0; x < 16 && !found; ++x) {
+            for (int z = 0; z < 16 && !found; ++z) {
+                // Get highest point in these coordinates
+                int y = chunk->getHeightValue(x, z); 
+                
+                // Check block directly UNDER feet (y - 1)
+                uint8_t groundBlock = chunk->getBlockID(x, y - 1, z);
+                
+                // Search for grass (2) or sand (12)
+                if (groundBlock == 2 || groundBlock == 12) {
+                    spawnX = (searchChunkX * 16) + x;
+                    spawnZ = (searchChunkZ * 16) + z;
+                    spawnY = y; // Set player coordinates
+                    found = true;
+                }
+            }
+        }
+
+        // If chunk is ocean or rock, spiral out randomly
+        if (!found) {
+            searchChunkX += (std::rand() % 3) - 1;
+            searchChunkZ += (std::rand() % 3) - 1;
+        }
+    }
+    std::cout << "[INFO] Spawn found: X=" << spawnX << " Y=" << spawnY << " Z=" << spawnZ << std::endl;
+}
+
+void World::saveWorker() {
+    while (!stopSaving_ || !saveQueue_.empty()) {
+        std::unique_lock<std::mutex> lock(saveMutex_);
+        saveCondition_.wait_for(lock, std::chrono::seconds(1), [this] {
+            return !saveQueue_.empty() || stopSaving_;
+        });
+
+        while (!saveQueue_.empty()) {
+            SaveTask task = std::move(saveQueue_.front());
+            saveQueue_.pop();
+            lock.unlock();
+
+            // Perform LevelDB I/O outside of main lock
+            if (db_) {
+                int32_t cx = static_cast<int>(static_cast<int32_t>(task.key >> 32));
+                int32_t cz = static_cast<int>(static_cast<int32_t>(task.key & 0xFFFFFFFF));
+
+                leveldb::Slice keySlice(reinterpret_cast<const char*>(&task.key), sizeof(uint64_t));
+                leveldb::Slice valSlice(reinterpret_cast<const char*>(task.data.data()), task.data.size());
+
+                leveldb::Status status = db_->Put(leveldb::WriteOptions(), keySlice, valSlice);
+                if (!status.ok()) {
+                    std::cerr << "[ERROR] LevelDB save failed for chunk " << cx << "," << cz 
+                              << ": " << status.ToString() << std::endl;
+                }
+            }
+            
+            lock.lock();
+        }
+    }
+}
+
+std::vector<uint8_t> World::compressChunkData(Chunk* chunk) {
+    NBTCompound level;
+    level.setInt("xPos", chunk->xPosition);
+    level.setInt("zPos", chunk->zPosition);
+    level.setByte("TerrainPopulated", chunk->isTerrainPopulated ? 1 : 0);
+    level.setByteArray("Blocks", chunk->blocks);
+    level.setByteArray("Data", chunk->data.data);
+    level.setByteArray("SkyLight", chunk->skylight.data);
+    level.setByteArray("BlockLight", chunk->blocklight.data);
+    level.setByteArray("HeightMap", chunk->heightMap);
+
+    NBTCompound root;
+    root.setCompound("Level", std::make_shared<NBTCompound>(level));
+
+    ByteBuffer buf;
+    root.writeRoot(buf, ""); // Outer tag name is usually empty in modern versions or specific in old
+
+    // Compress with zlib (GZIP)
+    z_stream strm;
+    strm.zalloc = Z_NULL;
+    strm.zfree = Z_NULL;
+    strm.opaque = Z_NULL;
+
+    // Use GZIP format (windowBits = 15 + 16)
+    if (deflateInit2(&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
+        return std::vector<uint8_t>();
+    }
+
+    std::vector<uint8_t> outBuf(buf.data.size() + 1024);
+    strm.next_in = buf.data.data();
+    strm.avail_in = static_cast<uInt>(buf.data.size());
+    strm.next_out = outBuf.data();
+    strm.avail_out = static_cast<uInt>(outBuf.size());
+
+    deflate(&strm, Z_FINISH);
+    outBuf.resize(strm.total_out);
+    deflateEnd(&strm);
+
+    return outBuf;
+}
+
+void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data) {
+    // Decompress GZIP
+    z_stream strm;
+    strm.zalloc = Z_NULL;
+    strm.zfree = Z_NULL;
+    strm.opaque = Z_NULL;
+    strm.avail_in = 0;
+    strm.next_in = Z_NULL;
+
+    if (inflateInit2(&strm, 15 + 16) != Z_OK) return;
+
+    strm.next_in = const_cast<uint8_t*>(data.data());
+    strm.avail_in = static_cast<uInt>(data.size());
+
+    std::vector<uint8_t> outBuf(128 * 1024); // Start with 128KB
+    strm.next_out = outBuf.data();
+    strm.avail_out = static_cast<uInt>(outBuf.size());
+
+    int ret = inflate(&strm, Z_FINISH);
+    if (ret != Z_STREAM_END && ret != Z_OK) {
+        inflateEnd(&strm);
+        return;
+    }
+    outBuf.resize(strm.total_out);
+    inflateEnd(&strm);
+
+    ByteBuffer buf(outBuf);
+    auto root = NBTCompound::readRoot(buf);
+    if (!root) return;
+
+    auto level = root->getCompound("Level");
+    if (!level) return;
+
+    chunk->isTerrainPopulated = level->getByte("TerrainPopulated") != 0;
+    chunk->blocks = level->getByteArray("Blocks");
+    chunk->data.data = level->getByteArray("Data");
+    chunk->skylight.data = level->getByteArray("SkyLight");
+    chunk->blocklight.data = level->getByteArray("BlockLight");
+    chunk->heightMap = level->getByteArray("HeightMap");
 }

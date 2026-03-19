@@ -32,7 +32,7 @@ public:
         MobSpawnerBase::generateBiomeLookup();
     }
 
-    MobSpawnerBase& func_4067_a(int x, int z) {
+    MobSpawnerBase func_4067_a(int x, int z) {
         auto result = loadBlockGeneratorData(x, z, 1, 1);
         return result[0];
     }
