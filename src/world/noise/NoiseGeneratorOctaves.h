@@ -9,21 +9,17 @@ public:
     double xCoord, yCoord, zCoord;
     int permutations[512];
 
-    explicit NoiseGeneratorPerlin(int64_t seed) {
-        // Minecraft's classic pseudo-random permutation initialization
-        xCoord = (seed * 1103515245 + 12345) / 65536.0;
-        yCoord = (seed * 1103515245 + 12345) / 65536.0;
-        zCoord = (seed * 1103515245 + 12345) / 65536.0;
+    explicit NoiseGeneratorPerlin(JavaRandom& rand) {
+        xCoord = rand.nextDouble() * 256.0;
+        yCoord = rand.nextDouble() * 256.0;
+        zCoord = rand.nextDouble() * 256.0;
 
         for (int i = 0; i < 256; ++i) {
             permutations[i] = i;
         }
 
-        // Shuffle
-        uint64_t lcg = seed;
         for (int i = 0; i < 256; ++i) {
-            lcg = lcg * 6364136223846793005ULL + 1442695040888963407ULL;
-            int j = (lcg >> 32) % (256 - i) + i;
+            int j = rand.nextInt(256 - i) + i;
             int temp = permutations[i];
             permutations[i] = permutations[j];
             permutations[j] = temp;
@@ -40,6 +36,10 @@ public:
     }
 
     double noise(double x, double y, double z) const {
+        x += xCoord;
+        y += yCoord;
+        z += zCoord;
+
         double floorX = std::floor(x);
         double floorY = std::floor(y);
         double floorZ = std::floor(z);
@@ -80,11 +80,9 @@ private:
     int octaves;
 
 public:
-    NoiseGeneratorOctaves(int64_t seed, int octaves) : octaves(octaves) {
-        uint64_t lcg = seed;
+    NoiseGeneratorOctaves(JavaRandom& rand, int octaves) : octaves(octaves) {
         for (int i = 0; i < octaves; ++i) {
-            lcg = lcg * 6364136223846793005ULL + 1442695040888963407ULL;
-            generatorCollection.emplace_back(lcg);
+            generatorCollection.push_back(NoiseGeneratorPerlin(rand));
         }
     }
 

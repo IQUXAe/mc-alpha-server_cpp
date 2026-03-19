@@ -23,6 +23,48 @@ World::~World() = default;
 
 void World::tick() {
     worldTime++;
+
+    // Unload chunks far from all players periodically
+    if (worldTime % 100 == 0) {
+        int r = 0;
+        if (mcServer) {
+            r = mcServer->viewDistance + 2; // Generation radius mapping
+        }
+
+        std::vector<uint64_t> toUnload;
+        for (const auto& [key, chunk] : chunks_) {
+            int cx = static_cast<int>(static_cast<int32_t>(key >> 32));
+            int cz = static_cast<int>(static_cast<int32_t>(key & 0xFFFFFFFF));
+
+            bool keep = false;
+            if (mcServer && mcServer->configManager) {
+                for (auto* player : mcServer->configManager->playerEntities) {
+                    int px = static_cast<int>(std::floor(player->posX)) >> 4;
+                    int pz = static_cast<int>(std::floor(player->posZ)) >> 4;
+                    
+                    if (std::abs(cx - px) <= r && std::abs(cz - pz) <= r) {
+                        keep = true;
+                        break;
+                    }
+                }
+            } else {
+                keep = true; // Don't unload if no server attached yet
+            }
+
+            // Spawn chunks protection could be added here (e.g. keep around 0,0)
+            if (std::abs(cx) <= 3 && std::abs(cz) <= 3) {
+                keep = true;
+            }
+
+            if (!keep) {
+                toUnload.push_back(key);
+            }
+        }
+
+        for (uint64_t key : toUnload) {
+            chunks_.erase(key);
+        }
+    }
 }
 
 Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {

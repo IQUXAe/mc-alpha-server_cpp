@@ -7,6 +7,7 @@
 
 #include <iostream>
 #include <algorithm>
+#include <cmath>
 
 NetServerHandler::NetServerHandler(MinecraftServer* server, std::unique_ptr<NetworkManager> netMgr, EntityPlayerMP* player)
     : mcServer_(server), netManager_(std::move(netMgr)), player_(player) {
@@ -25,61 +26,111 @@ void NetServerHandler::tick() {
         sendPacket(std::make_unique<Packet0KeepAlive>());
     }
 
-    int cx = static_cast<int>(player_->posX) >> 4;
-    int cz = static_cast<int>(player_->posZ) >> 4;
+    int cx = static_cast<int>(std::floor(player_->posX)) >> 4;
+    int cz = static_cast<int>(std::floor(player_->posZ)) >> 4;
+
+    // Every time the player enters a new chunk, rebuild what needs loading
     if (lastChunkX_ != cx || lastChunkZ_ != cz) {
+        lastChunkX_ = cx;
+        lastChunkZ_ = cz;
+
         int r = mcServer_->viewDistance;
-        std::vector<std::pair<int, int>> newChunks;
-        int genR = r + 2; // Generate 2 extra rings to guarantee r+1 chunks populate and spill over into r before we send r to client
+        int genR = r + 2; // extra generation ring so border chunks get populated
+
+        // Unload chunks that are now outside the view distance.
+        // The client will render garbage/stale data if we don't tell it to drop these.
+        std::vector<int64_t> toRemove;
+        for (int64_t key : sentChunks_) {
+            int sx = static_cast<int>(static_cast<uint32_t>(key & 0xFFFFFFFF));
+            int sz = static_cast<int>(static_cast<uint32_t>((key >> 32) & 0xFFFFFFFF));
+            if (std::abs(sx - cx) > r || std::abs(sz - cz) > r) {
+                toRemove.push_back(key);
+            }
+        }
+        for (int64_t key : toRemove) {
+            int sx = static_cast<int>(static_cast<uint32_t>(key & 0xFFFFFFFF));
+            int sz = static_cast<int>(static_cast<uint32_t>((key >> 32) & 0xFFFFFFFF));
+            sendPacket(std::make_unique<Packet50PreChunk>(sx, sz, false));
+            sentChunks_.erase(key);
+        }
+
+        // Build sorted list of chunks to load (nearest first), skip already sent
+        std::vector<std::pair<int,int>> needed;
         for (int i = cx - genR; i <= cx + genR; ++i) {
             for (int j = cz - genR; j <= cz + genR; ++j) {
-                if (std::abs(i - lastChunkX_) > genR || std::abs(j - lastChunkZ_) > genR) {
-                    newChunks.push_back({i, j});
+                bool isPadding = (std::abs(i - cx) > r || std::abs(j - cz) > r);
+                if (isPadding) {
+                    // Queue for generation silently (don't add to toLoad), just force generate now
+                    mcServer_->worldMngr->getChunk(i, j);
+                    continue;
+                }
+                // Only queue visible chunks that haven't been sent yet
+                if (sentChunks_.find(chunkKey(i, j)) == sentChunks_.end()) {
+                    needed.push_back({i, j});
                 }
             }
         }
-        
-        std::sort(newChunks.begin(), newChunks.end(), [cx, cz](const std::pair<int, int>& a, const std::pair<int, int>& b) {
-            int distA = (a.first - cx) * (a.first - cx) + (a.second - cz) * (a.second - cz);
-            int distB = (b.first - cx) * (b.first - cx) + (b.second - cz) * (b.second - cz);
-            return distA < distB;
+
+        std::sort(needed.begin(), needed.end(), [cx, cz](const std::pair<int,int>& a, const std::pair<int,int>& b) {
+            int dA = (a.first - cx)*(a.first - cx) + (a.second - cz)*(a.second - cz);
+            int dB = (b.first - cx)*(b.first - cx) + (b.second - cz)*(b.second - cz);
+            return dA < dB;
         });
 
-        chunksToLoad_.insert(chunksToLoad_.end(), newChunks.begin(), newChunks.end());
-        lastChunkX_ = cx;
-        lastChunkZ_ = cz;
+        // Prepend to queue (new position = higher priority), avoid duplicates with a quick erase
+        // Simple approach: replace queue with newly sorted list merged with existing
+        // Keep existing items that are still in view radius
+        std::vector<std::pair<int,int>> merged;
+        merged.reserve(needed.size() + chunksToLoad_.size());
+        // Add new ones first (higher priority - closet to player)
+        for (auto& c : needed) {
+            merged.push_back(c);
+        }
+        // Re-add old queued items that weren't in needed and still within view
+        for (auto& c : chunksToLoad_) {
+            bool alreadyInNeeded = false;
+            for (auto& n : needed) {
+                if (n.first == c.first && n.second == c.second) { alreadyInNeeded = true; break; }
+            }
+            if (!alreadyInNeeded && sentChunks_.find(chunkKey(c.first, c.second)) == sentChunks_.end()) {
+                merged.push_back(c);
+            }
+        }
+        chunksToLoad_ = std::move(merged);
     }
 
-    int chunksProcessedThisTick = 0;
-    for (auto it = chunksToLoad_.begin(); it != chunksToLoad_.end() && chunksProcessedThisTick < 10; ) {
+    // Process up to 15 chunks per tick: generate + send populated ones
+    int sent = 0;
+    for (auto it = chunksToLoad_.begin(); it != chunksToLoad_.end() && sent < 15; ) {
         int px = it->first;
         int pz = it->second;
-        
-        bool existed = mcServer_->worldMngr->chunkExists(px, pz);
+
         auto* chunk = mcServer_->worldMngr->getChunk(px, pz);
-        if (!existed && chunk) {
-            chunksProcessedThisTick++; // Heavy work (generation) done
-        }
-        
-        bool isPadding = (std::abs(px - cx) > mcServer_->viewDistance || std::abs(pz - cz) > mcServer_->viewDistance);
-        
-        if (isPadding) {
-            // It's just a padding chunk to help borders populate. Remove it.
+
+        if (chunk && chunk->isTerrainPopulated) {
+            // Generate the +1, +1 padding neighbors synchronously to ensure population
+            mcServer_->worldMngr->getChunk(px + 1, pz);
+            mcServer_->worldMngr->getChunk(px, pz + 1);
+            mcServer_->worldMngr->getChunk(px + 1, pz + 1);
+
+            sendPacket(std::make_unique<Packet50PreChunk>(px, pz, true));
+            sendPacket(std::make_unique<Packet51MapChunk>(px * 16, 0, pz * 16, 16, 128, 16, chunk->getChunkData()));
+            sentChunks_.insert(chunkKey(px, pz));
             it = chunksToLoad_.erase(it);
+            ++sent;
         } else {
-            // Visible chunk. We ONLY send it to the client AFTER the terrain is populated with trees/ores!
-            if (chunk && chunk->isTerrainPopulated) {
-                sendPacket(std::make_unique<Packet50PreChunk>(px, pz, true));
-                sendPacket(std::make_unique<Packet51MapChunk>(px * 16, 0, pz * 16, 16, 128, 16, chunk->getChunkData()));
-                it = chunksToLoad_.erase(it);
-                chunksProcessedThisTick++; // Sending a chunk is also work
-            } else {
-                // Needs neighbors to generate before it can populate. Leave in queue.
-                ++it;
+            // Chunk exists but not yet populated — its neighbors might not be generated yet.
+            // Force-generate the 2x2 block of neighbors so World::getChunk can trigger population.
+            if (chunk) {
+                mcServer_->worldMngr->getChunk(px + 1, pz);
+                mcServer_->worldMngr->getChunk(px, pz + 1);
+                mcServer_->worldMngr->getChunk(px + 1, pz + 1);
             }
+            ++it;
         }
     }
 }
+
 
 void NetServerHandler::kick(const std::string& reason) {
     if (disconnected) return;

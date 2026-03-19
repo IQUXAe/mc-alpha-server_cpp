@@ -32,9 +32,9 @@ public:
     double yCoord;
     double zCoord;
 
-    NoiseGenerator2() : NoiseGenerator2(JavaRandom()) {}
 
-    NoiseGenerator2(JavaRandom rand) {
+
+    NoiseGenerator2(JavaRandom& rand) {
         perm[0] = 0; // init
         xCoord = rand.nextDouble() * 256.0;
         yCoord = rand.nextDouble() * 256.0;
