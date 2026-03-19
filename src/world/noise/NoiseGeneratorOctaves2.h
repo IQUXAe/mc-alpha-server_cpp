@@ -11,7 +11,7 @@ private:
     int numOctaves;
 
 public:
-    NoiseGeneratorOctaves2(JavaRandom rand, int octaves) : numOctaves(octaves) {
+    NoiseGeneratorOctaves2(JavaRandom& rand, int octaves) : numOctaves(octaves) {
         for (int i = 0; i < octaves; ++i) {
             generators.emplace_back(rand);
         }

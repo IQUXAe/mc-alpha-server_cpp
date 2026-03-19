@@ -7,6 +7,8 @@
 
 #include <memory>
 #include <string>
+#include <vector>
+#include <unordered_set>
 
 class MinecraftServer;
 class EntityPlayerMP;
@@ -46,9 +48,18 @@ private:
     // Anti-cheat: track last known position
     double lastX_ = 0.0, lastY_ = 0.0, lastZ_ = 0.0;
     bool hasMoved_ = false;
-    
+
     // Chunk generation tracking
     int lastChunkX_ = -999999;
     int lastChunkZ_ = -999999;
-    std::vector<std::pair<int, int>> chunksToLoad_;
+
+    // Chunks already sent to client
+    std::unordered_set<int64_t> sentChunks_;
+    // Chunks queued (ordered, nearest first)
+    std::vector<std::pair<int,int>> chunksToLoad_;
+
+    static int64_t chunkKey(int x, int z) {
+        return ((int64_t)(uint32_t)x) | (((int64_t)(uint32_t)z) << 32);
+    }
 };
+

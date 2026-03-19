@@ -9,6 +9,9 @@
 // Exact port of Java's WorldChunkManager from Alpha 1.2.6
 class WorldChunkManager {
 private:
+    JavaRandom tempRand;
+    JavaRandom humidRand;
+    JavaRandom noise3Rand;
     NoiseGeneratorOctaves2 tempNoiseGen;    // field_4255_e
     NoiseGeneratorOctaves2 humidNoiseGen;   // field_4254_f
     NoiseGeneratorOctaves2 noiseGen3;       // field_4253_g
@@ -20,9 +23,12 @@ public:
     std::vector<MobSpawnerBase> biomes; // field_4256_d
 
     WorldChunkManager(int64_t worldSeed)
-        : tempNoiseGen(JavaRandom(worldSeed * 9871LL), 4),
-          humidNoiseGen(JavaRandom(worldSeed * 39811LL), 4),
-          noiseGen3(JavaRandom(worldSeed * 543321LL), 2) {
+        : tempRand(worldSeed * 9871LL),
+          humidRand(worldSeed * 39811LL),
+          noise3Rand(worldSeed * 543321LL),
+          tempNoiseGen(tempRand, 4),
+          humidNoiseGen(humidRand, 4),
+          noiseGen3(noise3Rand, 2) {
         MobSpawnerBase::generateBiomeLookup();
     }
 

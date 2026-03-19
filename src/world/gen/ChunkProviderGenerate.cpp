@@ -134,7 +134,7 @@ void ChunkProviderGenerate::generateTerrain(int chunkX, int chunkZ, std::vector<
 
                     for (int var43 = 0; var43 < 4; ++var43) {
                         // Exact Java index: var43 + var11 * 4 << 11 | 0 + var12 * 4 << 7 | var13 * 8 + var32
-                        int var44 = var43 + var11 * 4 << 11 | 0 + var12 * 4 << 7 | var13 * 8 + var32;
+                        int var44 = ((var43 + var11 * 4) << 11) | ((0 + var12 * 4) << 7) | (var13 * 8 + var32);
                         int var45 = 128; // short
                         double var46 = 0.25;
                         double var48 = var35;
