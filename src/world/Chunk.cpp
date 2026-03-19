@@ -1,7 +1,13 @@
 #include "Chunk.h"
+#include "World.h"
 #include <stdexcept>
 #include <cstring>
 #include <iostream>
+#include <queue>
+
+struct LightNode {
+    int x, y, z; // Global world coordinates
+};
 
 Chunk::Chunk(World* world, int x, int z) 
     : xPosition(x), zPosition(z), worldObj(world),
@@ -80,27 +86,42 @@ void Chunk::generateHeightMap() {
 }
 
 void Chunk::generateSkylightMap() {
-    generateHeightMap();
-    
-    // Step 1: Initial pass for Skylight vertically and Blocklight emission
-    for (int x = 0; x < CHUNK_SIZE_X; ++x) {
-        for (int z = 0; z < CHUNK_SIZE_Z; ++z) {
+    std::queue<LightNode> skyQueue;
+    std::queue<LightNode> blockQueue;
+
+    // Fast local transparency check
+    auto isTransparent = [](uint8_t id) {
+        if (id == 0) return true; // Air
+        if (id == 8 || id == 9 || id == 10 || id == 11) return true; // Liquids
+        if (id == 78 || id == 37 || id == 38 || id == 39 || id == 40) return true; // Snow, flowers, mushrooms
+        if (id == 83 || id == 51 || id == 6) return true; // Reeds, fire, sapling
+        if (id == 18 || id == 20) return true; // Leaves and glass
+        return false; 
+    };
+
+    int globalX = xPosition * 16;
+    int globalZ = zPosition * 16;
+
+    // STEP 1: Vertical initial pass for Skylight and detection of light emitters
+    for (int x = 0; x < 16; ++x) {
+        for (int z = 0; z < 16; ++z) {
             int currentSky = 15;
             for (int y = 127; y >= 0; --y) {
                 uint8_t id = getBlockID(x, y, z);
                 
-                int opacity = 0;
-                if (id == 0 || id == 20 /*glass*/ || id == 50 /*torch*/) opacity = 0; // Wait, light attenuation from moving 1 block is handled in flood fill
-                else if (id == 18 /*leaves*/) opacity = 1;
-                else if (id == 8 || id == 9 /*water*/) opacity = 3;
-                else opacity = 255;
+                if (!isTransparent(id)) {
+                    currentSky = 0; // Solid block blocks sunlight
+                } else if (id == 18 || id == 8 || id == 9 || id == 10 || id == 11) {
+                    currentSky -= 3; // Leaves and liquids attenuate light
+                }
                 
-                if (opacity > 0) currentSky -= opacity;
                 if (currentSky < 0) currentSky = 0;
-                
                 skylight.setNibble(x, y, z, currentSky);
                 
-                // Block light emission
+                // Add to queue if has skylight using GLOBAL coordinates
+                if (currentSky > 0) skyQueue.push({globalX + x, y, globalZ + z});
+
+                // Block light emission (torches, lava, etc)
                 int emission = 0;
                 if (id == 10 || id == 11 || id == 51 || id == 89 || id == 91) emission = 15;
                 else if (id == 50) emission = 14;
@@ -108,56 +129,82 @@ void Chunk::generateSkylightMap() {
                 else if (id == 76) emission = 7;
                 
                 blocklight.setNibble(x, y, z, emission);
+                if (emission > 0) blockQueue.push({globalX + x, y, globalZ + z});
             }
         }
     }
-    
-    // Step 2: Flood-fill propagation for BOTH skylight and blocklight
-    bool changed;
-    int maxIterations = 15;
-    do {
-        changed = false;
-        for (int y = 0; y < CHUNK_SIZE_Y; ++y) {
-            for (int x = 0; x < CHUNK_SIZE_X; ++x) {
-                for (int z = 0; z < CHUNK_SIZE_Z; ++z) {
-                    uint8_t id = getBlockID(x, y, z);
-                    int opacity = 1; // Default attenuation is 1 per block
-                    if (id == 18) opacity = 1;
-                    else if (id == 8 || id == 9) opacity = 3;
-                    else if (id != 0 && id != 20 && id != 50 && id != 51 && id != 59) opacity = 255; // solid block
-                    
-                    int currentSky = skylight.getNibble(x, y, z);
-                    int currentBlock = blocklight.getNibble(x, y, z);
-                    
-                    int maxNeighborSky = currentSky;
-                    int maxNeighborBlock = currentBlock;
-                    
-                    auto checkNeighbors = [&](int nx, int ny, int nz) {
-                        if (nx < 0 || nx >= CHUNK_SIZE_X || ny < 0 || ny >= CHUNK_SIZE_Y || nz < 0 || nz >= CHUNK_SIZE_Z) return;
-                        int s = skylight.getNibble(nx, ny, nz);
-                        if (s > maxNeighborSky) maxNeighborSky = s;
-                        int b = blocklight.getNibble(nx, ny, nz);
-                        if (b > maxNeighborBlock) maxNeighborBlock = b;
-                    };
-                    
-                    checkNeighbors(x - 1, y, z); checkNeighbors(x + 1, y, z);
-                    checkNeighbors(x, y - 1, z); checkNeighbors(x, y + 1, z);
-                    checkNeighbors(x, y, z - 1); checkNeighbors(x, y, z + 1);
-                    
-                    if (opacity < 15) {
-                        if (maxNeighborSky > currentSky + opacity) {
-                            skylight.setNibble(x, y, z, maxNeighborSky - opacity);
-                            changed = true;
-                        }
-                        if (maxNeighborBlock > currentBlock + opacity) {
-                            blocklight.setNibble(x, y, z, maxNeighborBlock - opacity);
-                            changed = true;
-                        }
-                    }
+
+    // STEP 2: Global Breadth-First Spread for Skylight
+    while (!skyQueue.empty()) {
+        LightNode node = skyQueue.front();
+        skyQueue.pop();
+
+        Chunk* currentChunk = worldObj->getChunkFromBlockCoords(node.x, node.z, false);
+        if (!currentChunk) continue;
+
+        int currentLight = currentChunk->getSavedLightValue(0, node.x & 15, node.y, node.z & 15);
+        if (currentLight <= 1) continue;
+
+        auto spread = [&](int nx, int ny, int nz) {
+            if (ny >= 0 && ny < 128) {
+                Chunk* neighborChunk = worldObj->getChunkFromBlockCoords(nx, nz, false);
+                if (!neighborChunk) return;
+
+                uint8_t id = neighborChunk->getBlockID(nx & 15, ny, nz & 15);
+                if (!isTransparent(id)) return;
+
+                int opacity = 1;
+                if (id == 18 || id == 8 || id == 9 || id == 10 || id == 11) opacity = 3;
+
+                int neighborLight = neighborChunk->getSavedLightValue(0, nx & 15, ny, nz & 15);
+                int newLight = currentLight - opacity;
+                if (newLight > neighborLight) {
+                    neighborChunk->setLightValue(0, nx & 15, ny, nz & 15, newLight);
+                    skyQueue.push({nx, ny, nz});
                 }
             }
-        }
-    } while (changed && --maxIterations > 0);
+        };
+
+        spread(node.x - 1, node.y, node.z); spread(node.x + 1, node.y, node.z);
+        spread(node.x, node.y - 1, node.z); spread(node.x, node.y + 1, node.z);
+        spread(node.x, node.y, node.z - 1); spread(node.x, node.y, node.z + 1);
+    }
+
+    // STEP 3: Global Breadth-First Spread for Blocklight
+    while (!blockQueue.empty()) {
+        LightNode node = blockQueue.front();
+        blockQueue.pop();
+
+        Chunk* currentChunk = worldObj->getChunkFromBlockCoords(node.x, node.z, false);
+        if (!currentChunk) continue;
+
+        int currentLight = currentChunk->getSavedLightValue(1, node.x & 15, node.y, node.z & 15);
+        if (currentLight <= 1) continue;
+
+        auto spread = [&](int nx, int ny, int nz) {
+            if (ny >= 0 && ny < 128) {
+                Chunk* neighborChunk = worldObj->getChunkFromBlockCoords(nx, nz, false);
+                if (!neighborChunk) return;
+
+                uint8_t id = neighborChunk->getBlockID(nx & 15, ny, nz & 15);
+                if (!isTransparent(id)) return;
+
+                int opacity = 1;
+                if (id == 18 || id == 8 || id == 9 || id == 10 || id == 11) opacity = 3;
+
+                int neighborLight = neighborChunk->getSavedLightValue(1, nx & 15, ny, nz & 15);
+                int newLight = currentLight - opacity;
+                if (newLight > neighborLight) {
+                    neighborChunk->setLightValue(1, nx & 15, ny, nz & 15, newLight);
+                    blockQueue.push({nx, ny, nz});
+                }
+            }
+        };
+
+        spread(node.x - 1, node.y, node.z); spread(node.x + 1, node.y, node.z);
+        spread(node.x, node.y - 1, node.z); spread(node.x, node.y + 1, node.z);
+        spread(node.x, node.y, node.z - 1); spread(node.x, node.y, node.z + 1);
+    }
 }
 
 #include <zlib.h>

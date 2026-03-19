@@ -265,7 +265,7 @@ void ChunkProviderGenerate::populate(int chunkX, int chunkZ) {
     int var5 = chunkZ * 16;
 
     // Get biome for this chunk region (center of chunk +16, +16)
-    MobSpawnerBase& var6 = chunkManager->func_4067_a(var4 + 16, var5 + 16);
+    MobSpawnerBase var6 = chunkManager->func_4067_a(var4 + 16, var5 + 16);
 
     // Exact Java Random seed sequence
     rand.setSeed(worldObj->randomSeed);
@@ -489,7 +489,7 @@ void ChunkProviderGenerate::populate(int chunkX, int chunkZ) {
                 worldObj->getBlockId(var17, var21, var18) == 0 &&
                 worldObj->isBlockSolid(var17, var21 - 1, var18) &&
                 worldObj->getBlockId(var17, var21 - 1, var18) != 79) { // not ice
-                worldObj->setBlockWithNotify(var17, var21, var18, 78); // snow layer
+                worldObj->setBlock(var17, var21, var18, 78); // snow layer
             }
         }
     }

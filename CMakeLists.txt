@@ -7,6 +7,7 @@ set(CMAKE_BUILD_TYPE Release)
 
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
+find_library(LEVELDB_LIBRARY NAMES leveldb REQUIRED)
 
 file(GLOB_RECURSE SOURCES "src/*.cpp")
 file(GLOB_RECURSE HEADERS "src/*.h")
@@ -14,7 +15,7 @@ file(GLOB_RECURSE HEADERS "src/*.h")
 add_executable(alpha_server ${SOURCES} ${HEADERS})
 
 target_include_directories(alpha_server PRIVATE src)
-target_link_libraries(alpha_server PRIVATE ZLIB::ZLIB Threads::Threads)
+target_link_libraries(alpha_server PRIVATE ZLIB::ZLIB Threads::Threads ${LEVELDB_LIBRARY})
 
 if(UNIX)
     target_compile_options(alpha_server PRIVATE -Wall -Wextra -Wno-unused-parameter)

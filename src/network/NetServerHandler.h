@@ -25,6 +25,8 @@ public:
     void sendPacket(std::unique_ptr<Packet> pkt);
     void teleport(double x, double y, double z, float yaw, float pitch);
     void sendChunks();
+    bool hasChunkLoaded(int64_t key) const { return sentChunks_.find(key) != sentChunks_.end(); }
+    std::unordered_set<int64_t> sentChunks_;
 
     // NetHandler overrides
     void handleChat(Packet3Chat& pkt) override;
@@ -53,8 +55,6 @@ private:
     int lastChunkX_ = -999999;
     int lastChunkZ_ = -999999;
 
-    // Chunks already sent to client
-    std::unordered_set<int64_t> sentChunks_;
     // Chunks queued (ordered, nearest first)
     std::vector<std::pair<int,int>> chunksToLoad_;
 
