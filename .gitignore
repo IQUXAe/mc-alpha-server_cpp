@@ -9,7 +9,7 @@ server.properties
 banned-ips.txt
 banned-players.txt
 ops.txt
-world/
+/world/
 
 # Editor/IDE
 .vscode/
