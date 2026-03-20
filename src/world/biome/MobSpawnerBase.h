@@ -70,15 +70,14 @@ struct MobSpawnerBase {
 
     static void generateBiomeLookup() {
         if (lookupInitialized) return;
+        // Desert and iceDesert already have topBlock=fillerBlock=12 from static initialization
+        
         for (int i = 0; i < 64; ++i) {
             for (int j = 0; j < 64; ++j) {
                 // IMPORTANT: Use float to match Java's exact precision!
                 biomeLookupTable[i + j * 64] = getBiome((float)i / 63.0f, (float)j / 63.0f);
             }
         }
-        // Set desert and iceDesert to sand
-        desert.topBlock = desert.fillerBlock = 12;  // sand
-        iceDesert.topBlock = iceDesert.fillerBlock = 12;  // sand
         lookupInitialized = true;
     }
 
@@ -102,9 +101,9 @@ inline MobSpawnerBase MobSpawnerBase::forest           {BiomeType::FOREST,      
 inline MobSpawnerBase MobSpawnerBase::savanna          {BiomeType::SAVANNA,          2, 3};
 inline MobSpawnerBase MobSpawnerBase::shrubland        {BiomeType::SHRUBLAND,        2, 3};
 inline MobSpawnerBase MobSpawnerBase::taiga            {BiomeType::TAIGA,            2, 3};
-inline MobSpawnerBase MobSpawnerBase::desert           {BiomeType::DESERT,           2, 3}; // overridden in generateBiomeLookup
+inline MobSpawnerBase MobSpawnerBase::desert           {BiomeType::DESERT,           12, 12}; // sand - set directly
 inline MobSpawnerBase MobSpawnerBase::plains           {BiomeType::PLAINS,           2, 3};
-inline MobSpawnerBase MobSpawnerBase::iceDesert        {BiomeType::ICE_DESERT,       2, 3}; // overridden in generateBiomeLookup
+inline MobSpawnerBase MobSpawnerBase::iceDesert        {BiomeType::ICE_DESERT,       12, 12}; // sand - set directly
 inline MobSpawnerBase MobSpawnerBase::tundra           {BiomeType::TUNDRA,           2, 3};
 inline MobSpawnerBase MobSpawnerBase::hell             {BiomeType::HELL,             2, 3};
 
