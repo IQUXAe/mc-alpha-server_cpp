@@ -32,18 +32,35 @@ bool Chunk::setBlockID(int x, int y, int z, uint8_t blockID) {
 
     blocks[getIndex(x, y, z)] = blockID;
     generateHeightMap();
-    isModified = true;
+    if (worldObj && !worldObj->isPopulating) isModified = true;
     return true;
 }
 
 bool Chunk::setBlockIDWithMetadata(int x, int y, int z, uint8_t blockID, uint8_t metadata) {
-    int id = getBlockID(x, y, z);
-    if (id == blockID && data.getNibble(x, y, z) == metadata) return false;
+    int oldId = getBlockID(x, y, z);
+    if (oldId == blockID && data.getNibble(x, y, z) == metadata) return false;
 
     blocks[getIndex(x, y, z)] = blockID;
     data.setNibble(x, y, z, metadata);
-    generateHeightMap();
-    isModified = true;
+    
+    int oldHeight = heightMap[(z << 4) | x];
+    if (blockID != 0) {
+        if (y >= oldHeight) heightMap[(z << 4) | x] = static_cast<uint8_t>(y + 1);
+    } else {
+        if (y == oldHeight - 1) {
+            // Recalculate height
+            int newY = y;
+            while (newY > 0 && blocks[getIndex(x, newY - 1, z)] == 0) --newY;
+            heightMap[(z << 4) | x] = static_cast<uint8_t>(newY);
+        }
+    }
+
+    // Basic Skylight update
+    if (worldObj && !worldObj->isPopulating) {
+        isModified = true;
+        generateHeightMap();   // Update heightmap first
+        generateSkylightMap(); // Then update lighting based on new heights
+    }
     return true;
 }
 
@@ -53,7 +70,7 @@ uint8_t Chunk::getBlockMetadata(int x, int y, int z) const {
 
 void Chunk::setBlockMetadata(int x, int y, int z, uint8_t metadata) {
     data.setNibble(x, y, z, metadata);
-    isModified = true;
+    if (worldObj && !worldObj->isPopulating) isModified = true;
 }
 
 uint8_t Chunk::getSavedLightValue(int type, int x, int y, int z) const {
@@ -65,7 +82,7 @@ uint8_t Chunk::getSavedLightValue(int type, int x, int y, int z) const {
 void Chunk::setLightValue(int type, int x, int y, int z, uint8_t value) {
     if (type == 0) skylight.setNibble(x, y, z, value);
     else blocklight.setNibble(x, y, z, value);
-    isModified = true;
+    if (worldObj && !worldObj->isPopulating) isModified = true;
 }
 
 int Chunk::getHeightValue(int x, int z) const {

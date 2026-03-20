@@ -12,11 +12,14 @@ public:
     int32_t entityId;
     double posX = 0.0, posY = 0.0, posZ = 0.0;
     double prevPosX = 0.0, prevPosY = 0.0, prevPosZ = 0.0;
+    double lastX = 0.0, lastY = 0.0, lastZ = 0.0;  // For entity tracking
     double motionX = 0.0, motionY = 0.0, motionZ = 0.0;
     float rotationYaw = 0.0f;
     float rotationPitch = 0.0f;
     float prevRotationYaw = 0.0f;
     float prevRotationPitch = 0.0f;
+    float lastYaw = 0.0f;    // For entity tracking
+    float lastPitch = 0.0f;  // For entity tracking
     AxisAlignedBB boundingBox;
     bool onGround = false;
     bool isDead = false;
@@ -42,6 +45,11 @@ public:
         prevPosZ = posZ;
         prevRotationYaw = rotationYaw;
         prevRotationPitch = rotationPitch;
+        lastX = posX;
+        lastY = posY;
+        lastZ = posZ;
+        lastYaw = rotationYaw;
+        lastPitch = rotationPitch;
     }
 
     virtual void setPosition(double x, double y, double z) {
@@ -59,12 +67,7 @@ public:
         rotationPitch = pitch;
     }
 
-    virtual void moveEntity(double dx, double dy, double dz) {
-        posX += dx;
-        posY += dy;
-        posZ += dz;
-        setPosition(posX, posY, posZ);
-    }
+    virtual void moveEntity(double dx, double dy, double dz);
 
     double getDistanceSq(double x, double y, double z) const {
         double dx = posX - x;

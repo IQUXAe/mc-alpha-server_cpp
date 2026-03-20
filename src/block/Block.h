@@ -92,6 +92,7 @@ public:
 
     virtual int quantityDropped() const { return 1; }
     virtual int idDropped(int metadata) const { return blockID; }
+    virtual bool canHarvestBlock(EntityPlayer* player) const { return true; }
     virtual void dropBlockAsItem(World* world, int x, int y, int z, int metadata);
     virtual void dropBlockAsItemWithChance(World* world, int x, int y, int z, int metadata, float chance);
 

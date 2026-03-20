@@ -1,21 +1,20 @@
 #include "World.h"
 #include "../block/Block.h"
 #include "../entity/Entity.h"
+#include "../entity/EntityItem.h"
+#include "../network/packets/AllPackets.h"
 #include "../core/AxisAlignedBB.h"
 #include "../MinecraftServer.h"
 #include "core/NBT.h"
+#include "core/Logger.h"
 #include <zlib.h>
-#include <iostream>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <ctime>
 
-World::World(MinecraftServer* server, const std::string& savePath)
+World::World(MinecraftServer* server, const std::string& savePath, int64_t seed)
     : mcServer(server), worldPath_(savePath) {
-    randomSeed = time(nullptr); // Basic seed
-    worldTime = 0;
-
     // Create world directory
     std::filesystem::create_directories(worldPath_);
 
@@ -24,32 +23,164 @@ World::World(MinecraftServer* server, const std::string& savePath)
     options.create_if_missing = true;
     leveldb::Status status = leveldb::DB::Open(options, worldPath_ + "/db", &db_);
     if (!status.ok()) {
-        std::cerr << "[ERROR] Failed to open LevelDB: " << status.ToString() << std::endl;
+        Logger::severe("Failed to open LevelDB: " + status.ToString());
         db_ = nullptr;
     } else {
-        std::cout << "[INFO] LevelDB world storage initialized at " << worldPath_ << "/db" << std::endl;
+        Logger::info("LevelDB world storage initialized at {}/db", worldPath_);
     }
 
-    // Initialize WorldChunkManager (biome system)
+    // Load level.dat or initialize new world data
+    bool hasLevelDat = loadLevelDat();
+    if (!hasLevelDat) {
+        // Use provided seed, or generate random if seed is 0
+        if (seed != 0) {
+            randomSeed = seed;
+        } else {
+            randomSeed = time(nullptr);
+        }
+        worldTime = 0;
+        Logger::info("No level.dat found, generated new seed: {}", randomSeed);
+    } else {
+        Logger::info("Loaded level.dat, seed: {}, time: {}", randomSeed, worldTime);
+    }
+
+    // IMPORTANT: Initialize WorldChunkManager AFTER randomSeed is set!
+    // In Java, WorldChunkManager is created in WorldProvider.func_4090_a() after World.randomSeed is loaded
     worldChunkManager = std::make_unique<WorldChunkManager>(randomSeed);
 
     // Initialize exactly same as alpha
     chunkProvider = std::make_unique<ChunkProviderGenerate>(this, randomSeed);
+    rand.seed(randomSeed);
 
     // Initialize background saving
     saveThread_ = std::thread(&World::saveWorker, this);
+    
+    // Load spawn and entities
+    if (!hasLevelDat) {
+        findSafeSpawnPoint();
+        saveLevelDat();
+    }
+    loadEntities();
+}
 
-    std::cout << "[INFO] World initialized with seed " << randomSeed << std::endl;
+void World::saveWorld() {
+    saveLevelDat();
+    saveEntities();
 
-    findSafeSpawnPoint();
+    int savedCount = 0;
+    for (const auto& [key, chunk] : chunks_) {
+        bool shouldSave = true;
+        if (mcServer && mcServer->saveModifiedChunksOnly && !chunk->isModified) {
+            shouldSave = false;
+        }
+        
+        if (shouldSave) {
+            std::vector<uint8_t> data = compressChunkData(chunk.get());
+            {
+                std::lock_guard<std::mutex> lock(saveMutex_);
+                saveQueue_.push({key, data});
+            }
+            chunk->isModified = false;
+            savedCount++;
+        }
+    }
+    if (savedCount > 0) saveCondition_.notify_one();
+    Logger::info("Saved level.dat and queued {} chunks.", savedCount);
+}
+
+bool World::loadLevelDat() {
+    std::ifstream file(worldPath_ + "/level.dat", std::ios::binary);
+    if (!file.is_open()) return false;
+    
+    std::vector<uint8_t> compressed((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    file.close();
+
+    z_stream strm{};
+    strm.zalloc = Z_NULL;
+    strm.zfree = Z_NULL;
+    strm.opaque = Z_NULL;
+
+    if (inflateInit2(&strm, 15 + 16) != Z_OK) return false;
+    strm.next_in = compressed.data();
+    strm.avail_in = compressed.size();
+    
+    std::vector<uint8_t> uncompressed(1024 * 128); // 128KB should be plenty for level.dat
+    strm.next_out = uncompressed.data();
+    strm.avail_out = uncompressed.size();
+    
+    int ret = inflate(&strm, Z_FINISH);
+    if (ret != Z_STREAM_END && ret != Z_OK) {
+        inflateEnd(&strm);
+        return false;
+    }
+    uncompressed.resize(strm.total_out);
+    inflateEnd(&strm);
+
+    ByteBuffer buf(uncompressed);
+    auto root = NBTCompound::readRoot(buf);
+    if (!root) return false;
+    
+    auto data = root->getCompound("Data");
+    if (!data) return false;
+    
+    randomSeed = data->getLong("RandomSeed");
+    spawnX = data->getInt("SpawnX");
+    spawnY = data->getInt("SpawnY");
+    spawnZ = data->getInt("SpawnZ");
+    worldTime = data->getLong("Time");
+    
+    return true;
+}
+
+void World::saveLevelDat() {
+    NBTCompound data;
+    data.setLong("RandomSeed", randomSeed);
+    data.setInt("SpawnX", spawnX);
+    data.setInt("SpawnY", spawnY);
+    data.setInt("SpawnZ", spawnZ);
+    data.setLong("Time", worldTime);
+    data.setLong("SizeOnDisk", 0);
+    data.setInt("version", 19132);
+    data.setString("LevelName", "world");
+    
+    NBTCompound root;
+    root.setCompound("Data", std::make_shared<NBTCompound>(data));
+    
+    ByteBuffer buf;
+    root.writeRoot(buf, "");
+    
+    z_stream strm{};
+    strm.zalloc = Z_NULL;
+    strm.zfree = Z_NULL;
+    strm.opaque = Z_NULL;
+
+    if (deflateInit2(&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK) return;
+    
+    std::vector<uint8_t> compressed(buf.data.size() + 1024);
+    strm.next_in = buf.data.data();
+    strm.avail_in = buf.data.size();
+    strm.next_out = compressed.data();
+    strm.avail_out = compressed.size();
+    
+    deflate(&strm, Z_FINISH);
+    compressed.resize(strm.total_out);
+    deflateEnd(&strm);
+    
+    std::ofstream file(worldPath_ + "/level.dat", std::ios::binary);
+    if (file) {
+        file.write(reinterpret_cast<const char*>(compressed.data()), compressed.size());
+    }
 }
 
 World::~World() {
+    saveWorld();
+
     stopSaving_ = true;
     saveCondition_.notify_all();
     if (saveThread_.joinable()) {
         saveThread_.join();
     }
+
     if (db_) {
         delete db_;
         db_ = nullptr;
@@ -58,6 +189,61 @@ World::~World() {
 
 void World::tick() {
     worldTime++;
+
+    // Process scheduled block updates
+    int maxTicks = 1000;
+    auto it = scheduledTicks.begin();
+    while (it != scheduledTicks.end() && maxTicks-- > 0) {
+        if (it->scheduledTime > worldTime) {
+            break; // Since it's a set sorted by scheduledTime, subsequent entries are also in the future
+        }
+        
+        NextTickListEntry entry = *it;
+        scheduledTicks.erase(it);
+        
+        uint8_t currentBlock = getBlockId(entry.x, entry.y, entry.z);
+        if (currentBlock == entry.blockId && currentBlock > 0) {
+            if (Block::blocksList[currentBlock]) {
+                Block::blocksList[currentBlock]->updateTick(this, entry.x, entry.y, entry.z);
+            }
+        }
+        
+        it = scheduledTicks.begin(); // Re-fetch begin as set might have been modified during updateTick
+    }
+
+    // Tick entities
+    for (auto itE = entities_.begin(); itE != entities_.end(); ) {
+        (*itE)->tick();
+        
+        // Item pickup logic
+        auto* item = dynamic_cast<EntityItem*>(itE->get());
+        if (item && !item->isDead && item->pickupDelay <= 0) {
+            if (mcServer && mcServer->configManager) {
+                for (auto* player : mcServer->configManager->playerEntities) {
+                    double dx = player->posX - item->posX;
+                    double dy = player->posY - item->posY;
+                    double dz = player->posZ - item->posZ;
+                    double distSq = dx*dx + dy*dy + dz*dz;
+                    
+                    if (distSq < 2.25) { // 1.5 blocks radius
+                        // Collect effect
+                        mcServer->configManager->broadcastPacket(std::make_unique<Packet22Collect>(item->entityId, player->entityId));
+                        item->isDead = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if ((*itE)->isDead) {
+            if (mcServer && mcServer->configManager) {
+                mcServer->configManager->broadcastPacket(std::make_unique<Packet29DestroyEntity>((*itE)->entityId));
+            }
+            itE = entities_.erase(itE);
+        } else {
+            ++itE;
+        }
+    }
 
     // Unload chunks far from all players periodically
     if (worldTime % 100 == 0) {
@@ -99,24 +285,70 @@ void World::tick() {
         for (uint64_t key : toUnload) {
             auto it = chunks_.find(key);
             if (it != chunks_.end()) {
-                // Queue for saving before unloading
-                std::vector<uint8_t> data = compressChunkData(it->second.get());
-                {
-                    std::lock_guard<std::mutex> lock(saveMutex_);
-                    saveQueue_.push({key, data});
+                bool shouldSave = true;
+                if (mcServer && mcServer->saveModifiedChunksOnly && !it->second->isModified) {
+                    shouldSave = false;
                 }
-                saveCondition_.notify_one();
+                
+                if (shouldSave) {
+                    // Queue for saving before unloading
+                    std::vector<uint8_t> data = compressChunkData(it->second.get());
+                    {
+                        std::lock_guard<std::mutex> lock(saveMutex_);
+                        saveQueue_.push({key, data});
+                    }
+                    saveCondition_.notify_one();
+                }
 
                 chunks_.erase(it);
             }
         }
     }
+
+    // Auto-saving logic
+    if (mcServer && mcServer->autoSaveInterval > 0 && worldTime % mcServer->autoSaveInterval == 0) {
+        int savedCount = 0;
+        for (const auto& [key, chunk] : chunks_) {
+            bool shouldSave = true;
+            if (mcServer && mcServer->saveModifiedChunksOnly && !chunk->isModified) {
+                shouldSave = false;
+            }
+            
+            if (shouldSave) {
+                std::vector<uint8_t> data = compressChunkData(chunk.get());
+                {
+                    std::lock_guard<std::mutex> lock(saveMutex_);
+                    saveQueue_.push({key, data});
+                }
+                chunk->isModified = false; // Reset modification flag after queueing
+                savedCount++;
+            }
+        }
+        if (savedCount > 0) {
+            std::cout << "[INFO] Auto-saved " << savedCount << " chunks." << std::endl;
+            saveCondition_.notify_one();
+        }
+    }
+}
+
+void World::scheduleBlockUpdate(int x, int y, int z, int blockId, int delay) {
+    NextTickListEntry entry;
+    entry.x = x;
+    entry.y = y;
+    entry.z = z;
+    entry.blockId = blockId;
+    entry.scheduledTime = worldTime + delay;
+    scheduledTicks.insert(entry);
 }
 
 Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
     auto key = getChunkKey(chunkX, chunkZ);
-    auto it = chunks_.find(key);
-    if (it != chunks_.end()) return it->second.get();
+    
+    {
+        std::lock_guard<std::mutex> lock(chunksMutex_);
+        auto it = chunks_.find(key);
+        if (it != chunks_.end()) return it->second.get();
+    }
 
     // Try loading from LevelDB
     if (db_) {
@@ -128,7 +360,10 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
             std::vector<uint8_t> data(val.begin(), val.end());
             decompressChunkData(chunk.get(), data);
             Chunk* ptr = chunk.get();
-            chunks_[key] = std::move(chunk);
+            {
+                std::lock_guard<std::mutex> lock(chunksMutex_);
+                chunks_[key] = std::move(chunk);
+            }
             return ptr;
         }
     }
@@ -137,7 +372,10 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
 
     // Use ChunkProviderGenerate instead of inline procedural generator
     Chunk* ptr = chunkProvider->provideChunk(chunkX, chunkZ);
-    chunks_[key] = std::unique_ptr<Chunk>(ptr);
+    {
+        std::lock_guard<std::mutex> lock(chunksMutex_);
+        chunks_[key] = std::unique_ptr<Chunk>(ptr);
+    }
 
     // Instead of forcing THIS chunk to populate immediately,
     // we evaluate if any of the surrounding chunks are now ready to populate.
@@ -148,6 +386,7 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
         if (c && !c->isTerrainPopulated) {
             if (chunkExists(px + 1, pz) && chunkExists(px, pz + 1) && chunkExists(px + 1, pz + 1)) {
                 c->isTerrainPopulated = true;
+                this->isPopulating = true;
                 chunkProvider->populate(px, pz);
                 
                 // Recalculate lighting for the entire 2x2 area AFTER trees/ores are placed
@@ -155,6 +394,7 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
                 if (Chunk* c1 = getChunk(px + 1, pz, false)) c1->generateSkylightMap();
                 if (Chunk* c2 = getChunk(px, pz + 1, false)) c2->generateSkylightMap();
                 if (Chunk* c3 = getChunk(px + 1, pz + 1, false)) c3->generateSkylightMap();
+                this->isPopulating = false;
             }
         }
     };
@@ -172,6 +412,7 @@ Chunk* World::getChunkFromBlockCoords(int x, int z, bool generate) {
 }
 
 bool World::chunkExists(int chunkX, int chunkZ) const {
+    std::lock_guard<std::mutex> lock(chunksMutex_);
     return chunks_.find(getChunkKey(chunkX, chunkZ)) != chunks_.end();
 }
 
@@ -231,24 +472,11 @@ bool World::setBlockAndMetadataWithNotify(int x, int y, int z, uint8_t blockId, 
 void World::markBlockNeedsUpdate(int x, int y, int z) {
     if (!mcServer || !mcServer->configManager) return;
 
-    int chunkX = x >> 4;
-    int chunkZ = z >> 4;
-    
-    // Key format same as in NetServerHandler
-    int64_t key = ((int64_t)(static_cast<uint32_t>(chunkX))) | (((int64_t)(static_cast<uint32_t>(chunkZ))) << 32);
-
     Packet53BlockChange pkt(x, static_cast<int8_t>(y), z, 
                             static_cast<int8_t>(getBlockId(x, y, z)), 
                             static_cast<int8_t>(getBlockMetadata(x, y, z)));
 
-    // Send only to players who have this chunk loaded
-    for (auto* player : mcServer->configManager->playerEntities) {
-        if (player->netHandler) {
-            if (player->netHandler->hasChunkLoaded(key)) {
-                player->netHandler->sendPacket(std::make_unique<Packet53BlockChange>(pkt));
-            }
-        }
-    }
+    mcServer->configManager->broadcastPacket(std::make_unique<Packet53BlockChange>(pkt));
 }
 
 void World::notifyBlocksOfNeighborChange(int x, int y, int z, uint8_t blockId) {
@@ -457,4 +685,88 @@ void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data) 
     chunk->skylight.data = level->getByteArray("SkyLight");
     chunk->blocklight.data = level->getByteArray("BlockLight");
     chunk->heightMap = level->getByteArray("HeightMap");
+
+    // Force regeneration if heightmap is all zeros or suspicious
+    if (chunk->heightMap.empty() || chunk->heightMap.size() < 256) {
+        chunk->heightMap.assign(256, 0);
+        chunk->generateHeightMap();
+        chunk->generateSkylightMap();
+    }
+}
+
+void World::spawnEntityInWorld(std::unique_ptr<Entity> entity) {
+    if (!entity) return;
+    
+    // Notify all players about the new entity
+    auto* item = dynamic_cast<EntityItem*>(entity.get());
+    if (item && mcServer && mcServer->configManager) {
+        Packet21PickupSpawn pkt;
+        pkt.entityId = item->entityId;
+        pkt.itemId = static_cast<int16_t>(item->itemID);
+        pkt.count = static_cast<int8_t>(item->count);
+        pkt.x = static_cast<int32_t>(std::floor(item->posX * 32.0));
+        pkt.y = static_cast<int32_t>(std::floor(item->posY * 32.0));
+        pkt.z = static_cast<int32_t>(std::floor(item->posZ * 32.0));
+        pkt.rotation = static_cast<int8_t>(item->motionX * 128.0);
+        pkt.pitch = static_cast<int8_t>(item->motionY * 128.0);
+        pkt.roll = static_cast<int8_t>(item->motionZ * 128.0);
+        
+        mcServer->configManager->broadcastPacket(std::make_unique<Packet21PickupSpawn>(pkt));
+    }
+    
+    entities_.push_back(std::move(entity));
+}
+
+void World::removeEntity(Entity* entity) {
+    if (!entity) return;
+    entity->isDead = true;
+}
+
+void World::saveEntities() {
+    std::ofstream file(worldPath_ + "/entities.dat", std::ios::binary);
+    if (!file) return;
+
+    uint32_t count = 0;
+    for (const auto& e : entities_) {
+        if (dynamic_cast<EntityItem*>(e.get()) && !e->isDead) count++;
+    }
+
+    file.write(reinterpret_cast<const char*>(&count), sizeof(count));
+    for (const auto& e : entities_) {
+        auto* item = dynamic_cast<EntityItem*>(e.get());
+        if (item && !item->isDead) {
+            file.write(reinterpret_cast<const char*>(&item->itemID), sizeof(item->itemID));
+            file.write(reinterpret_cast<const char*>(&item->count), sizeof(item->count));
+            file.write(reinterpret_cast<const char*>(&item->metadata), sizeof(item->metadata));
+            file.write(reinterpret_cast<const char*>(&item->posX), sizeof(item->posX));
+            file.write(reinterpret_cast<const char*>(&item->posY), sizeof(item->posY));
+            file.write(reinterpret_cast<const char*>(&item->posZ), sizeof(item->posZ));
+        }
+    }
+    file.flush();
+    file.close();
+}
+
+void World::loadEntities() {
+    std::ifstream file(worldPath_ + "/entities.dat", std::ios::binary);
+    if (!file) return;
+
+    uint32_t count = 0;
+    file.read(reinterpret_cast<char*>(&count), sizeof(count));
+    for (uint32_t i = 0; i < count; ++i) {
+        int id, cnt, meta;
+        double x, y, z;
+        file.read(reinterpret_cast<char*>(&id), sizeof(id));
+        file.read(reinterpret_cast<char*>(&cnt), sizeof(cnt));
+        file.read(reinterpret_cast<char*>(&meta), sizeof(meta));
+        file.read(reinterpret_cast<char*>(&x), sizeof(x));
+        file.read(reinterpret_cast<char*>(&y), sizeof(y));
+        file.read(reinterpret_cast<char*>(&z), sizeof(z));
+
+        auto item = std::make_unique<EntityItem>(id - 256, cnt, meta);
+        item->setPosition(x, y, z);
+        item->worldObj = this;
+        entities_.push_back(std::move(item));
+    }
+    if (count > 0) std::cout << "[INFO] Loaded " << count << " entities." << std::endl;
 }

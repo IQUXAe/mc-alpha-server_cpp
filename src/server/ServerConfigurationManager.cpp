@@ -91,21 +91,9 @@ void ServerConfigurationManager::playerLoggedOut(EntityPlayerMP* player) {
 }
 
 void ServerConfigurationManager::broadcastPacket(std::unique_ptr<Packet> pkt) {
-    // We need to send the same packet to all players
-    // Since we move unique_ptrs, we'll serialize once and re-create
-    ByteBuffer buf;
-    buf.writeUByte(static_cast<uint8_t>(pkt->getPacketId()));
-    pkt->writePacketData(buf);
-
     for (auto* player : playerEntities) {
         if (player->netHandler) {
-            // Create a copy by re-reading
-            auto copy = Packet::createPacket(pkt->getPacketId());
-            if (copy) {
-                ByteBuffer readBuf(std::vector<uint8_t>(buf.data.begin() + 1, buf.data.end()));
-                copy->readPacketData(readBuf);
-                player->netHandler->sendPacket(std::move(copy));
-            }
+            player->netHandler->sendPacket(pkt->clone());
         }
     }
 }

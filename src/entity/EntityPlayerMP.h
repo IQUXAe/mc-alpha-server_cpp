@@ -21,6 +21,7 @@ public:
     int miningStartX = 0;
     int miningStartY = 0;
     int miningStartZ = 0;
+    int64_t miningStartTime = 0;
     int miningTicks = -1;
 
     EntityPlayerMP(MinecraftServer* server, World* world, const std::string& name)

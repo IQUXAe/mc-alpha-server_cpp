@@ -14,6 +14,8 @@ ChunkProviderGenerate::ChunkProviderGenerate(World* world, int64_t seed)
       field_714_b(rand, 16),
       field_713_c(rand, 8),
       chunkManager(world->func_4077_a()) {
+    // Initialize noise arrays
+    field_4224_q.reserve(17 * 17 * 17);
 }
 
 // Exact port of Java's func_4058_a (density field generation)
@@ -180,8 +182,9 @@ void ChunkProviderGenerate::replaceBlocksForBiome(int chunkX, int chunkZ, std::v
     int var5 = 64;
     double var6 = 1.0 / 32.0;
 
+    // Fix: Java uses (chunkX, chunkZ) order, not (chunkZ, chunkX)
     field_698_r = field_702_n.func_648_a(field_698_r, chunkX * 16, chunkZ * 16, 0, 16, 16, 1, var6, var6, 1.0);
-    field_697_s = field_702_n.func_648_a(field_697_s, chunkZ * 16, 109.0134, chunkX * 16, 16, 1, 16, var6, 1.0, var6);
+    field_697_s = field_702_n.func_648_a(field_697_s, chunkX * 16, 109.0134, chunkZ * 16, 16, 1, 16, var6, 1.0, var6);
     field_696_t = field_701_o.func_648_a(field_696_t, chunkX * 16, chunkZ * 16, 0, 16, 16, 1, var6 * 2.0, var6 * 2.0, var6 * 2.0);
 
     for (int var8 = 0; var8 < 16; ++var8) {
@@ -255,6 +258,8 @@ Chunk* ChunkProviderGenerate::provideChunk(int chunkX, int chunkZ) {
     MapGenCaves caveGen;
     caveGen.func_667_a(this, worldObj, chunkX, chunkZ, blocks);
 
+    // IMPORTANT: Update heightmap AFTER terrain generation and cave carving
+    chunk->generateHeightMap();
     chunk->generateSkylightMap();
     return chunk;
 }

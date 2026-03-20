@@ -35,12 +35,28 @@ public:
     void write(ByteBuffer& buf) const override { buf.writeByte(value); }
 };
 
+class NBTShort : public NBTTag {
+public:
+    int16_t value;
+    explicit NBTShort(int16_t v) : value(v) {}
+    NBTTagType getType() const override { return NBTTagType::TAG_Short; }
+    void write(ByteBuffer& buf) const override { buf.writeShort(value); }
+};
+
 class NBTInt : public NBTTag {
 public:
     int32_t value;
     explicit NBTInt(int32_t v) : value(v) {}
     NBTTagType getType() const override { return NBTTagType::TAG_Int; }
     void write(ByteBuffer& buf) const override { buf.writeInt(value); }
+};
+
+class NBTLong : public NBTTag {
+public:
+    int64_t value;
+    explicit NBTLong(int64_t v) : value(v) {}
+    NBTTagType getType() const override { return NBTTagType::TAG_Long; }
+    void write(ByteBuffer& buf) const override { buf.writeLong(value); }
 };
 
 class NBTString : public NBTTag {
@@ -71,7 +87,9 @@ public:
     NBTTagType getType() const override { return NBTTagType::TAG_Compound; }
 
     void setByte(const std::string& name, int8_t v) { tags[name] = std::make_shared<NBTByte>(v); }
+    void setShort(const std::string& name, int16_t v) { tags[name] = std::make_shared<NBTShort>(v); }
     void setInt(const std::string& name, int32_t v) { tags[name] = std::make_shared<NBTInt>(v); }
+    void setLong(const std::string& name, int64_t v) { tags[name] = std::make_shared<NBTLong>(v); }
     void setString(const std::string& name, std::string v) { tags[name] = std::make_shared<NBTString>(std::move(v)); }
     void setByteArray(const std::string& name, std::vector<uint8_t> v) { tags[name] = std::make_shared<NBTByteArray>(std::move(v)); }
     void setCompound(const std::string& name, std::shared_ptr<NBTCompound> v) { tags[name] = v; }
@@ -85,10 +103,28 @@ public:
         return 0;
     }
 
+    int16_t getShort(const std::string& name) const {
+        auto it = tags.find(name);
+        if (it != tags.end()) {
+            auto t = std::dynamic_pointer_cast<NBTShort>(it->second);
+            if (t) return t->value;
+        }
+        return 0;
+    }
+
     int32_t getInt(const std::string& name) const {
         auto it = tags.find(name);
         if (it != tags.end()) {
             auto t = std::dynamic_pointer_cast<NBTInt>(it->second);
+            if (t) return t->value;
+        }
+        return 0;
+    }
+
+    int64_t getLong(const std::string& name) const {
+        auto it = tags.find(name);
+        if (it != tags.end()) {
+            auto t = std::dynamic_pointer_cast<NBTLong>(it->second);
             if (t) return t->value;
         }
         return 0;
@@ -160,11 +196,11 @@ inline std::shared_ptr<NBTTag> NBTCompound::readTag(ByteBuffer& buf, NBTTagType 
     if (type == NBTTagType::TAG_Byte) {
         return std::make_shared<NBTByte>(buf.readByte());
     } else if (type == NBTTagType::TAG_Short) {
-        return std::make_shared<NBTByte>(buf.readShort()); // Should be NBTShort, but for chunks Byte is enough if we don't have it
+        return std::make_shared<NBTShort>(buf.readShort());
     } else if (type == NBTTagType::TAG_Int) {
         return std::make_shared<NBTInt>(buf.readInt());
     } else if (type == NBTTagType::TAG_Long) {
-        buf.readLong(); return nullptr; // Placeholder
+        return std::make_shared<NBTLong>(buf.readLong());
     } else if (type == NBTTagType::TAG_ByteArray) {
         int32_t len = buf.readInt();
         std::vector<uint8_t> data(len);

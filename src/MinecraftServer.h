@@ -2,8 +2,10 @@
 
 #include "forward.h"
 #include "core/PropertyManager.h"
+#include "core/ServerConstants.h"
 #include "network/NetworkListenThread.h"
 #include "server/ServerConfigurationManager.h"
+#include "entity/EntityTracker.h"
 
 #include <memory>
 #include <string>
@@ -17,11 +19,14 @@ public:
     std::unique_ptr<NetworkListenThread> networkListenThread;
     std::unique_ptr<ServerConfigurationManager> configManager;
     std::unique_ptr<World> worldMngr;
+    std::unique_ptr<EntityTracker> entityTracker;
 
     bool onlineMode = true;
     bool spawnAnimals = true;
     bool pvpEnabled = true;
     int viewDistance = 10;
+    int autoSaveInterval = 6000;
+    bool saveModifiedChunksOnly = false;
 
     MinecraftServer();
     ~MinecraftServer();
