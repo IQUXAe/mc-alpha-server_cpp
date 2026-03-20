@@ -37,7 +37,8 @@ private:
 
     WorldChunkManager* chunkManager; // Not owned, from World
 
-    void func_4058_a(int x, int y, int z, int xSize, int ySize, int zSize);
+    void func_4058_a(int x, int y, int z, int xSize, int ySize, int zSize,
+                     const std::vector<double>& temperatures, const std::vector<double>& humidities);
     void generateTerrain(int chunkX, int chunkZ, std::vector<uint8_t>& blocks,
                          std::vector<MobSpawnerBase>& biomes, std::vector<double>& temps);
     void replaceBlocksForBiome(int chunkX, int chunkZ, std::vector<uint8_t>& blocks,

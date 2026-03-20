@@ -19,17 +19,14 @@ ChunkProviderGenerate::ChunkProviderGenerate(World* world, int64_t seed)
 }
 
 // Exact port of Java's func_4058_a (density field generation)
-void ChunkProviderGenerate::func_4058_a(int var2, int var3, int var4, int var5, int var6, int var7) {
+void ChunkProviderGenerate::func_4058_a(int var2, int var3, int var4, int var5, int var6, int var7,
+                                         const std::vector<double>& temperatures, const std::vector<double>& humidities) {
     if (field_4224_q.size() < (size_t)(var5 * var6 * var7)) {
         field_4224_q.resize(var5 * var6 * var7);
     }
 
     double var8 = 684.412;
     double var10 = 684.412;
-
-    // Get temperature and humidity from WorldChunkManager
-    std::vector<double>& temperatures = chunkManager->temperature;
-    std::vector<double>& humidities = chunkManager->humidity;
 
     field_4226_g = field_715_a.func_4103_a(field_4226_g, var2, var4, var5, var7, 1.121, 1.121, 0.5);
     field_4225_h = field_714_b.func_4103_a(field_4225_h, var2, var4, var5, var7, 200.0, 200.0, 0.5);
@@ -112,7 +109,7 @@ void ChunkProviderGenerate::generateTerrain(int chunkX, int chunkZ, std::vector<
     int var9 = 17;
     int var10 = var6 + 1;
 
-    func_4058_a(chunkX * var6, 0, chunkZ * var6, var8, var9, var10);
+    func_4058_a(chunkX * var6, 0, chunkZ * var6, var8, var9, var10, temps, chunkManager->humidity);
 
     for (int var11 = 0; var11 < var6; ++var11) {
         for (int var12 = 0; var12 < var6; ++var12) {
@@ -182,9 +179,11 @@ void ChunkProviderGenerate::replaceBlocksForBiome(int chunkX, int chunkZ, std::v
     int var5 = 64;
     double var6 = 1.0 / 32.0;
 
-    // Fix: Java uses (chunkX, chunkZ) order, not (chunkZ, chunkX)
+    // Java signature: func_648_a(double[] d, double x, double y, double z, int w, int h, int d, ...)
+    // field_698_r: x=chunkX*16, z=chunkZ*16 (horizontal noise)
     field_698_r = field_702_n.func_648_a(field_698_r, chunkX * 16, chunkZ * 16, 0, 16, 16, 1, var6, var6, 1.0);
-    field_697_s = field_702_n.func_648_a(field_697_s, chunkX * 16, 109.0134, chunkZ * 16, 16, 1, 16, var6, 1.0, var6);
+    // field_697_s: x=chunkZ*16, z=chunkX*16 (SWAPPED! Java uses var2, var1 order here)
+    field_697_s = field_702_n.func_648_a(field_697_s, chunkZ * 16, 109.0134, chunkX * 16, 16, 1, 16, var6, 1.0, var6);
     field_696_t = field_701_o.func_648_a(field_696_t, chunkX * 16, chunkZ * 16, 0, 16, 16, 1, var6 * 2.0, var6 * 2.0, var6 * 2.0);
 
     for (int var8 = 0; var8 < 16; ++var8) {
