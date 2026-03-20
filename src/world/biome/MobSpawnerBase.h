@@ -48,24 +48,23 @@ struct MobSpawnerBase {
     static MobSpawnerBase biomeLookupTable[4096];
     static bool lookupInitialized;
 
-    // Exact port of Java's getBiome - NOTE: Java uses float here for biome interpolation
-    // But we use double for better precision to match Java's internal calculations
-    static MobSpawnerBase& getBiome(double temp, double humid) {
+    // Exact port of Java's getBiome - Java uses float for biome interpolation
+    static MobSpawnerBase& getBiome(float temp, float humid) {
         humid *= temp;
-        if (temp < 0.1) return tundra;
-        if (humid < 0.2) {
-            if (temp < 0.5) return tundra;
-            if (temp < 0.95) return savanna;
+        if (temp < 0.1f) return tundra;
+        if (humid < 0.2f) {
+            if (temp < 0.5f) return tundra;
+            if (temp < 0.95f) return savanna;
             return desert;
         }
-        if (humid > 0.5 && temp < 0.7) return swampland;
-        if (temp < 0.5) return taiga;
-        if (temp < 0.97) {
-            if (humid < 0.35) return shrubland;
+        if (humid > 0.5f && temp < 0.7f) return swampland;
+        if (temp < 0.5f) return taiga;
+        if (temp < 0.97f) {
+            if (humid < 0.35f) return shrubland;
             return forest;
         }
-        if (humid < 0.45) return plains;
-        if (humid < 0.9) return seasonalForest;
+        if (humid < 0.45f) return plains;
+        if (humid < 0.9f) return seasonalForest;
         return rainforest;
     }
 
@@ -73,7 +72,8 @@ struct MobSpawnerBase {
         if (lookupInitialized) return;
         for (int i = 0; i < 64; ++i) {
             for (int j = 0; j < 64; ++j) {
-                biomeLookupTable[i + j * 64] = getBiome((double)i / 63.0, (double)j / 63.0);
+                // IMPORTANT: Use float to match Java's exact precision!
+                biomeLookupTable[i + j * 64] = getBiome((float)i / 63.0f, (float)j / 63.0f);
             }
         }
         // Set desert and iceDesert to sand
@@ -83,8 +83,9 @@ struct MobSpawnerBase {
     }
 
     static MobSpawnerBase& getBiomeFromLookup(double temp, double humid) {
-        int t = (int)(temp * 63.0);
-        int h = (int)(humid * 63.0);
+        // IMPORTANT: Cast to float to match Java's exact precision!
+        int t = (int)((float)temp * 63.0f);
+        int h = (int)((float)humid * 63.0f);
         if (t < 0) t = 0;
         if (t > 63) t = 63;
         if (h < 0) h = 0;
