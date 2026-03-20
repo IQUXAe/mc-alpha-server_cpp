@@ -249,36 +249,46 @@ void NetServerHandler::handlePlayerLookMove(Packet13PlayerLookMove& pkt) {
 }
 
 void NetServerHandler::handleBlockDig(Packet14BlockDig& pkt) {
-    if (pkt.status == 0) {
-        player_->miningStartX = pkt.x;
-        player_->miningStartY = pkt.y;
-        player_->miningStartZ = pkt.z;
-        player_->miningTicks = 0;
-    } else if (pkt.status == 2) {
-        player_->miningTicks = -1;
-    } else if (pkt.status == 1) {
-        if (player_->miningTicks >= 0 && pkt.x == player_->miningStartX && pkt.y == player_->miningStartY && pkt.z == player_->miningStartZ) {
-            player_->miningTicks++;
-            
-            uint8_t id = mcServer_->worldMngr->getBlockId(pkt.x, pkt.y, pkt.z);
-            if (id > 0) {
-                // Determine target ticks
-                int reqTicks = 15; // default 0.75s
-                if (id == 18 || id == 20) reqTicks = 4; // leaves, glass fast
-                else if (id == 3 || id == 12 || id == 13) reqTicks = 10; // dirt, sand
-                else if (id >= 1 && id != 7) reqTicks = 20; // stone etc.
+    int realX = pkt.x;
+    int realY = pkt.y;
+    int realZ = pkt.z;
 
-                if (player_->miningTicks >= reqTicks) {
-                    mcServer_->worldMngr->setBlockWithNotify(pkt.x, pkt.y, pkt.z, 0);
-                    if (Block::blocksList[id]) {
-                        Block::blocksList[id]->dropBlockAsItem(mcServer_->worldMngr.get(), pkt.x, pkt.y, pkt.z, 0);
-                    }
-                    player_->miningTicks = -1;
-                }
+    // In Alpha, status 2/3 often sends 0,0,0 coordinates
+    if ((pkt.status == 2 || pkt.status == 3) && pkt.x == 0 && pkt.y == 0 && pkt.z == 0) {
+        realX = player_->miningStartX;
+        realY = player_->miningStartY;
+        realZ = player_->miningStartZ;
+    }
+
+    std::cout << "[DEBUG] Dig packet: status=" << (int)pkt.status << " x=" << realX << " y=" << (int)realY << " z=" << realZ << std::endl;
+
+    if (pkt.status == 0) {
+        player_->miningStartX = realX;
+        player_->miningStartY = realY;
+        player_->miningStartZ = realZ;
+        player_->miningStartTime = mcServer_->getWorldTime();
+        
+        uint8_t id = mcServer_->worldMngr->getBlockId(realX, realY, realZ);
+        // Instant-break for decorations
+        if (id == 37 || id == 38 || id == 39 || id == 40 || id == 50 || id == 51 || id == 55 || id == 59 || id == 83) {
+            mcServer_->worldMngr->setBlockWithNotify(realX, realY, realZ, 0);
+            if (Block::blocksList[id]) {
+                Block::blocksList[id]->dropBlockAsItem(mcServer_->worldMngr.get(), realX, realY, realZ, 0);
             }
         }
-    } else if (pkt.status == 4) { // Drop held item
-        // Not implemented yet
+    } else if (pkt.status == 2) {
+        uint8_t id = mcServer_->worldMngr->getBlockId(realX, realY, realZ);
+        if (id == 0) return;
+
+        std::cout << "[DEBUG] Block broken at: " << realX << "," << realY << "," << realZ << " (id=" << (int)id << ")" << std::endl;
+        
+        mcServer_->worldMngr->setBlockWithNotify(realX, realY, realZ, 0);
+        if (Block::blocksList[id]) {
+            Block::blocksList[id]->dropBlockAsItemWithChance(mcServer_->worldMngr.get(), realX, realY, realZ, 0, 1.0f);
+        }
+    } else if (pkt.status == 3) {
+        // Mining aborted - do nothing, just log
+        std::cout << "[DEBUG] Mining aborted by client at: " << realX << "," << realY << "," << realZ << std::endl;
     }
 }
 

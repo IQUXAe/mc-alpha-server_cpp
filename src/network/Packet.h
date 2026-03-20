@@ -179,6 +179,7 @@ public:
     virtual void writePacketData(ByteBuffer& buf) = 0;
     virtual void processPacket(NetHandler& handler) = 0;
     virtual int getPacketSize() = 0;
+    virtual std::unique_ptr<Packet> clone() const = 0;
 
     int getPacketId() const;
 

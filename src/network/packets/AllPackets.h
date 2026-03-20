@@ -3,6 +3,7 @@
 #include "../Packet.h"
 #include "../NetHandler.h"
 #include <string>
+#include <type_traits>
 
 // ============= Packet 0: Keep Alive =============
 class Packet0KeepAlive : public Packet {
@@ -10,6 +11,7 @@ public:
     void readPacketData(ByteBuffer& buf) override {}
     void writePacketData(ByteBuffer& buf) override {}
     void processPacket(NetHandler& handler) override {}
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet0KeepAlive>(*this); }
     int getPacketSize() override { return 0; }
 };
 
@@ -46,6 +48,7 @@ public:
         handler.handleLogin(*this);
     }
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet1Login>(*this); }
     int getPacketSize() override {
         return 4 + static_cast<int>(username.size()) + static_cast<int>(password.size()) + 4 + 5;
     }
@@ -71,6 +74,7 @@ public:
         handler.handleHandshake(*this);
     }
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet2Handshake>(*this); }
     int getPacketSize() override {
         return 4 + static_cast<int>(username.size()) + 4;
     }
@@ -96,6 +100,7 @@ public:
         handler.handleChat(*this);
     }
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet3Chat>(*this); }
     int getPacketSize() override {
         return static_cast<int>(message.size()) + 2;
     }
@@ -119,6 +124,7 @@ public:
 
     void processPacket(NetHandler& handler) override {}
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet4UpdateTime>(*this); }
     int getPacketSize() override { return 8; }
 };
 
@@ -161,6 +167,7 @@ public:
 
     void processPacket(NetHandler& handler) override {}
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet5PlayerInventory>(*this); }
     int getPacketSize() override {
         int size = 6;
         for (auto& s : slots) {
@@ -188,6 +195,7 @@ public:
     }
 
     void processPacket(NetHandler& handler) override {}
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet6SpawnPosition>(*this); }
     int getPacketSize() override { return 12; }
 };
 
@@ -211,6 +219,7 @@ public:
     }
 
     void processPacket(NetHandler& handler) override {}
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet7UseEntity>(*this); }
     int getPacketSize() override { return 9; }
 };
 
@@ -225,6 +234,7 @@ public:
     void readPacketData(ByteBuffer& buf) override { health = buf.readShort(); }
     void writePacketData(ByteBuffer& buf) override { buf.writeShort(health); }
     void processPacket(NetHandler& handler) override {}
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet8UpdateHealth>(*this); }
     int getPacketSize() override { return 2; }
 };
 
@@ -234,6 +244,7 @@ public:
     void readPacketData(ByteBuffer& buf) override {}
     void writePacketData(ByteBuffer& buf) override {}
     void processPacket(NetHandler& handler) override {}
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet9Respawn>(*this); }
     int getPacketSize() override { return 0; }
 };
 
@@ -258,6 +269,7 @@ public:
         handler.handleFlying(*this);
     }
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet10Flying>(*this); }
     int getPacketSize() override { return 1; }
 };
 
@@ -283,6 +295,7 @@ public:
         buf.writeBool(onGround);
     }
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet11PlayerPosition>(*this); }
     int getPacketSize() override { return 33; }
 };
 
@@ -304,6 +317,7 @@ public:
         buf.writeBool(onGround);
     }
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet12PlayerLook>(*this); }
     int getPacketSize() override { return 9; }
 };
 
@@ -346,6 +360,7 @@ public:
         buf.writeBool(onGround);
     }
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet13PlayerLookMove>(*this); }
     int getPacketSize() override { return 41; }
 };
 
@@ -378,6 +393,7 @@ public:
         handler.handleBlockDig(*this);
     }
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet14BlockDig>(*this); }
     int getPacketSize() override { return 11; }
 };
 
@@ -412,6 +428,7 @@ public:
         handler.handlePlace(*this);
     }
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet15Place>(*this); }
     int getPacketSize() override { return 12; }
 };
 
@@ -435,6 +452,7 @@ public:
         handler.handleBlockItemSwitch(*this);
     }
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet16BlockItemSwitch>(*this); }
     int getPacketSize() override { return 6; }
 };
 
@@ -458,6 +476,7 @@ public:
     }
 
     void processPacket(NetHandler& handler) override {}
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet17AddToInventory>(*this); }
     int getPacketSize() override { return 5; }
 };
 
@@ -484,6 +503,7 @@ public:
         handler.handleArmAnimation(*this);
     }
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet18ArmAnimation>(*this); }
     int getPacketSize() override { return 5; }
 };
 
@@ -520,6 +540,7 @@ public:
     }
 
     void processPacket(NetHandler& handler) override {}
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet20NamedEntitySpawn>(*this); }
     int getPacketSize() override { return 28 + static_cast<int>(name.size()); }
 };
 
@@ -549,6 +570,7 @@ public:
     }
 
     void processPacket(NetHandler& handler) override {}
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet21PickupSpawn>(*this); }
     int getPacketSize() override { return 22; }
 };
 
@@ -573,6 +595,7 @@ public:
     }
 
     void processPacket(NetHandler& handler) override {}
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet22Collect>(*this); }
     int getPacketSize() override { return 8; }
 };
 
@@ -600,6 +623,7 @@ public:
     }
 
     void processPacket(NetHandler& handler) override {}
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet23VehicleSpawn>(*this); }
     int getPacketSize() override { return 17; }
 };
 
@@ -626,6 +650,7 @@ public:
     }
 
     void processPacket(NetHandler& handler) override {}
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet24MobSpawn>(*this); }
     int getPacketSize() override { return 19; }
 };
 
@@ -662,6 +687,7 @@ public:
     }
 
     void processPacket(NetHandler& handler) override {}
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet28EntityVelocity>(*this); }
     int getPacketSize() override { return 10; }
 };
 
@@ -676,6 +702,7 @@ public:
     void readPacketData(ByteBuffer& buf) override { entityId = buf.readInt(); }
     void writePacketData(ByteBuffer& buf) override { buf.writeInt(entityId); }
     void processPacket(NetHandler& handler) override {}
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet29DestroyEntity>(*this); }
     int getPacketSize() override { return 4; }
 };
 
@@ -696,6 +723,7 @@ public:
     }
 
     void processPacket(NetHandler& handler) override {}
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet30Entity>(*this); }
     int getPacketSize() override { return 4; }
 };
 
@@ -718,6 +746,7 @@ public:
         buf.writeByte(dx); buf.writeByte(dy); buf.writeByte(dz);
     }
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet31RelEntityMove>(*this); }
     int getPacketSize() override { return 7; }
 };
 
@@ -740,6 +769,7 @@ public:
         buf.writeByte(yaw); buf.writeByte(pitch);
     }
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet32EntityLook>(*this); }
     int getPacketSize() override { return 6; }
 };
 
@@ -765,6 +795,7 @@ public:
         buf.writeByte(yaw); buf.writeByte(pitch);
     }
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet33RelEntityMoveLook>(*this); }
     int getPacketSize() override { return 9; }
 };
 
@@ -792,6 +823,7 @@ public:
     }
 
     void processPacket(NetHandler& handler) override {}
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet34EntityTeleport>(*this); }
     int getPacketSize() override { return 18; }
 };
 
@@ -815,6 +847,7 @@ public:
     }
 
     void processPacket(NetHandler& handler) override {}
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet38EntityStatus>(*this); }
     int getPacketSize() override { return 5; }
 };
 
@@ -835,6 +868,7 @@ public:
     }
 
     void processPacket(NetHandler& handler) override {}
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet39AttachEntity>(*this); }
     int getPacketSize() override { return 8; }
 };
 
@@ -858,6 +892,7 @@ public:
     }
 
     void processPacket(NetHandler& handler) override {}
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet50PreChunk>(*this); }
     int getPacketSize() override { return 9; }
 };
 
@@ -907,6 +942,7 @@ public:
 
     void processPacket(NetHandler& handler) override {}
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet51MapChunk>(*this); }
     int getPacketSize() override {
         return 17 + static_cast<int>(compressedData.size());
     }
@@ -943,6 +979,7 @@ public:
 
     void processPacket(NetHandler& handler) override {}
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet52MultiBlockChange>(*this); }
     int getPacketSize() override {
         return 10 + static_cast<int>(coordinateArray.size()) * 4;
     }
@@ -972,6 +1009,7 @@ public:
     }
 
     void processPacket(NetHandler& handler) override {}
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet53BlockChange>(*this); }
     int getPacketSize() override { return 11; }
 };
 
@@ -1003,6 +1041,7 @@ public:
 
     void processPacket(NetHandler& handler) override {}
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet59ComplexEntity>(*this); }
     int getPacketSize() override {
         return 12 + static_cast<int>(nbtData.size());
     }
@@ -1039,6 +1078,7 @@ public:
 
     void processPacket(NetHandler& handler) override {}
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet60Explosion>(*this); }
     int getPacketSize() override {
         return 32 + static_cast<int>(destroyedBlocks.size()) * 3;
     }
@@ -1064,6 +1104,7 @@ public:
         handler.handleKickDisconnect(*this);
     }
 
+    std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet255KickDisconnect>(*this); }
     int getPacketSize() override {
         return static_cast<int>(reason.size()) + 2;
     }

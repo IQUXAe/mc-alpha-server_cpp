@@ -3,6 +3,7 @@
 #include "Packet.h"
 #include "NetHandler.h"
 #include "packets/AllPackets.h"
+#include "../core/Logger.h"
 
 #include <thread>
 #include <mutex>
@@ -10,7 +11,7 @@
 #include <atomic>
 #include <string>
 #include <memory>
-#include <iostream>
+#include <stdexcept>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -77,7 +78,15 @@ public:
         }
 
         for (auto& pkt : toProcess) {
-            pkt->processPacket(*netHandler_);
+            try {
+                pkt->processPacket(*netHandler_);
+            } catch (const std::exception& e) {
+                Logger::warning("Failed to process packet: {} - {}", pkt->getPacketId(), e.what());
+                // Kick the player on packet processing error
+                if (netHandler_) {
+                    netHandler_->handleErrorMessage("Packet processing error: " + std::string(e.what()));
+                }
+            }
         }
 
         if (isTerminating_) {
@@ -160,7 +169,7 @@ private:
                 readPackets_.push(std::move(pkt));
             } catch (const std::exception& e) {
                 if (!isTerminating_) {
-                    std::cerr << "[NetworkManager] Read error: " << e.what() << std::endl;
+                    Logger::warning("Read error on {}: {}", description_, e.what());
                     shutdown("Internal exception: " + std::string(e.what()));
                 }
                 return;
@@ -211,7 +220,7 @@ private:
                 }
             } catch (const std::exception& e) {
                 if (!isTerminating_) {
-                    std::cerr << "[NetworkManager] Write error: " << e.what() << std::endl;
+                    Logger::warning("Write error on {}: {}", description_, e.what());
                     shutdown("Internal exception: " + std::string(e.what()));
                 }
                 return;

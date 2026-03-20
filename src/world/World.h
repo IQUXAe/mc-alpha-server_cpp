@@ -15,6 +15,27 @@
 #include <atomic>
 #include <leveldb/db.h>
 
+#include <set>
+#include <tuple>
+#include <random>
+
+struct NextTickListEntry {
+    int x, y, z;
+    int blockId;
+    int64_t scheduledTime;
+
+    bool operator<(const NextTickListEntry& other) const {
+        if (scheduledTime != other.scheduledTime) return scheduledTime < other.scheduledTime;
+        if (x != other.x) return x < other.x;
+        if (y != other.y) return y < other.y;
+        return z < other.z;
+    }
+    
+    bool operator==(const NextTickListEntry& other) const {
+        return x == other.x && y == other.y && z == other.z && blockId == other.blockId;
+    }
+};
+
 class ChunkProviderGenerate;
 
 class World {
@@ -24,16 +45,19 @@ public:
     int spawnZ = 0;
     int64_t randomSeed = 0;
     int64_t worldTime = 0;
+    bool isPopulating = false;
 
     std::unique_ptr<ChunkProviderGenerate> chunkProvider;
     std::unique_ptr<WorldChunkManager> worldChunkManager;
+    std::mt19937_64 rand;
 
     MinecraftServer* mcServer;
 
-    World(MinecraftServer* server, const std::string& savePath);
+    World(MinecraftServer* server, const std::string& savePath, int64_t seed = 0);
     ~World();
 
     void tick();
+    void scheduleBlockUpdate(int x, int y, int z, int blockId, int delay);
 
     // WorldChunkManager access (func_4077_a in Java)
     WorldChunkManager* func_4077_a() { return worldChunkManager.get(); }
@@ -60,15 +84,26 @@ public:
 
     // Entity integration
     void getCollidingBoundingBoxes(Entity* entity, const AxisAlignedBB& mask, std::vector<AxisAlignedBB>& result);
+    void spawnEntityInWorld(std::unique_ptr<Entity> entity);
+    void removeEntity(Entity* entity);
+
+    void saveWorld();
+    void loadEntities();
+    void saveEntities();
 
 private:
     void findSafeSpawnPoint();
     void saveWorker();
+    bool loadLevelDat();
+    void saveLevelDat();
     std::vector<uint8_t> compressChunkData(Chunk* chunk);
     void decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data);
 
     std::unordered_map<uint64_t, std::unique_ptr<Chunk>> chunks_;
+    mutable std::mutex chunksMutex_;  // Protects chunks_ map from concurrent access
+    std::vector<std::unique_ptr<Entity>> entities_;
     std::string worldPath_;
+    std::set<NextTickListEntry> scheduledTicks;
 
     // Asynchronous saving queue
     struct SaveTask {

@@ -58,7 +58,7 @@ public:
                              maxX + x, maxY + y, maxZ + z);
     }
 
-    double clipXCollide(const AxisAlignedBB& other, double dx) const {
+    double calculateXOffset(const AxisAlignedBB& other, double dx) const {
         if (other.maxY > minY && other.minY < maxY && other.maxZ > minZ && other.minZ < maxZ) {
             if (dx > 0.0 && other.maxX <= minX) {
                 double d = minX - other.maxX;
@@ -72,7 +72,7 @@ public:
         return dx;
     }
 
-    double clipYCollide(const AxisAlignedBB& other, double dy) const {
+    double calculateYOffset(const AxisAlignedBB& other, double dy) const {
         if (other.maxX > minX && other.minX < maxX && other.maxZ > minZ && other.minZ < maxZ) {
             if (dy > 0.0 && other.maxY <= minY) {
                 double d = minY - other.maxY;
@@ -86,7 +86,7 @@ public:
         return dy;
     }
 
-    double clipZCollide(const AxisAlignedBB& other, double dz) const {
+    double calculateZOffset(const AxisAlignedBB& other, double dz) const {
         if (other.maxX > minX && other.minX < maxX && other.maxY > minY && other.minY < maxY) {
             if (dz > 0.0 && other.maxZ <= minZ) {
                 double d = minZ - other.maxZ;

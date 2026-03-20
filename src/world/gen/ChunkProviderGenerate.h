@@ -10,6 +10,7 @@
 
 class ChunkProviderGenerate {
 private:
+    World* worldObj;  // Must be first for correct initialization order
     JavaRandom rand;
     NoiseGeneratorOctaves field_705_k;
     NoiseGeneratorOctaves field_704_l;
@@ -19,7 +20,6 @@ private:
     NoiseGeneratorOctaves field_715_a;
     NoiseGeneratorOctaves field_714_b;
     NoiseGeneratorOctaves field_713_c;
-    World* worldObj;
 
     std::vector<double> field_4224_q;
     std::vector<double> field_698_r;

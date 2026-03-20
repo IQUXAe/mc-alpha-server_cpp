@@ -1,10 +1,12 @@
 #include "MinecraftServer.h"
 #include "core/MathHelper.h"
+#include "core/Logger.h"
 #include "network/Packet.h"
 #include "network/packets/AllPackets.h"
 #include "entity/EntityPlayerMP.h"
 #include "world/World.h"
 #include "block/Block.h"
+#include "core/Item.h"
 
 #include <iostream>
 #include <chrono>
@@ -17,7 +19,10 @@ MinecraftServer::MinecraftServer() {
     Packet::registerPackets();
 }
 
-MinecraftServer::~MinecraftServer() = default;
+MinecraftServer::~MinecraftServer() {
+    stop();
+    if (worldMngr) worldMngr->saveWorld();
+}
 
 bool MinecraftServer::initialize() {
     std::cout << "[INFO] Starting minecraft server version 0.2.8 (Alpha 1.2.6)" << std::endl;
@@ -33,6 +38,8 @@ bool MinecraftServer::initialize() {
     viewDistance = propertyManager->getIntProperty("view-distance", 10);
     if (viewDistance < 3) viewDistance = 3;
     if (viewDistance > 15) viewDistance = 15;
+    autoSaveInterval = propertyManager->getIntProperty("auto-save-interval", 6000);
+    saveModifiedChunksOnly = propertyManager->getBooleanProperty("save-modified-chunks-only", false);
     int port = propertyManager->getIntProperty("server-port", 25565);
 
     std::string displayAddr = bindAddress.empty() ? "*" : bindAddress;
@@ -61,21 +68,48 @@ bool MinecraftServer::initialize() {
 
     // Initialize world
     std::string levelName = propertyManager->getStringProperty("level-name", "world");
+    std::string levelSeed = propertyManager->getStringProperty("level-seed", "");
     bool isHellWorld = propertyManager->getBooleanProperty("hellworld", false);
     worldDimension_ = isHellWorld ? -1 : 0;
 
-    // Generate world seed
-    std::random_device rd;
-    std::mt19937_64 gen(rd());
-    worldSeed_ = gen();
+    // Generate world seed from level-seed property
+    if (!levelSeed.empty()) {
+        // Check if seed is numeric
+        try {
+            worldSeed_ = std::stoll(levelSeed);
+            Logger::info("Using numeric world seed: {}", worldSeed_);
+        } catch (...) {
+            // String seed - use Java's String.hashCode() algorithm
+            // Java: s[0]*31^(n-1) + s[1]*31^(n-2) + ... + s[n-1]
+            int64_t hash = 0;
+            for (char c : levelSeed) {
+                hash = hash * 31 + static_cast<int8_t>(c);
+            }
+            worldSeed_ = hash;
+            Logger::info("Using string world seed: \"{}\" -> {}", levelSeed, worldSeed_);
+        }
+    } else {
+        // Empty seed - will be generated randomly by World
+        worldSeed_ = 0;
+        Logger::info("No level-seed specified, world will generate random seed");
+    }
 
-    std::cout << "[INFO] Preparing level \"" << levelName << "\"" << std::endl;
+    std::cout << "[INFO] Preparing start region" << std::endl;
 
-    // Initialize block properties
+    // Initialize block and item properties
     Block::initBlocks();
+    Item::initItems();
 
     // Initialize world
-    worldMngr = std::make_unique<World>(this, levelName);
+    Logger::info("Preparing level \"{}\" with seed config: {}", levelName, levelSeed);
+    worldMngr = std::make_unique<World>(this, "world/" + levelName, worldSeed_);
+    worldSeed_ = worldMngr->randomSeed;
+
+    Logger::info("Actual world seed: {}", worldSeed_);
+    Logger::info("Spawn position: {}, {}, {}", spawnX_, spawnY_, spawnZ_);
+
+    // Initialize entity tracker
+    entityTracker = std::make_unique<EntityTracker>(this);
 
     std::cout << "[INFO] Preparing start region" << std::endl;
     // Spawn position is already set by World constructor, but we ensure it here
@@ -83,13 +117,13 @@ bool MinecraftServer::initialize() {
     spawnY_ = worldMngr->spawnY;
     spawnZ_ = worldMngr->spawnZ;
 
-    std::cout << "[INFO] Done! For help, type \"help\" or \"?\"" << std::endl;
+    Logger::info("Done! For help, type \"help\" or \"?\"");
     return true;
 }
 
 void MinecraftServer::run() {
     if (!initialize()) {
-        std::cerr << "[SEVERE] Failed to initialize server" << std::endl;
+        Logger::severe("Failed to initialize server");
         return;
     }
 
@@ -101,20 +135,20 @@ void MinecraftServer::run() {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTime).count();
 
         if (elapsed > 2000) {
-            std::cerr << "[WARNING] Can't keep up! Did the system time change, or is the server overloaded?" << std::endl;
+            Logger::warning("Can't keep up! Did the system time change, or is the server overloaded?");
             elapsed = 2000;
         }
 
         if (elapsed < 0) {
-            std::cerr << "[WARNING] Time ran backwards! Did the system time change?" << std::endl;
+            Logger::warning("Time ran backwards! Did the system time change?");
             elapsed = 0;
         }
 
         lag += elapsed;
         lastTime = now;
 
-        while (lag >= 50) {
-            lag -= 50;
+        while (lag >= ServerConstants::MILLISECONDS_PER_TICK) {
+            lag -= ServerConstants::MILLISECONDS_PER_TICK;
             serverTick();
         }
 
@@ -122,11 +156,13 @@ void MinecraftServer::run() {
     }
 
     // Shutdown
-    std::cout << "[INFO] Stopping server" << std::endl;
+    Logger::info("Stopping server");
     if (configManager) {
         configManager->savePlayerStates();
     }
-    // TODO: save world
+    if (worldMngr) {
+        worldMngr->saveWorld();
+    }
 
     std::cout << "[INFO] Server stopped." << std::endl;
 }
@@ -142,12 +178,18 @@ void MinecraftServer::serverTick() {
     worldTime_++;
 
     // Send time update every 20 ticks (1 second)
-    if (tickCounter_ % 20 == 0) {
+    if (tickCounter_ % ServerConstants::TICKS_PER_SECOND == 0) {
         configManager->broadcastPacket(std::make_unique<Packet4UpdateTime>(worldTime_));
     }
 
-    // TODO: world tick
-    // TODO: entity updates
+    if (worldMngr) {
+        worldMngr->tick();
+    }
+    
+    // Update entity tracking
+    if (entityTracker) {
+        entityTracker->tick();
+    }
 
     // Process network
     networkListenThread->networkTick();
@@ -201,7 +243,8 @@ void MinecraftServer::handleCommand(const std::string& cmd) {
         running_ = false;
     } else if (lower.starts_with("save-all")) {
         std::cout << "CONSOLE: Forcing save.." << std::endl;
-        // TODO: save world
+        if (worldMngr) worldMngr->saveWorld();
+        if (configManager) configManager->savePlayerStates();
         std::cout << "CONSOLE: Save complete." << std::endl;
     } else if (lower.starts_with("op ")) {
         std::string name = cmd.substr(3);
