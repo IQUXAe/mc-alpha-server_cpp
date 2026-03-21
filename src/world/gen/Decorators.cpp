@@ -232,7 +232,7 @@ bool WorldGenTrees::generate(World* world, JavaRandom& rand, int x, int y, int z
 
         int var8 = world->getBlockId(x, y - 1, z);
         if ((var8 == 2 || var8 == 3) && y < 128 - var6 - 1) {
-            world->setBlockWithNotify(x, y - 1, z, 3); // dirt
+            world->setBlock(x, y - 1, z, 3); // dirt
 
             // Leaves
             for (int var16 = y - 3 + var6; var16 <= y + var6; ++var16) {
@@ -244,7 +244,7 @@ bool WorldGenTrees::generate(World* world, JavaRandom& rand, int x, int y, int z
                         int var15 = var14 - z;
                         if ((std::abs(var13) != var11 || std::abs(var15) != var11 || (rand.nextInt(2) != 0 && var10 != 0)) &&
                             world->getBlockId(var12, var16, var14) == 0) {
-                            world->setBlockWithNotify(var12, var16, var14, 18); // leaves
+                            world->setBlock(var12, var16, var14, 18); // leaves
                         }
                     }
                 }
@@ -253,7 +253,7 @@ bool WorldGenTrees::generate(World* world, JavaRandom& rand, int x, int y, int z
             for (int var16 = 0; var16 < var6; ++var16) {
                 int var10 = world->getBlockId(x, y + var16, z);
                 if (var10 == 0 || var10 == 18) {
-                    world->setBlockWithNotify(x, y + var16, z, 17); // log
+                    world->setBlock(x, y + var16, z, 17); // log
                 }
             }
             return true;
@@ -345,7 +345,7 @@ void WorldGenBigTree::placeBlockLine(int* from, int* to, int blockId) {
         pos[maxAxis] = (int)((double)(from[maxAxis] + i) + 0.5);
         pos[ax1] = (int)((double)from[ax1] + (double)i * r1 + 0.5);
         pos[ax2] = (int)((double)from[ax2] + (double)i * r2 + 0.5);
-        worldObj->setBlockWithNotify(pos[0], pos[1], pos[2], blockId);
+        worldObj->setBlock(pos[0], pos[1], pos[2], blockId);
     }
 }
 
@@ -365,7 +365,7 @@ void WorldGenBigTree::genTreeLayer(int x, int y, int z, float radius, int8_t axi
             pos[ax2] = center[ax2] + j;
             int bid = worldObj->getBlockId(pos[0], pos[1], pos[2]);
             if (bid != 0 && bid != 18) continue;
-            worldObj->setBlockWithNotify(pos[0], pos[1], pos[2], blockId);
+            worldObj->setBlock(pos[0], pos[1], pos[2], blockId);
         }
     }
 }
@@ -760,7 +760,7 @@ bool WorldGenPumpkin::generate(World* world, JavaRandom& rand, int x, int y, int
         int py = y + rand.nextInt(4) - rand.nextInt(4);
         int pz = z + rand.nextInt(8) - rand.nextInt(8);
         if (world->getBlockId(px, py, pz) == 0 && world->getBlockId(px, py - 1, pz) == 2) { // on grass
-            world->setBlockAndMetadataWithNotify(px, py, pz, 86, rand.nextInt(4)); // pumpkin with random rotation
+            world->setBlockAndMetadata(px, py, pz, 86, rand.nextInt(4)); // pumpkin with random rotation
         }
     }
     return true;
