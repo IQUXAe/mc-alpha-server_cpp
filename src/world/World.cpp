@@ -3,6 +3,7 @@
 #include "../entity/Entity.h"
 #include "../entity/EntityItem.h"
 #include "../entity/EntityPlayerMP.h"
+#include "../entity/EntityTracker.h"
 #include "../network/packets/AllPackets.h"
 #include "../core/AxisAlignedBB.h"
 #include "../MinecraftServer.h"
@@ -263,8 +264,8 @@ void World::tick() {
         }
 
         if ((*itE)->isDead) {
-            if (mcServer && mcServer->configManager) {
-                mcServer->configManager->broadcastPacket(std::make_unique<Packet29DestroyEntity>((*itE)->entityId));
+            if (mcServer && mcServer->entityTracker) {
+                mcServer->entityTracker->removeEntity(itE->get());
             }
             itE = entities_.erase(itE);
         } else {
@@ -475,7 +476,16 @@ bool World::setBlockWithNotify(int x, int y, int z, uint8_t blockId) {
     if (!setBlock(x, y, z, blockId)) return false;
 
     markBlockNeedsUpdate(x, y, z);
+    // Notify the placed block itself
+    if (blockId > 0 && Block::blocksList[blockId])
+        Block::blocksList[blockId]->onBlockAdded(this, x, y, z);
     notifyBlocksOfNeighborChange(x, y, z, blockId);
+    return true;
+}
+
+bool World::setBlockAndUpdate(int x, int y, int z, uint8_t blockId) {
+    if (!setBlock(x, y, z, blockId)) return false;
+    markBlockNeedsUpdate(x, y, z);
     return true;
 }
 
@@ -499,11 +509,19 @@ bool World::setBlockAndMetadataWithNotify(int x, int y, int z, uint8_t blockId, 
 void World::markBlockNeedsUpdate(int x, int y, int z) {
     if (!mcServer || !mcServer->configManager) return;
 
-    Packet53BlockChange pkt(x, static_cast<int8_t>(y), z, 
-                            static_cast<int8_t>(getBlockId(x, y, z)), 
+    int chunkX = x >> 4;
+    int chunkZ = z >> 4;
+    auto pkt = std::make_unique<Packet53BlockChange>(x, static_cast<int8_t>(y), z,
+                            static_cast<int8_t>(getBlockId(x, y, z)),
                             static_cast<int8_t>(getBlockMetadata(x, y, z)));
 
-    mcServer->configManager->broadcastPacket(std::make_unique<Packet53BlockChange>(pkt));
+    // Only send to players who have this chunk loaded
+    for (auto* player : mcServer->configManager->playerEntities) {
+        if (player->netHandler && player->netHandler->hasChunkLoaded(
+                player->netHandler->chunkKey(chunkX, chunkZ))) {
+            player->netHandler->sendPacket(pkt->clone());
+        }
+    }
 }
 
 void World::notifyBlocksOfNeighborChange(int x, int y, int z, uint8_t blockId) {
@@ -723,26 +741,13 @@ void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data) 
 
 void World::spawnEntityInWorld(std::unique_ptr<Entity> entity) {
     if (!entity) return;
-    
     entity->worldObj = this;
-
-    auto* item = dynamic_cast<EntityItem*>(entity.get());
-    if (item && mcServer && mcServer->configManager) {
-        Packet21PickupSpawn pkt;
-        pkt.entityId = item->entityId;
-        pkt.itemId = static_cast<int16_t>(item->itemID);
-        pkt.count = static_cast<int8_t>(item->count);
-        pkt.x = static_cast<int32_t>(std::floor(item->posX * 32.0));
-        pkt.y = static_cast<int32_t>(std::floor(item->posY * 32.0));
-        pkt.z = static_cast<int32_t>(std::floor(item->posZ * 32.0));
-        pkt.rotation = static_cast<int8_t>(item->motionX * 128.0);
-        pkt.pitch = static_cast<int8_t>(item->motionY * 128.0);
-        pkt.roll = static_cast<int8_t>(item->motionZ * 128.0);
-        
-        mcServer->configManager->broadcastPacket(std::make_unique<Packet21PickupSpawn>(pkt));
-    }
-    
+    Entity* ptr = entity.get();
     entities_.push_back(std::move(entity));
+    // EntityTracker handles sending spawn packets to players
+    if (mcServer && mcServer->entityTracker) {
+        mcServer->entityTracker->addEntity(ptr);
+    }
 }
 
 void World::removeEntity(Entity* entity) {

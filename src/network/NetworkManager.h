@@ -181,42 +181,38 @@ private:
         while (isRunning_ || isServerTerminating_) {
             try {
                 bool idle = true;
-                std::unique_ptr<Packet> pkt;
 
-                // Send data packets first
-                {
-                    std::lock_guard<std::mutex> lock(sendMutex_);
-                    if (!dataPackets_.empty()) {
+                // Drain all pending data packets first (movement, chat, block updates, etc.)
+                while (true) {
+                    std::unique_ptr<Packet> pkt;
+                    {
+                        std::lock_guard<std::mutex> lock(sendMutex_);
+                        if (dataPackets_.empty()) break;
                         pkt = std::move(dataPackets_.front());
                         dataPackets_.pop();
                         sendQueueByteLength_ -= pkt->getPacketSize() + 1;
-                        idle = false;
                     }
-                }
-
-                if (pkt) {
                     Packet::writePacket(*pkt, socketFd_);
-                    pkt.reset();
+                    idle = false;
                 }
 
-                // Send chunk data packets (rate limited)
+                // Send one chunk packet per iteration (rate limited to avoid flooding)
                 {
-                    std::lock_guard<std::mutex> lock(sendMutex_);
-                    if ((idle || chunkDataSendCounter_-- <= 0) && !chunkDataPackets_.empty()) {
-                        pkt = std::move(chunkDataPackets_.front());
-                        chunkDataPackets_.pop();
-                        sendQueueByteLength_ -= pkt->getPacketSize() + 1;
-                        idle = false;
-                        chunkDataSendCounter_ = 50;
+                    std::unique_ptr<Packet> pkt;
+                    {
+                        std::lock_guard<std::mutex> lock(sendMutex_);
+                        if (!chunkDataPackets_.empty()) {
+                            pkt = std::move(chunkDataPackets_.front());
+                            chunkDataPackets_.pop();
+                            sendQueueByteLength_ -= pkt->getPacketSize() + 1;
+                            idle = false;
+                        }
                     }
-                }
-
-                if (pkt) {
-                    Packet::writePacket(*pkt, socketFd_);
+                    if (pkt) Packet::writePacket(*pkt, socketFd_);
                 }
 
                 if (idle) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
                 }
             } catch (const std::exception& e) {
                 if (!isTerminating_) {

@@ -275,7 +275,7 @@ void ChunkProviderGenerate::populate(int chunkX, int chunkZ) {
     rand.setSeed(worldObj->randomSeed);
     int64_t var7 = rand.nextLong() / 2LL * 2LL + 1LL;
     int64_t var9 = rand.nextLong() / 2LL * 2LL + 1LL;
-    rand.setSeed((int64_t)chunkX * var7 + (int64_t)chunkZ * var9 ^ worldObj->randomSeed);
+    rand.setSeed(((int64_t)chunkX * var7 + (int64_t)chunkZ * var9) ^ worldObj->randomSeed);
 
     // --- Water lakes ---
     if (rand.nextInt(4) == 0) {

@@ -3,6 +3,7 @@
 #include "../core/AxisAlignedBB.h"
 #include "../world/World.h"
 #include "../entity/EntityItem.h"
+#include "../entity/EntityFallingSand.h"
 #include "../entity/EntityPlayerMP.h"
 #include "../core/Item.h"
 #include "../MinecraftServer.h"
@@ -13,7 +14,7 @@
 class BlockSand : public Block {
 public:
     BlockSand(int id, Material* material) : Block(id, material) {}
-    
+
     void onBlockAdded(World* world, int x, int y, int z) override {
         world->scheduleBlockUpdate(x, y, z, blockID, tickRate());
     }
@@ -24,28 +25,21 @@ public:
 
     void updateTick(World* world, int x, int y, int z) override {
         if (canFallBelow(world, x, y - 1, z) && y >= 0) {
-            world->setBlockWithNotify(x, y, z, 0);
-            
-            // In a real server this spawns an EntityFallingSand
-            // For simplicity, we just teleport the block down
-            int fallY = y - 1;
-            while (canFallBelow(world, x, fallY - 1, z) && fallY > 0) {
-                fallY--;
-            }
-            if (fallY > 0) {
-                world->setBlockWithNotify(x, fallY, z, blockID);
-            }
+            world->setBlockAndUpdate(x, y, z, 0);
+            auto entity = std::make_unique<EntityFallingSand>(blockID, x + 0.5, y + 0.5, z + 0.5);
+            world->spawnEntityInWorld(std::move(entity));
         }
     }
 
     int tickRate() const override { return 3; }
 
 private:
-    bool canFallBelow(World* world, int x, int y, int z) {
+    static bool canFallBelow(World* world, int x, int y, int z) {
         int id = world->getBlockId(x, y, z);
-        if (id == 0) return true;
-        if (id == 8 || id == 9 || id == 10 || id == 11) return true; // Liquids
-        return false;
+        if (id == 0 || id == 51) return true; // air or fire
+        Block* b = Block::blocksList[id];
+        if (!b) return true;
+        return b->blockMaterial == &Material::water || b->blockMaterial == &Material::lava;
     }
 };
 
@@ -121,7 +115,13 @@ public:
     BlockFlower(int id, Material* mat) : Block(id, mat) {}
     bool canBlockStay(World* world, int x, int y, int z) const override {
         int below = world->getBlockId(x, y - 1, z);
-        return below == 2 || below == 3 || below == 60; // grass, dirt, farmland
+        return below == 2 || below == 3 || below == 60;
+    }
+    void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
+        if (!canBlockStay(world, x, y, z)) {
+            dropBlockAsItem(world, x, y, z, 0);
+            world->setBlockAndUpdate(x, y, z, 0);
+        }
     }
     bool isReplaceable() const override { return true; }
     std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World*, int, int, int) override { return std::nullopt; }
@@ -134,6 +134,12 @@ public:
         int below = world->getBlockId(x, y - 1, z);
         return below > 0 && Block::blocksList[below] != nullptr;
     }
+    void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
+        if (!canBlockStay(world, x, y, z)) {
+            dropBlockAsItem(world, x, y, z, 0);
+            world->setBlockAndUpdate(x, y, z, 0);
+        }
+    }
     bool isReplaceable() const override { return true; }
     std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World*, int, int, int) override { return std::nullopt; }
 };
@@ -142,7 +148,6 @@ class BlockTorch : public Block {
 public:
     BlockTorch(int id, Material* mat) : Block(id, mat) {}
     bool canBlockStay(World* world, int x, int y, int z) const override {
-        // Can attach to solid block on any side or below
         auto isSolid = [&](int bx, int by, int bz) {
             int id = world->getBlockId(bx, by, bz);
             if (id == 0) return false;
@@ -152,6 +157,12 @@ public:
         return isSolid(x, y-1, z) || isSolid(x-1, y, z) || isSolid(x+1, y, z)
             || isSolid(x, y, z-1) || isSolid(x, y, z+1);
     }
+    void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
+        if (!canBlockStay(world, x, y, z)) {
+            dropBlockAsItem(world, x, y, z, 0);
+            world->setBlockAndUpdate(x, y, z, 0);
+        }
+    }
     bool isReplaceable() const override { return true; }
     std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World*, int, int, int) override { return std::nullopt; }
 };
@@ -159,18 +170,22 @@ public:
 class BlockCactus : public Block {
 public:
     BlockCactus(int id, Material* mat) : Block(id, mat) {}
+    void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
+        if (!canBlockStay(world, x, y, z)) {
+            dropBlockAsItem(world, x, y, z, world->getBlockMetadata(x, y, z));
+            world->setBlockAndUpdate(x, y, z, 0);
+        }
+    }
     bool canBlockStay(World* world, int x, int y, int z) const override {
-        // No solid blocks on sides, sand or cactus below
-        auto isSolid = [&](int bx, int by, int bz) {
+        auto solid = [&](int bx, int by, int bz) {
             int id = world->getBlockId(bx, by, bz);
             if (id == 0) return false;
             Block* b = Block::blocksList[id];
             return b && b->blockMaterial->isSolid();
         };
-        if (isSolid(x-1,y,z) || isSolid(x+1,y,z) || isSolid(x,y,z-1) || isSolid(x,y,z+1))
-            return false;
+        if (solid(x-1,y,z) || solid(x+1,y,z) || solid(x,y,z-1) || solid(x,y,z+1)) return false;
         int below = world->getBlockId(x, y-1, z);
-        return below == 12 || below == 81; // sand or cactus
+        return below == 12 || below == 81;
     }
 };
 
@@ -179,13 +194,18 @@ public:
     BlockReed(int id, Material* mat) : Block(id, mat) {}
     bool canBlockStay(World* world, int x, int y, int z) const override {
         int below = world->getBlockId(x, y-1, z);
-        if (below == 83) return true; // reed on reed
-        if (below != 2 && below != 3 && below != 12) return false; // grass/dirt/sand
-        // needs water adjacent at ground level
+        if (below == 83) return true;
+        if (below != 2 && below != 3 && below != 12) return false;
         return world->getBlockId(x-1,y-1,z) == 8 || world->getBlockId(x-1,y-1,z) == 9
             || world->getBlockId(x+1,y-1,z) == 8 || world->getBlockId(x+1,y-1,z) == 9
             || world->getBlockId(x,y-1,z-1) == 8 || world->getBlockId(x,y-1,z-1) == 9
             || world->getBlockId(x,y-1,z+1) == 8 || world->getBlockId(x,y-1,z+1) == 9;
+    }
+    void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
+        if (!canBlockStay(world, x, y, z)) {
+            dropBlockAsItem(world, x, y, z, 0);
+            world->setBlockAndUpdate(x, y, z, 0);
+        }
     }
     bool isReplaceable() const override { return true; }
     std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World*, int, int, int) override { return std::nullopt; }

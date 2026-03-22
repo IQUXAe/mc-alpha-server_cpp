@@ -44,8 +44,8 @@ public:
     }
     
     float getStrVsBlock(Block* block) {
-        // Assume getStrVsBlock exists in Item
-        // return getItem()->getStrVsBlock(this, block);
+        if (auto* tool = dynamic_cast<ItemTool*>(getItem()))
+            return tool->getStrVsBlock(block->blockID);
         return 1.0f;
     }
     
@@ -100,7 +100,8 @@ public:
     }
     
     bool canHarvestBlock(Block* block) {
-        // return getItem()->canHarvestBlock(block);
+        if (auto* tool = dynamic_cast<ItemTool*>(getItem()))
+            return tool->canHarvestBlock(block->blockID);
         return false;
     }
     

@@ -11,8 +11,9 @@ find_library(LEVELDB_LIBRARY NAMES leveldb REQUIRED)
 
 file(GLOB_RECURSE SOURCES "src/*.cpp")
 file(GLOB_RECURSE HEADERS "src/*.h")
+list(FILTER SOURCES EXCLUDE REGEX ".*main\.cpp$")
 
-add_executable(alpha_server ${SOURCES} ${HEADERS})
+add_executable(alpha_server ${SOURCES} src/main.cpp ${HEADERS})
 
 target_include_directories(alpha_server PRIVATE src)
 target_link_libraries(alpha_server PRIVATE ZLIB::ZLIB Threads::Threads ${LEVELDB_LIBRARY})

@@ -24,6 +24,8 @@ public:
     }
 
     ~InventoryPlayer() {
+        // lastSlot (index 35) is a non-owning alias managed by NetServerHandler — null it before delete
+        if (!mainInventory.empty()) mainInventory.back() = nullptr;
         for (auto* stack : mainInventory) delete stack;
         for (auto* stack : armorInventory) delete stack;
         for (auto* stack : craftingInventory) delete stack;
