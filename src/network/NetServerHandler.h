@@ -25,6 +25,7 @@ public:
     void sendPacket(std::unique_ptr<Packet> pkt);
     void teleport(double x, double y, double z, float yaw, float pitch);
     void sendChunks();
+    void sendInventory();  // Equivalent to Java's NetServerHandler.func_40_d()
     bool hasChunkLoaded(int64_t key) const { return sentChunks_.find(key) != sentChunks_.end(); }
     std::unordered_set<int64_t> sentChunks_;
 
@@ -39,6 +40,8 @@ public:
     void handleBlockItemSwitch(Packet16BlockItemSwitch& pkt) override;
     void handleArmAnimation(Packet18ArmAnimation& pkt) override;
     void handleKickDisconnect(Packet255KickDisconnect& pkt) override;
+    void handlePlayerInventory(Packet5PlayerInventory& pkt) override;
+    void handlePickupSpawn(Packet21PickupSpawn& pkt) override;
     void handleErrorMessage(const std::string& reason) override;
 
 private:

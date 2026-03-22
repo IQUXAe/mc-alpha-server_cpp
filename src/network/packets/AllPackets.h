@@ -165,7 +165,9 @@ public:
         }
     }
 
-    void processPacket(NetHandler& handler) override {}
+    void processPacket(NetHandler& handler) override {
+        handler.handlePlayerInventory(*this);
+    }
 
     std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet5PlayerInventory>(*this); }
     int getPacketSize() override {
@@ -462,6 +464,9 @@ public:
     int16_t itemId = 0;
     int8_t count = 0;
     int16_t damage = 0;
+    
+    Packet17AddToInventory() = default;
+    Packet17AddToInventory(int16_t id, int8_t cnt, int16_t dmg) : itemId(id), count(cnt), damage(dmg) {}
 
     void readPacketData(ByteBuffer& buf) override {
         itemId = buf.readShort();
@@ -569,7 +574,9 @@ public:
         buf.writeByte(rotation); buf.writeByte(pitch); buf.writeByte(roll);
     }
 
-    void processPacket(NetHandler& handler) override {}
+    void processPacket(NetHandler& handler) override {
+        handler.handlePickupSpawn(*this);
+    }
     std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet21PickupSpawn>(*this); }
     int getPacketSize() override { return 22; }
 };

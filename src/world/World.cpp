@@ -2,6 +2,7 @@
 #include "../block/Block.h"
 #include "../entity/Entity.h"
 #include "../entity/EntityItem.h"
+#include "../entity/EntityPlayerMP.h"
 #include "../network/packets/AllPackets.h"
 #include "../core/AxisAlignedBB.h"
 #include "../MinecraftServer.h"
@@ -226,10 +227,32 @@ void World::tick() {
                     double distSq = dx*dx + dy*dy + dz*dz;
                     
                     if (distSq < 2.25) { // 1.5 blocks radius
-                        // Collect effect
-                        mcServer->configManager->broadcastPacket(std::make_unique<Packet22Collect>(item->entityId, player->entityId));
-                        item->isDead = true;
-                        break;
+                        ItemStack stack(item->itemID, item->count, item->metadata);
+                        int initialCount = item->count;
+                        player->inventory.addItemStackToInventory(&stack);
+                        int addedCount = initialCount - stack.stackSize;
+
+                        if (addedCount > 0) {
+                            mcServer->configManager->broadcastPacket(std::make_unique<Packet22Collect>(item->entityId, player->entityId));
+
+                            if (player->netHandler) {
+                                // Packet17: показывает анимацию подбора
+                                player->netHandler->sendPacket(std::make_unique<Packet17AddToInventory>(
+                                    static_cast<int16_t>(item->itemID),
+                                    static_cast<int8_t>(addedCount),
+                                    static_cast<int16_t>(item->metadata)));
+                                // Packet5: синхронизирует реальное состояние инвентаря
+                                player->netHandler->sendInventory();
+                            }
+
+                            if (stack.stackSize <= 0) {
+                                item->isDead = true;
+                            } else {
+                                item->count = stack.stackSize;
+                            }
+                        }
+
+                        if (item->isDead) break;
                     }
                 }
             }
@@ -697,7 +720,8 @@ void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data) 
 void World::spawnEntityInWorld(std::unique_ptr<Entity> entity) {
     if (!entity) return;
     
-    // Notify all players about the new entity
+    entity->worldObj = this;
+
     auto* item = dynamic_cast<EntityItem*>(entity.get());
     if (item && mcServer && mcServer->configManager) {
         Packet21PickupSpawn pkt;
@@ -763,7 +787,7 @@ void World::loadEntities() {
         file.read(reinterpret_cast<char*>(&y), sizeof(y));
         file.read(reinterpret_cast<char*>(&z), sizeof(z));
 
-        auto item = std::make_unique<EntityItem>(id - 256, cnt, meta);
+        auto item = std::make_unique<EntityItem>(id, cnt, meta);
         item->setPosition(x, y, z);
         item->worldObj = this;
         entities_.push_back(std::move(item));

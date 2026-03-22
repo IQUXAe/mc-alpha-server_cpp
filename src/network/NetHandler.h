@@ -22,6 +22,8 @@ public:
     virtual void handlePlace(Packet15Place& pkt) { unexpectedPacket(); }
     virtual void handleBlockItemSwitch(Packet16BlockItemSwitch& pkt) { unexpectedPacket(); }
     virtual void handleArmAnimation(Packet18ArmAnimation& pkt) { unexpectedPacket(); }
+    virtual void handlePlayerInventory(Packet5PlayerInventory& pkt) { unexpectedPacket(); }
+    virtual void handlePickupSpawn(Packet21PickupSpawn& pkt) { unexpectedPacket(); }
 
     // Disconnect
     virtual void handleKickDisconnect(Packet255KickDisconnect& pkt) { unexpectedPacket(); }

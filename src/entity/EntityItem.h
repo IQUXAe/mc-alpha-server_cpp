@@ -15,7 +15,7 @@ public:
     EntityItem(int id, int cnt, int meta) : itemID(id), count(cnt), metadata(meta) {
         width = 0.25f;
         height = 0.25f;
-        yOffset = height / 2.0f;
+        yOffset = 0.0f;
     }
 
     void tick() override {

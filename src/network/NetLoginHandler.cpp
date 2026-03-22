@@ -96,6 +96,10 @@ void NetLoginHandler::doLogin(Packet1Login& pkt) {
 
         // Send position
         serverHandler->teleport(player->posX, player->posY, player->posZ, player->rotationYaw, player->rotationPitch);
+        
+        // Send full inventory to client (Packet5) - exactly as Java's NetServerHandler.func_40_d()
+        serverHandler->sendInventory();
+        
         serverHandler->sendChunks();
 
         // Register connection
