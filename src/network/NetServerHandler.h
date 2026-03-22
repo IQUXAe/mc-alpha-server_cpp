@@ -29,6 +29,9 @@ public:
     void restoreHeldItem(int itemId);  // called on login to restore saved held item
     int getHeldItemId() const;
     bool hasChunkLoaded(int64_t key) const { return sentChunks_.find(key) != sentChunks_.end(); }
+    static int64_t chunkKey(int x, int z) {
+        return ((int64_t)(uint32_t)x) | (((int64_t)(uint32_t)z) << 32);
+    }
     std::unordered_set<int64_t> sentChunks_;
 
     // NetHandler overrides
@@ -51,7 +54,8 @@ private:
     std::unique_ptr<NetworkManager> netManager_;
     EntityPlayerMP* player_;
     int tickCounter_ = 0;
-    ItemStack* heldItem_ = nullptr; // mirrors Java's field_10_k
+    ItemStack* heldItem_ = nullptr; // fallback placeholder when item not yet in inventory
+    int heldItemId_ = 0;             // itemID of what the player is holding
 
     // Anti-cheat: track last known position
     double lastX_ = 0.0, lastY_ = 0.0, lastZ_ = 0.0;
@@ -63,9 +67,5 @@ private:
 
     // Chunks queued (ordered, nearest first)
     std::vector<std::pair<int,int>> chunksToLoad_;
-
-    static int64_t chunkKey(int x, int z) {
-        return ((int64_t)(uint32_t)x) | (((int64_t)(uint32_t)z) << 32);
-    }
 };
 

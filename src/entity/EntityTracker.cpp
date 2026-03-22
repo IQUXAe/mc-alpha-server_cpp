@@ -1,5 +1,6 @@
 #include "EntityTracker.h"
 #include "EntityItem.h"
+#include "EntityFallingSand.h"
 #include "EntityLiving.h"
 #include "../MinecraftServer.h"
 #include <cmath>
@@ -180,11 +181,13 @@ void EntityTracker::addEntity(Entity* entity) {
     bool vel = false;
 
     if (dynamic_cast<EntityPlayerMP*>(entity)) {
-        range = 512; rate = 2;
+        range = 512; rate = 1;
     } else if (dynamic_cast<EntityItem*>(entity)) {
         range = 64; rate = 20; vel = true;
     } else {
-        range = 160; rate = 3;
+        // EntityFallingSand and other non-player, non-item entities:
+        // don't track them (Alpha client doesn't render them server-side)
+        return;
     }
 
     auto entry = std::make_unique<TrackerEntry>(entity, range, rate, vel);

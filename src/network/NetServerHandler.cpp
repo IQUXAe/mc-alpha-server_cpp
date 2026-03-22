@@ -137,7 +137,7 @@ void NetServerHandler::tick() {
 void NetServerHandler::kick(const std::string& reason) {
     if (disconnected) return;
     std::cout << "[INFO] Disconnecting " << player_->username << ": " << reason << std::endl;
-    player_->savedHeldItemId = heldItem_ ? heldItem_->itemID : 0;
+    player_->savedHeldItemId = heldItemId_;
     sendPacket(std::make_unique<Packet255KickDisconnect>(reason));
     netManager_->serverShutdown();
     disconnected = true;
@@ -189,11 +189,21 @@ void NetServerHandler::sendInventory() {
 }
 
 int NetServerHandler::getHeldItemId() const {
-    return heldItem_ ? heldItem_->itemID : 0;
+    return heldItemId_;
 }
 
-void NetServerHandler::restoreHeldItem(int itemId) {    int lastSlot = static_cast<int>(player_->inventory.mainInventory.size()) - 1;
-    heldItem_ = itemId > 0 ? new ItemStack(itemId, 1, 0) : nullptr;
+void NetServerHandler::restoreHeldItem(int itemId) {
+    heldItemId_ = itemId;
+    int lastSlot = static_cast<int>(player_->inventory.mainInventory.size()) - 1;
+    player_->inventory.mainInventory[lastSlot] = nullptr;
+    if (itemId <= 0) { player_->inventory.currentItem = 0; return; }
+    for (int i = 0; i < lastSlot; ++i) {
+        auto* s = player_->inventory.mainInventory[i];
+        if (s && s->itemID == itemId) { player_->inventory.currentItem = i; return; }
+    }
+    // Not in inventory yet
+    delete heldItem_;
+    heldItem_ = new ItemStack(itemId, 1, 0);
     player_->inventory.currentItem = lastSlot;
     player_->inventory.mainInventory[lastSlot] = heldItem_;
 }
@@ -289,10 +299,17 @@ void NetServerHandler::handlePlayerLookMove(Packet13PlayerLookMove& pkt) {
 }
 
 void NetServerHandler::handleBlockDig(Packet14BlockDig& pkt) {
-    // Mirrors Java: restore current slot from held item before processing dig
-    int lastSlot = static_cast<int>(player_->inventory.mainInventory.size()) - 1;
-    player_->inventory.mainInventory[lastSlot] = heldItem_;
-    player_->inventory.currentItem = lastSlot;
+    // Sync currentItem to the real slot holding heldItemId_
+    if (heldItemId_ > 0) {
+        int lastSlot = static_cast<int>(player_->inventory.mainInventory.size()) - 1;
+        for (int i = 0; i < lastSlot; ++i) {
+            auto* s = player_->inventory.mainInventory[i];
+            if (s && s->itemID == heldItemId_) {
+                player_->inventory.currentItem = i;
+                break;
+            }
+        }
+    }
 
     bool isOp = mcServer_->configManager->isOp(player_->username);
     bool checkDist = false;
@@ -352,39 +369,39 @@ void NetServerHandler::handlePlace(Packet15Place& pkt) {
         }
     } else {
         int x = pkt.x;
-        int y = (int)(uint8_t)pkt.y;
+        int y = pkt.y & 0xFF;  // treat as unsigned byte: 0-255
         int z = pkt.z;
-        int direction = (int)(uint8_t)pkt.direction;
+        int direction = pkt.direction & 0xFF;
         
         int distX = std::abs(x - mcServer_->worldMngr->spawnX);
         int distZ = std::abs(z - mcServer_->worldMngr->spawnZ);
         int dist = std::max(distX, distZ);
         
         if (dist > 16 || isOp) {
-            // In Alpha, Packet15 carries the itemId the client is holding.
-            // Use it directly — server inventory may be out of sync.
+            // Find the actual inventory slot for this item
             ItemStack* itemstack = nullptr;
-            ItemStack fromPacket;
             if (pkt.itemId >= 0) {
-                // Find matching slot in inventory to get correct stackSize/damage,
-                // but trust pkt.itemId as the actual item being placed.
                 ItemStack* held = player_->inventory.getCurrentItem();
                 if (held && held->itemID == pkt.itemId) {
                     itemstack = held;
                 } else {
-                    // Scan all slots for this itemId
                     for (auto* s : player_->inventory.mainInventory) {
                         if (s && s->itemID == pkt.itemId) { itemstack = s; break; }
                     }
                 }
-                // Fallback: construct a temporary stack from packet
-                if (!itemstack) {
-                    fromPacket = ItemStack(pkt.itemId, 1, 0);
-                    itemstack = &fromPacket;
-                }
             }
-            player_->itemInWorldManager->activeBlockOrUseItem(
-                player_, mcServer_->worldMngr.get(), itemstack, x, y, z, direction);
+
+            bool placed = false;
+            if (itemstack) {
+                placed = player_->itemInWorldManager->activeBlockOrUseItem(
+                    player_, mcServer_->worldMngr.get(), itemstack, x, y, z, direction);
+            } else if (pkt.itemId >= 0) {
+                // Item not in inventory (creative/cheat) — use temporary stack
+                ItemStack tmp(pkt.itemId, 1, 0);
+                placed = player_->itemInWorldManager->activeBlockOrUseItem(
+                    player_, mcServer_->worldMngr.get(), &tmp, x, y, z, direction);
+            }
+            (void)placed;
         }
         
         // Always send block update at clicked position (rollback for client if rejected)
@@ -408,19 +425,32 @@ void NetServerHandler::handlePlace(Packet15Place& pkt) {
 }
 
 void NetServerHandler::handleBlockItemSwitch(Packet16BlockItemSwitch& pkt) {
-    // Mirrors Java: store item in field_10_k, set currentItem to last slot, write to inventory
     int lastSlot = static_cast<int>(player_->inventory.mainInventory.size()) - 1;
-    player_->inventory.currentItem = lastSlot;
+    // lastSlot is never owned — always nullptr to avoid aliasing
+    player_->inventory.mainInventory[lastSlot] = nullptr;
+
+    heldItemId_ = pkt.itemId;
 
     if (pkt.itemId == 0) {
-        heldItem_ = nullptr;
-    } else {
-        // Reuse existing heldItem_ if same id, otherwise create new
-        if (!heldItem_ || heldItem_->itemID != pkt.itemId) {
-            heldItem_ = new ItemStack(pkt.itemId, 1, 0);
+        player_->inventory.currentItem = 0;
+        return;
+    }
+
+    // Point currentItem at the real slot
+    for (int i = 0; i < lastSlot; ++i) {
+        auto* s = player_->inventory.mainInventory[i];
+        if (s && s->itemID == pkt.itemId) {
+            player_->inventory.currentItem = i;
+            return;
         }
     }
 
+    // Not in inventory yet — use placeholder in lastSlot
+    if (!heldItem_ || heldItem_->itemID != pkt.itemId) {
+        delete heldItem_;
+        heldItem_ = new ItemStack(pkt.itemId, 1, 0);
+    }
+    player_->inventory.currentItem = lastSlot;
     player_->inventory.mainInventory[lastSlot] = heldItem_;
 }
 
@@ -440,27 +470,42 @@ void NetServerHandler::handleKickDisconnect(Packet255KickDisconnect& pkt) {
 }
 
 void NetServerHandler::handlePlayerInventory(Packet5PlayerInventory& pkt) {
-    auto applySlots = [](std::vector<ItemStack*>& inv, const std::vector<Packet5PlayerInventory::SlotData>& slots, int skipSlot = -1) {
+    auto applySlots = [](std::vector<ItemStack*>& inv, const std::vector<Packet5PlayerInventory::SlotData>& slots, int skipSlot) {
         size_t count = std::min(slots.size(), inv.size());
         for (size_t i = 0; i < count; i++) {
-            if ((int)i == skipSlot) continue; // don't overwrite heldItem_ slot
+            if ((int)i == skipSlot) continue;
             delete inv[i];
             int16_t id = slots[i].itemId;
-            if (id >= 0 && id < 32000) {
-                inv[i] = new ItemStack(id, slots[i].count, slots[i].damage);
-            } else {
-                inv[i] = nullptr;
-            }
+            inv[i] = (id >= 0 && id < 32000) ? new ItemStack(id, slots[i].count, slots[i].damage) : nullptr;
         }
     };
 
     if (pkt.type == -1) {
         int lastSlot = static_cast<int>(player_->inventory.mainInventory.size()) - 1;
+        // lastSlot is a non-owning alias slot — skip it, manage separately
         applySlots(player_->inventory.mainInventory, pkt.slots, lastSlot);
+        // Re-sync currentItem
+        if (heldItemId_ > 0) {
+            bool found = false;
+            for (int i = 0; i < lastSlot; ++i) {
+                auto* s = player_->inventory.mainInventory[i];
+                if (s && s->itemID == heldItemId_) {
+                    player_->inventory.currentItem = i;
+                    player_->inventory.mainInventory[lastSlot] = nullptr;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                // Item depleted from inventory — clear held
+                heldItemId_ = 0;
+                player_->inventory.mainInventory[lastSlot] = nullptr;
+            }
+        }
     } else if (pkt.type == -2)
-        applySlots(player_->inventory.craftingInventory, pkt.slots);
+        applySlots(player_->inventory.craftingInventory, pkt.slots, -1);
     else if (pkt.type == -3)
-        applySlots(player_->inventory.armorInventory, pkt.slots);
+        applySlots(player_->inventory.armorInventory, pkt.slots, -1);
 }
 
 void NetServerHandler::handlePickupSpawn(Packet21PickupSpawn& pkt) {
@@ -481,7 +526,7 @@ void NetServerHandler::handlePickupSpawn(Packet21PickupSpawn& pkt) {
 
 void NetServerHandler::handleErrorMessage(const std::string& reason) {
     std::cout << "[INFO] " << player_->username << " lost connection: " << reason << std::endl;
-    player_->savedHeldItemId = heldItem_ ? heldItem_->itemID : 0;
+    player_->savedHeldItemId = heldItemId_;
     disconnected = true;
     mcServer_->configManager->broadcastPacket(
         std::make_unique<Packet3Chat>("\u00a7e" + player_->username + " left the game."));
