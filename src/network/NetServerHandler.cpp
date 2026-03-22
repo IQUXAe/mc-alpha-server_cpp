@@ -4,6 +4,7 @@
 #include "../entity/EntityPlayerMP.h"
 #include "../world/Chunk.h"
 #include "../block/Block.h"
+#include "../entity/EntityItem.h"
 
 #include <iostream>
 #include <algorithm>
@@ -158,6 +159,33 @@ void NetServerHandler::teleport(double x, double y, double z, float yaw, float p
     sendPacket(std::make_unique<Packet13PlayerLookMove>(x, y + 1.6200000047683716, y, z, yaw, pitch, false));
 }
 
+void NetServerHandler::sendInventory() {
+    // Exactly mirrors Java's NetServerHandler.func_40_d()
+    // Sends Packet5 for each inventory section: type -1=main, -2=crafting, -3=armor
+    
+    auto buildPacket = [](int type, const std::vector<ItemStack*>& stacks) {
+        auto pkt = std::make_unique<Packet5PlayerInventory>();
+        pkt->type = type;
+        pkt->slots.resize(stacks.size());
+        for (size_t i = 0; i < stacks.size(); i++) {
+            if (stacks[i] != nullptr && stacks[i]->stackSize > 0) {
+                pkt->slots[i].itemId = static_cast<int16_t>(stacks[i]->itemID);
+                pkt->slots[i].count = static_cast<int8_t>(stacks[i]->stackSize);
+                pkt->slots[i].damage = static_cast<int16_t>(stacks[i]->itemDamage);
+            } else {
+                pkt->slots[i].itemId = -1;
+                pkt->slots[i].count = 0;
+                pkt->slots[i].damage = 0;
+            }
+        }
+        return pkt;
+    };
+    
+    sendPacket(buildPacket(-1, player_->inventory.mainInventory));
+    sendPacket(buildPacket(-2, player_->inventory.craftingInventory));
+    sendPacket(buildPacket(-3, player_->inventory.armorInventory));
+}
+
 void NetServerHandler::sendChunks() {
     int chunkX = static_cast<int>(player_->posX) >> 4;
     int chunkZ = static_cast<int>(player_->posZ) >> 4;
@@ -249,57 +277,103 @@ void NetServerHandler::handlePlayerLookMove(Packet13PlayerLookMove& pkt) {
 }
 
 void NetServerHandler::handleBlockDig(Packet14BlockDig& pkt) {
-    int realX = pkt.x;
-    int realY = pkt.y;
-    int realZ = pkt.z;
+    bool isOp = mcServer_->configManager->isOp(player_->username);
+    bool checkDist = false;
+    
+    if (pkt.status == 0) checkDist = true;
+    if (pkt.status == 1) checkDist = true;
+    
+    int x = pkt.x;
+    int y = pkt.y;
+    int z = pkt.z;
+    int face = pkt.face;
 
-    // In Alpha, status 2/3 often sends 0,0,0 coordinates
-    if ((pkt.status == 2 || pkt.status == 3) && pkt.x == 0 && pkt.y == 0 && pkt.z == 0) {
-        realX = player_->miningStartX;
-        realY = player_->miningStartY;
-        realZ = player_->miningStartZ;
+    std::cout << "[DEBUG] BlockDig status=" << (int)pkt.status << " at " << x << "," << y << "," << z << std::endl;
+    
+    if (checkDist) {
+        double dX = player_->posX - (x + 0.5);
+        double dY = player_->posY - (y + 0.5);
+        double dZ = player_->posZ - (z + 0.5);
+        if (dX * dX + dY * dY + dZ * dZ > 36.0) {
+            return;
+        }
     }
-
-    std::cout << "[DEBUG] Dig packet: status=" << (int)pkt.status << " x=" << realX << " y=" << (int)realY << " z=" << realZ << std::endl;
-
+    
+    int distFromSpawnX = std::abs(x - mcServer_->getSpawnX());
+    int distFromSpawnZ = std::abs(z - mcServer_->getSpawnZ());
+    int distFromSpawn = std::max(distFromSpawnX, distFromSpawnZ);
+    
     if (pkt.status == 0) {
-        player_->miningStartX = realX;
-        player_->miningStartY = realY;
-        player_->miningStartZ = realZ;
-        player_->miningStartTime = mcServer_->getWorldTime();
-        
-        uint8_t id = mcServer_->worldMngr->getBlockId(realX, realY, realZ);
-        // Instant-break for decorations
-        if (id == 37 || id == 38 || id == 39 || id == 40 || id == 50 || id == 51 || id == 55 || id == 59 || id == 83) {
-            mcServer_->worldMngr->setBlockWithNotify(realX, realY, realZ, 0);
-            if (Block::blocksList[id]) {
-                Block::blocksList[id]->dropBlockAsItem(mcServer_->worldMngr.get(), realX, realY, realZ, 0);
-            }
+        if (distFromSpawn > 16 || isOp) {
+            player_->itemInWorldManager->onBlockClicked(x, y, z, face);
         }
     } else if (pkt.status == 2) {
-        uint8_t id = mcServer_->worldMngr->getBlockId(realX, realY, realZ);
-        if (id == 0) return;
-
-        std::cout << "[DEBUG] Block broken at: " << realX << "," << realY << "," << realZ << " (id=" << (int)id << ")" << std::endl;
-        
-        mcServer_->worldMngr->setBlockWithNotify(realX, realY, realZ, 0);
-        if (Block::blocksList[id]) {
-            Block::blocksList[id]->dropBlockAsItemWithChance(mcServer_->worldMngr.get(), realX, realY, realZ, 0, 1.0f);
+        player_->itemInWorldManager->cancelRemoving();
+    } else if (pkt.status == 1) {
+        if (distFromSpawn > 16 || isOp) {
+            player_->itemInWorldManager->blockRemoving(x, y, z, face);
         }
     } else if (pkt.status == 3) {
-        // Mining aborted - do nothing, just log
-        std::cout << "[DEBUG] Mining aborted by client at: " << realX << "," << realY << "," << realZ << std::endl;
+        double dX = player_->posX - (x + 0.5);
+        double dY = player_->posY - (y + 0.5);
+        double dZ = player_->posZ - (z + 0.5);
+        if (dX * dX + dY * dY + dZ * dZ < 256.0) {
+            sendPacket(std::make_unique<Packet53BlockChange>(x, y, z, 
+                mcServer_->worldMngr->getBlockId(x, y, z), 
+                mcServer_->worldMngr->getBlockMetadata(x, y, z)));
+        }
     }
 }
 
 void NetServerHandler::handlePlace(Packet15Place& pkt) {
-    // TODO: Implement block placing
-    std::cout << "[DEBUG] Place at " << pkt.x << ", " << (int)pkt.y << ", " << pkt.z
-              << " dir=" << (int)pkt.direction << " item=" << pkt.itemId << std::endl;
+    bool isOp = mcServer_->configManager->isOp(player_->username);
+    
+    if (pkt.direction == -1) {
+        // direction == 255 unsigned = -1 signed: right-click in air, use item
+        ItemStack* itemstack = player_->inventory.getCurrentItem();
+        if (itemstack) {
+            player_->itemInWorldManager->useItem(player_, mcServer_->worldMngr.get(), itemstack);
+        }
+    } else {
+        int x = pkt.x;
+        int y = (int)(uint8_t)pkt.y;
+        int z = pkt.z;
+        int direction = (int)(uint8_t)pkt.direction;
+        
+        int distX = std::abs(x - mcServer_->worldMngr->spawnX);
+        int distZ = std::abs(z - mcServer_->worldMngr->spawnZ);
+        int dist = std::max(distX, distZ);
+        
+        if (dist > 16 || isOp) {
+            ItemStack* itemstack = player_->inventory.getCurrentItem();
+            player_->itemInWorldManager->activeBlockOrUseItem(
+                player_, mcServer_->worldMngr.get(), itemstack, x, y, z, direction);
+        }
+        
+        // Always send block update at clicked position (rollback for client if rejected)
+        sendPacket(std::make_unique<Packet53BlockChange>(x, y, z,
+            mcServer_->worldMngr->getBlockId(x, y, z),
+            mcServer_->worldMngr->getBlockMetadata(x, y, z)));
+        
+        // Also send block update at adjacen face (where new block would be placed)
+        int nx = x, ny = y, nz = z;
+        if (direction == 0) --ny;
+        else if (direction == 1) ++ny;
+        else if (direction == 2) --nz;
+        else if (direction == 3) ++nz;
+        else if (direction == 4) --nx;
+        else if (direction == 5) ++nx;
+        
+        sendPacket(std::make_unique<Packet53BlockChange>(nx, ny, nz,
+            mcServer_->worldMngr->getBlockId(nx, ny, nz),
+            mcServer_->worldMngr->getBlockMetadata(nx, ny, nz)));
+    }
 }
 
 void NetServerHandler::handleBlockItemSwitch(Packet16BlockItemSwitch& pkt) {
-    // TODO: Update player's held item
+    if (pkt.itemId >= 0 && pkt.itemId < 9) {
+        player_->inventory.currentItem = pkt.itemId;
+    }
 }
 
 void NetServerHandler::handleArmAnimation(Packet18ArmAnimation& pkt) {
@@ -311,6 +385,44 @@ void NetServerHandler::handleArmAnimation(Packet18ArmAnimation& pkt) {
 
 void NetServerHandler::handleKickDisconnect(Packet255KickDisconnect& pkt) {
     netManager_->shutdown("Quitting");
+}
+
+void NetServerHandler::handlePlayerInventory(Packet5PlayerInventory& pkt) {
+    auto applySlots = [](std::vector<ItemStack*>& inv, const std::vector<Packet5PlayerInventory::SlotData>& slots) {
+        size_t count = std::min(slots.size(), inv.size());
+        for (size_t i = 0; i < count; i++) {
+            delete inv[i];
+            int16_t id = slots[i].itemId;
+            if (id >= 0 && id < 32000) {
+                inv[i] = new ItemStack(id, slots[i].count, slots[i].damage);
+            } else {
+                inv[i] = nullptr;
+            }
+        }
+    };
+
+    if (pkt.type == -1)
+        applySlots(player_->inventory.mainInventory, pkt.slots);
+    else if (pkt.type == -2)
+        applySlots(player_->inventory.craftingInventory, pkt.slots);
+    else if (pkt.type == -3)
+        applySlots(player_->inventory.armorInventory, pkt.slots);
+}
+
+void NetServerHandler::handlePickupSpawn(Packet21PickupSpawn& pkt) {
+    double px = pkt.x / 32.0;
+    double py = pkt.y / 32.0;
+    double pz = pkt.z / 32.0;
+    
+    // In Alpha, we'd spawn EntityItem directly
+    auto* drop = new EntityItem(pkt.itemId, pkt.count, 0); 
+    drop->setPosition(px, py, pz);
+    drop->motionX = pkt.rotation / 128.0;
+    drop->motionY = pkt.pitch / 128.0;
+    drop->motionZ = pkt.roll / 128.0;
+    drop->pickupDelay = 10;
+    
+    mcServer_->worldMngr->spawnEntityInWorld(std::unique_ptr<Entity>(drop));
 }
 
 void NetServerHandler::handleErrorMessage(const std::string& reason) {

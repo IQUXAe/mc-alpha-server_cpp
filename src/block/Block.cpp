@@ -274,21 +274,21 @@ void Block::dropBlockAsItem(World* world, int x, int y, int z, int metadata) {
 }
 
 void Block::dropBlockAsItemWithChance(World* world, int x, int y, int z, int metadata, float chance) {
-    if (world->mcServer && world->mcServer->configManager) { // check if server is active
+    if (world->mcServer && world->mcServer->configManager) {
         int dropId = idDropped(metadata);
         if (dropId > 0) {
             int count = quantityDropped();
             for (int i = 0; i < count; ++i) {
-                // In Alpha, we apply some random motion
                 auto entity = std::make_unique<EntityItem>(dropId, 1, metadata);
-                entity->setPosition(x + 0.5, y + 0.5, z + 0.5);
-                
-                // Random motion
+                // Spawn slightly above block center so it doesn't get stuck inside
+                entity->setPosition(x + 0.5, y + 0.7, z + 0.5);
+                entity->worldObj = world;
+
                 std::uniform_real_distribution<double> dist(-0.1, 0.1);
                 entity->motionX = dist(world->rand);
-                entity->motionY = 0.2; // slight upward bounce
+                entity->motionY = 0.2;
                 entity->motionZ = dist(world->rand);
-                
+
                 world->spawnEntityInWorld(std::move(entity));
             }
         }
@@ -297,6 +297,31 @@ void Block::dropBlockAsItemWithChance(World* world, int x, int y, int z, int met
 
 float Block::checkHardness(EntityPlayer* player) const {
     if (blockHardness < 0.0f) return 0.0f; // Unbreakable
-    // Depending on what player holds...
-    return 1.0f / blockHardness / 100.0f;
+    
+    // Simplistic version. Proper version would call player->getCurrentPlayerStrVsBlock(this);
+    // Since we don't have that fully integrated across EntityPlayerMP->Inventory yet,
+    // let's do a basic emulation. Hand = 1.0f str.
+    float str = 1.0f;
+    
+    // Cast player to EntityPlayerMP for inventory access, if valid
+    // For now we'll just check canHarvest:
+    // If you can't harvest, it takes 3.33x longer (100 vs 30)
+    // Actually wait, canHarvestBlock(player) isn't correctly implemented yet.
+    // In Alpha, you can harvest dirt with hand, so it returns true.
+    // If you can harvest, divisor is 30. If not, 100.
+    
+    bool canHarvest = true;
+    // We already have check against BlockStone that overrides it to false for hand
+    if (!this->canHarvestBlock(player)) {
+        canHarvest = false; 
+        // We'd correctly check player's inventory here, but for now block's inherent canHarvest is a good fallback
+    } else {
+        canHarvest = true;
+    }
+
+    if (!canHarvest) {
+        return str / blockHardness / 100.0f;
+    } else {
+        return str / blockHardness / 30.0f;
+    }
 }
