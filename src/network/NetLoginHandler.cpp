@@ -94,6 +94,11 @@ void NetLoginHandler::doLogin(Packet1Login& pkt) {
         // Complete player login
         mcServer_->configManager->playerLoggedIn(player);
 
+        // Restore held item from saved state (mirrors Java's field_10_k)
+        if (player->savedHeldItemId > 0) {
+            serverHandler->restoreHeldItem(player->savedHeldItemId);
+        }
+
         // Send position
         serverHandler->teleport(player->posX, player->posY, player->posZ, player->rotationYaw, player->rotationPitch);
         

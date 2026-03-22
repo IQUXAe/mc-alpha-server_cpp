@@ -31,6 +31,9 @@ public:
     int64_t miningStartTime = 0;
     int miningTicks = -1;
 
+    // Persisted held item id (restored into NetServerHandler on login)
+    int savedHeldItemId = 0;
+
     EntityPlayerMP(MinecraftServer* server, World* world, const std::string& name)
         : mcServer(server), inventory(this) {
         this->worldObj = world;
@@ -82,8 +85,8 @@ public:
         // Health
         nbt->setShort("Health", health);
         
-        // Current item slot
-        nbt->setInt("CurrentItem", inventory.currentItem);
+        // Held item (what the player is holding, mirrors field_10_k)
+        nbt->setInt("HeldItemId", savedHeldItemId);
         
         // Inventory
         auto invTag = std::make_shared<NBTCompound>();
@@ -104,8 +107,8 @@ public:
         // Health
         health = nbt->getShort("Health");
         
-        // Current item slot
-        inventory.currentItem = nbt->getInt("CurrentItem");
+        // Held item
+        savedHeldItemId = nbt->getInt("HeldItemId");
         
         // Inventory
         auto invTag = nbt->getCompound("Inventory");

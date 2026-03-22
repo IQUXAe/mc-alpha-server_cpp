@@ -136,6 +136,7 @@ void NetServerHandler::tick() {
 void NetServerHandler::kick(const std::string& reason) {
     if (disconnected) return;
     std::cout << "[INFO] Disconnecting " << player_->username << ": " << reason << std::endl;
+    player_->savedHeldItemId = heldItem_ ? heldItem_->itemID : 0;
     sendPacket(std::make_unique<Packet255KickDisconnect>(reason));
     netManager_->serverShutdown();
     disconnected = true;
@@ -184,6 +185,13 @@ void NetServerHandler::sendInventory() {
     sendPacket(buildPacket(-1, player_->inventory.mainInventory));
     sendPacket(buildPacket(-2, player_->inventory.craftingInventory));
     sendPacket(buildPacket(-3, player_->inventory.armorInventory));
+}
+
+void NetServerHandler::restoreHeldItem(int itemId) {
+    int lastSlot = static_cast<int>(player_->inventory.mainInventory.size()) - 1;
+    heldItem_ = itemId > 0 ? new ItemStack(itemId, 1, 0) : nullptr;
+    player_->inventory.currentItem = lastSlot;
+    player_->inventory.mainInventory[lastSlot] = heldItem_;
 }
 
 void NetServerHandler::sendChunks() {
@@ -277,6 +285,11 @@ void NetServerHandler::handlePlayerLookMove(Packet13PlayerLookMove& pkt) {
 }
 
 void NetServerHandler::handleBlockDig(Packet14BlockDig& pkt) {
+    // Mirrors Java: restore current slot from held item before processing dig
+    int lastSlot = static_cast<int>(player_->inventory.mainInventory.size()) - 1;
+    player_->inventory.mainInventory[lastSlot] = heldItem_;
+    player_->inventory.currentItem = lastSlot;
+
     bool isOp = mcServer_->configManager->isOp(player_->username);
     bool checkDist = false;
     
@@ -391,17 +404,20 @@ void NetServerHandler::handlePlace(Packet15Place& pkt) {
 }
 
 void NetServerHandler::handleBlockItemSwitch(Packet16BlockItemSwitch& pkt) {
-    // In Alpha, Packet16.itemId is the itemID being held (not slot number)
-    // Store it in the last slot of mainInventory (mirrors Java behavior)
+    // Mirrors Java: store item in field_10_k, set currentItem to last slot, write to inventory
     int lastSlot = static_cast<int>(player_->inventory.mainInventory.size()) - 1;
     player_->inventory.currentItem = lastSlot;
 
-    delete player_->inventory.mainInventory[lastSlot];
-    if (pkt.itemId > 0) {
-        player_->inventory.mainInventory[lastSlot] = new ItemStack(pkt.itemId, 1, 0);
+    if (pkt.itemId == 0) {
+        heldItem_ = nullptr;
     } else {
-        player_->inventory.mainInventory[lastSlot] = nullptr;
+        // Reuse existing heldItem_ if same id, otherwise create new
+        if (!heldItem_ || heldItem_->itemID != pkt.itemId) {
+            heldItem_ = new ItemStack(pkt.itemId, 1, 0);
+        }
     }
+
+    player_->inventory.mainInventory[lastSlot] = heldItem_;
 }
 
 void NetServerHandler::handleArmAnimation(Packet18ArmAnimation& pkt) {
@@ -416,9 +432,10 @@ void NetServerHandler::handleKickDisconnect(Packet255KickDisconnect& pkt) {
 }
 
 void NetServerHandler::handlePlayerInventory(Packet5PlayerInventory& pkt) {
-    auto applySlots = [](std::vector<ItemStack*>& inv, const std::vector<Packet5PlayerInventory::SlotData>& slots) {
+    auto applySlots = [](std::vector<ItemStack*>& inv, const std::vector<Packet5PlayerInventory::SlotData>& slots, int skipSlot = -1) {
         size_t count = std::min(slots.size(), inv.size());
         for (size_t i = 0; i < count; i++) {
+            if ((int)i == skipSlot) continue; // don't overwrite heldItem_ slot
             delete inv[i];
             int16_t id = slots[i].itemId;
             if (id >= 0 && id < 32000) {
@@ -429,9 +446,10 @@ void NetServerHandler::handlePlayerInventory(Packet5PlayerInventory& pkt) {
         }
     };
 
-    if (pkt.type == -1)
-        applySlots(player_->inventory.mainInventory, pkt.slots);
-    else if (pkt.type == -2)
+    if (pkt.type == -1) {
+        int lastSlot = static_cast<int>(player_->inventory.mainInventory.size()) - 1;
+        applySlots(player_->inventory.mainInventory, pkt.slots, lastSlot);
+    } else if (pkt.type == -2)
         applySlots(player_->inventory.craftingInventory, pkt.slots);
     else if (pkt.type == -3)
         applySlots(player_->inventory.armorInventory, pkt.slots);
@@ -455,6 +473,7 @@ void NetServerHandler::handlePickupSpawn(Packet21PickupSpawn& pkt) {
 
 void NetServerHandler::handleErrorMessage(const std::string& reason) {
     std::cout << "[INFO] " << player_->username << " lost connection: " << reason << std::endl;
+    player_->savedHeldItemId = heldItem_ ? heldItem_->itemID : 0;
     disconnected = true;
     mcServer_->configManager->broadcastPacket(
         std::make_unique<Packet3Chat>("\u00a7e" + player_->username + " left the game."));

@@ -25,7 +25,8 @@ public:
     void sendPacket(std::unique_ptr<Packet> pkt);
     void teleport(double x, double y, double z, float yaw, float pitch);
     void sendChunks();
-    void sendInventory();  // Equivalent to Java's NetServerHandler.func_40_d()
+    void sendInventory();
+    void restoreHeldItem(int itemId);  // called on login to restore saved held item
     bool hasChunkLoaded(int64_t key) const { return sentChunks_.find(key) != sentChunks_.end(); }
     std::unordered_set<int64_t> sentChunks_;
 
@@ -49,6 +50,7 @@ private:
     std::unique_ptr<NetworkManager> netManager_;
     EntityPlayerMP* player_;
     int tickCounter_ = 0;
+    ItemStack* heldItem_ = nullptr; // mirrors Java's field_10_k
 
     // Anti-cheat: track last known position
     double lastX_ = 0.0, lastY_ = 0.0, lastZ_ = 0.0;
