@@ -52,6 +52,7 @@ public:
     bool isOp(const std::string& name) const;
 
     void savePlayerStates();
+    void syncHeldItems(); // sync heldItem_ -> savedHeldItemId before save
 
 private:
     MinecraftServer* mcServer_;

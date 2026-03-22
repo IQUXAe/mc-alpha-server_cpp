@@ -1,263 +1,258 @@
 #include "EntityTracker.h"
+#include "EntityItem.h"
+#include "EntityLiving.h"
 #include "../MinecraftServer.h"
-#include "../core/Logger.h"
 #include <cmath>
 #include <algorithm>
 
-EntityTracker::EntityTracker(MinecraftServer* server)
-    : mcServer_(server) {
+// ─── TrackerEntry helpers ────────────────────────────────────────────────────
+
+std::unique_ptr<Packet> TrackerEntry::makeSpawnPacket() const {
+    int fx = (int)(entity->posX * 32.0);
+    int fy = (int)(entity->posY * 32.0);
+    int fz = (int)(entity->posZ * 32.0);
+    int yaw   = (int)(entity->rotationYaw   * 256.0f / 360.0f);
+    int pitch = (int)(entity->rotationPitch * 256.0f / 360.0f);
+
+    if (auto* p = dynamic_cast<EntityPlayerMP*>(entity)) {
+        auto pkt = std::make_unique<Packet20NamedEntitySpawn>();
+        pkt->entityId    = entity->entityId;
+        pkt->name        = p->username;
+        pkt->x           = fx;
+        pkt->y           = fy;
+        pkt->z           = fz;
+        pkt->rotation    = (int8_t)(yaw   & 0xFF);
+        pkt->pitch       = (int8_t)(pitch & 0xFF);
+        pkt->currentItem = (int16_t)lastHeldItemId;
+        return pkt;
+    }
+
+    if (auto* item = dynamic_cast<EntityItem*>(entity)) {
+        auto pkt = std::make_unique<Packet21PickupSpawn>();
+        pkt->entityId = entity->entityId;
+        pkt->itemId   = (int16_t)item->itemID;
+        pkt->count    = (int8_t)item->count;
+        pkt->x        = fx;
+        pkt->y        = fy;
+        pkt->z        = fz;
+        pkt->rotation = 0;
+        pkt->pitch    = 0;
+        pkt->roll     = 0;
+        return pkt;
+    }
+
+    // Fallback: generic mob spawn (type 0 = pig, just so client doesn't crash)
+    auto pkt = std::make_unique<Packet24MobSpawn>();
+    pkt->entityId = entity->entityId;
+    pkt->type     = 90; // pig
+    pkt->x        = fx;
+    pkt->y        = fy;
+    pkt->z        = fz;
+    pkt->yaw      = (int8_t)(yaw   & 0xFF);
+    pkt->pitch    = (int8_t)(pitch & 0xFF);
+    return pkt;
 }
 
+void TrackerEntry::sendSpawnTo(EntityPlayerMP* player) const {
+    if (!player || !player->netHandler) return;
+    auto spawnPkt = makeSpawnPacket();
+    if (spawnPkt) player->netHandler->sendPacket(std::move(spawnPkt));
+
+    // Send velocity for items/projectiles
+    if (sendVelocity && (entity->motionX != 0 || entity->motionY != 0 || entity->motionZ != 0)) {
+        player->netHandler->sendPacket(std::make_unique<Packet28EntityVelocity>(
+            entity->entityId, entity->motionX, entity->motionY, entity->motionZ));
+    }
+
+    // If already sneaking, tell the new observer
+    if (auto* living = dynamic_cast<EntityLiving*>(entity)) {
+        if (living->isSneaking)
+            player->netHandler->sendPacket(
+                std::make_unique<Packet18ArmAnimation>(entity->entityId, 104));
+    }
+}
+
+void TrackerEntry::broadcast(std::unique_ptr<Packet> pkt) const {
+    for (auto* p : trackingPlayers) {
+        if (p && p->netHandler) p->netHandler->sendPacket(pkt->clone());
+    }
+}
+
+void TrackerEntry::broadcastIncludingSelf(std::unique_ptr<Packet> pkt) const {
+    broadcast(pkt->clone());
+    if (auto* p = dynamic_cast<EntityPlayerMP*>(entity)) {
+        if (p->netHandler) p->netHandler->sendPacket(std::move(pkt));
+    }
+}
+
+void TrackerEntry::updateTracking(const std::vector<EntityPlayerMP*>& allPlayers) {
+    for (auto* player : allPlayers) {
+        if (!player) continue;
+
+        double dx = player->posX - (double)(lastFixedX / 32);
+        double dz = player->posZ - (double)(lastFixedZ / 32);
+        bool inRange = dx >= -trackingRange && dx <= trackingRange
+                    && dz >= -trackingRange && dz <= trackingRange;
+
+        bool alreadyTracking = trackingPlayers.count(player) > 0;
+
+        if (inRange && !alreadyTracking && player != entity) {
+            trackingPlayers.insert(player);
+            sendSpawnTo(player);
+        } else if (!inRange && alreadyTracking) {
+            trackingPlayers.erase(player);
+            player->netHandler->sendPacket(
+                std::make_unique<Packet29DestroyEntity>(entity->entityId));
+        }
+    }
+}
+
+void TrackerEntry::sendUpdates() {
+    if (tickCounter++ % updateRate != 0) return;
+
+    int fx = (int)(entity->posX * 32.0);
+    int fy = (int)(entity->posY * 32.0);
+    int fz = (int)(entity->posZ * 32.0);
+    int yaw   = (int)(entity->rotationYaw   * 256.0f / 360.0f);
+    int pitch = (int)(entity->rotationPitch * 256.0f / 360.0f);
+
+    int dx = fx - lastFixedX;
+    int dy = fy - lastFixedY;
+    int dz = fz - lastFixedZ;
+    bool moved  = dx != 0 || dy != 0 || dz != 0;
+    bool turned = yaw != lastYawByte || pitch != lastPitchByte;
+
+    if (moved || turned) {
+        std::unique_ptr<Packet> movePkt;
+
+        if (dx >= -128 && dx < 128 && dy >= -128 && dy < 128 && dz >= -128 && dz < 128) {
+            if (moved && turned)
+                movePkt = std::make_unique<Packet33RelEntityMoveLook>(
+                    entity->entityId, (int8_t)dx, (int8_t)dy, (int8_t)dz,
+                    (int8_t)yaw, (int8_t)pitch);
+            else if (moved)
+                movePkt = std::make_unique<Packet31RelEntityMove>(
+                    entity->entityId, (int8_t)dx, (int8_t)dy, (int8_t)dz);
+            else
+                movePkt = std::make_unique<Packet32EntityLook>(
+                    entity->entityId, (int8_t)yaw, (int8_t)pitch);
+        } else {
+            movePkt = std::make_unique<Packet34EntityTeleport>(
+                entity->entityId, fx, fy, fz, (int8_t)yaw, (int8_t)pitch);
+        }
+
+        broadcast(std::move(movePkt));
+
+        lastFixedX = fx; lastFixedY = fy; lastFixedZ = fz;
+        lastYawByte = yaw; lastPitchByte = pitch;
+    }
+
+    // Held item update for players (Packet16)
+    if (auto* mp = dynamic_cast<EntityPlayerMP*>(entity)) {
+        int heldId = mp->netHandler ? mp->netHandler->getHeldItemId() : 0;
+        if (heldId != lastHeldItemId) {
+            lastHeldItemId = heldId;
+            auto pkt = std::make_unique<Packet16BlockItemSwitch>();
+            pkt->entityId = entity->entityId;
+            pkt->itemId   = (int16_t)heldId;
+            broadcast(std::move(pkt));
+        }
+    }
+
+    // Sneak state update
+    if (auto* living = dynamic_cast<EntityLiving*>(entity)) {
+        if (living->isSneaking != lastSneaking) {
+            lastSneaking = living->isSneaking;
+            broadcast(std::make_unique<Packet18ArmAnimation>(
+                entity->entityId, lastSneaking ? 104 : 105));
+        }
+    }
+}
+
+// ─── EntityTracker ───────────────────────────────────────────────────────────
+
+EntityTracker::EntityTracker(MinecraftServer* server) : mcServer_(server) {}
+
 void EntityTracker::addEntity(Entity* entity) {
-    if (!entity) return;
-    
-    std::lock_guard<std::mutex> lock(trackerMutex_);
-    entities_[entity->entityId] = entity;
-    Logger::debug("EntityTracker: Added entity {} at ({}, {}, {})", 
-                  entity->entityId, entity->posX, entity->posY, entity->posZ);
+    if (!entity || entries_.count(entity->entityId)) return;
+
+    int range, rate;
+    bool vel = false;
+
+    if (dynamic_cast<EntityPlayerMP*>(entity)) {
+        range = 512; rate = 2;
+    } else if (dynamic_cast<EntityItem*>(entity)) {
+        range = 64; rate = 20; vel = true;
+    } else {
+        range = 160; rate = 3;
+    }
+
+    auto entry = std::make_unique<TrackerEntry>(entity, range, rate, vel);
+
+    // If it's a player, send them all existing entities
+    if (auto* newPlayer = dynamic_cast<EntityPlayerMP*>(entity)) {
+        for (auto& [id, e] : entries_) {
+            if (e->entity != entity) {
+                e->sendSpawnTo(newPlayer);
+                e->trackingPlayers.insert(newPlayer);
+            }
+        }
+    }
+
+    // Send this new entity to all players already in range
+    const auto& players = mcServer_->configManager->playerEntities;
+    entry->updateTracking(players);
+
+    entries_[entity->entityId] = std::move(entry);
 }
 
 void EntityTracker::removeEntity(Entity* entity) {
     if (!entity) return;
-    
-    std::lock_guard<std::mutex> lock(trackerMutex_);
-    
-    auto it = entities_.find(entity->entityId);
-    if (it != entities_.end()) {
-        // Notify all tracking players
-        auto trackIt = trackedEntities_.find(entity->entityId);
-        if (trackIt != trackedEntities_.end()) {
-            for (EntityPlayerMP* player : trackIt->second) {
-                if (player && player->netHandler) {
-                    player->sendPacket(std::make_unique<Packet29DestroyEntity>(entity->entityId));
-                }
-            }
-            trackedEntities_.erase(trackIt);
-        }
-        entities_.erase(it);
-        Logger::debug("EntityTracker: Removed entity {}", entity->entityId);
-    }
-}
+    auto it = entries_.find(entity->entityId);
+    if (it == entries_.end()) return;
 
-void EntityTracker::updateEntity(Entity* entity) {
-    // Mark entity as needing update on next tick
-    // Actual sending happens in tick() to batch updates
+    // If it's a player, remove them from all other entries' tracking sets
+    if (auto* leavingPlayer = dynamic_cast<EntityPlayerMP*>(entity)) {
+        for (auto& [id, e] : entries_) {
+            if (e->trackingPlayers.erase(leavingPlayer)) {
+                // No need to send Packet29 to a disconnecting player
+            }
+        }
+    }
+
+    // Notify all players tracking this entity that it's gone
+    it->second->broadcast(
+        std::make_unique<Packet29DestroyEntity>(entity->entityId));
+
+    entries_.erase(it);
 }
 
 void EntityTracker::tick() {
     if (!mcServer_ || !mcServer_->configManager) return;
-    
-    std::lock_guard<std::mutex> lock(trackerMutex_);
-    
-    // Get all players
     const auto& players = mcServer_->configManager->playerEntities;
-    
-    // For each entity, check which players should track it
-    for (auto& [entityId, entity] : entities_) {
-        if (!entity || entity->isDead) continue;
-        
-        std::unordered_set<EntityPlayerMP*> shouldTrackPlayers;
-        
-        // Find all players that should track this entity
-        for (EntityPlayerMP* player : players) {
-            if (!player || player->isDead) continue;
-            
-            if (shouldTrack(entity, player)) {
-                shouldTrackPlayers.insert(player);
-            }
-        }
-        
-        // Get current tracking players
-        auto& currentPlayers = trackingPlayers_[entityId];
-        
-        // Find players to add (newly in range)
-        std::vector<EntityPlayerMP*> toAdd;
-        for (EntityPlayerMP* player : shouldTrackPlayers) {
-            if (currentPlayers.find(player) == currentPlayers.end()) {
-                toAdd.push_back(player);
-            }
-        }
-        
-        // Find players to remove (no longer in range)
-        std::vector<EntityPlayerMP*> toRemove;
-        for (EntityPlayerMP* player : currentPlayers) {
-            if (shouldTrackPlayers.find(player) == shouldTrackPlayers.end()) {
-                toRemove.push_back(player);
-            }
-        }
-        
-        // Add new trackers
-        for (EntityPlayerMP* player : toAdd) {
-            startTracking(entity, player);
-            currentPlayers.insert(player);
-        }
-        
-        // Remove old trackers
-        for (EntityPlayerMP* player : toRemove) {
-            stopTracking(entity, player);
-            currentPlayers.erase(player);
-        }
-        
-        // Send updates to all tracking players
-        for (EntityPlayerMP* player : currentPlayers) {
-            if (player && player->netHandler) {
-                sendUpdatePackets(entity, player);
-            }
-        }
-    }
-    
-    // Clean up dead entities from tracking
-    for (auto it = trackingPlayers_.begin(); it != trackingPlayers_.end(); ) {
-        if (entities_.find(it->first) == entities_.end()) {
-            it = trackingPlayers_.erase(it);
-        } else {
-            ++it;
-        }
+
+    for (auto& [id, entry] : entries_) {
+        if (!entry->entity || entry->entity->isDead) continue;
+        entry->updateTracking(players);
+        entry->sendUpdates();
     }
 }
 
-void EntityTracker::startTracking(Entity* entity, EntityPlayerMP* player) {
-    if (!entity || !player || !player->netHandler) return;
-    
-    Logger::debug("EntityTracker: Player {} now tracking entity {}", 
-                  player->username, entity->entityId);
-    
-    // Send spawn packet
-    sendSpawnPacket(entity, player);
-    
-    // Add to tracked list
-    trackedEntities_[entity->entityId].push_back(player);
+void EntityTracker::broadcastPacket(Entity* entity, std::unique_ptr<Packet> pkt) {
+    auto it = entries_.find(entity->entityId);
+    if (it != entries_.end()) it->second->broadcast(std::move(pkt));
 }
 
-void EntityTracker::stopTracking(Entity* entity, EntityPlayerMP* player) {
-    if (!entity || !player || !player->netHandler) return;
-    
-    Logger::debug("EntityTracker: Player {} stopped tracking entity {}", 
-                  player->username, entity->entityId);
-    
-    // Send destroy packet
-    sendDestroyPacket(entity->entityId, player);
-    
-    // Remove from tracked list
-    auto it = trackedEntities_.find(entity->entityId);
-    if (it != trackedEntities_.end()) {
-        it->second.erase(std::remove(it->second.begin(), it->second.end(), player), 
-                         it->second.end());
-        if (it->second.empty()) {
-            trackedEntities_.erase(it);
+void EntityTracker::broadcastPacketIncludingSelf(Entity* entity, std::unique_ptr<Packet> pkt) {
+    auto it = entries_.find(entity->entityId);
+    if (it != entries_.end()) it->second->broadcastIncludingSelf(std::move(pkt));
+}
+
+void EntityTracker::sendAllToPlayer(EntityPlayerMP* player) {
+    for (auto& [id, entry] : entries_) {
+        if (entry->entity != player) {
+            entry->sendSpawnTo(player);
+            entry->trackingPlayers.insert(player);
         }
-    }
-}
-
-bool EntityTracker::shouldTrack(Entity* entity, EntityPlayerMP* player) const {
-    if (!entity || !player) return false;
-    
-    double dx = entity->posX - player->posX;
-    double dy = entity->posY - player->posY;
-    double dz = entity->posZ - player->posZ;
-    double distSq = dx*dx + dy*dy + dz*dz;
-    
-    return distSq <= (ServerConstants::TRACKING_DISTANCE * ServerConstants::TRACKING_DISTANCE);
-}
-
-void EntityTracker::sendSpawnPacket(Entity* entity, EntityPlayerMP* player) {
-    if (!entity || !player || !player->netHandler) return;
-    
-    // Convert position to fixed-point (like Minecraft does)
-    int fixedX = static_cast<int>(entity->posX * 32.0);
-    int fixedY = static_cast<int>(entity->posY * 32.0);
-    int fixedZ = static_cast<int>(entity->posZ * 32.0);
-    int yaw = static_cast<int>(entity->rotationYaw * 256.0f / 360.0f);
-    int pitch = static_cast<int>(entity->rotationPitch * 256.0f / 360.0f);
-    
-    // Different spawn packets for different entity types
-    if (auto* playerEnt = dynamic_cast<EntityPlayer*>(entity)) {
-        // Named entity spawn
-        auto pkt = std::make_unique<Packet20NamedEntitySpawn>();
-        pkt->entityId = entity->entityId;
-        pkt->name = playerEnt->username;
-        pkt->x = fixedX;
-        pkt->y = fixedY;
-        pkt->z = fixedZ;
-        pkt->rotation = static_cast<int8_t>(yaw & 0xFF);
-        pkt->pitch = static_cast<int8_t>(pitch & 0xFF);
-        pkt->currentItem = 0;  // TODO: get held item
-        player->sendPacket(std::move(pkt));
-    } else {
-        // Check if it's a mob
-        int mobType = 0;  // TODO: determine mob type
-        
-        auto pkt = std::make_unique<Packet24MobSpawn>();
-        pkt->entityId = entity->entityId;
-        pkt->type = static_cast<int8_t>(mobType);
-        pkt->x = fixedX;
-        pkt->y = fixedY;
-        pkt->z = fixedZ;
-        pkt->yaw = static_cast<int8_t>(yaw & 0xFF);
-        pkt->pitch = static_cast<int8_t>(pitch & 0xFF);
-        player->sendPacket(std::move(pkt));
-    }
-    
-    // Send entity velocity if moving
-    if (entity->motionX != 0 || entity->motionY != 0 || entity->motionZ != 0) {
-        auto velPkt = std::make_unique<Packet28EntityVelocity>(
-            entity->entityId, entity->motionX, entity->motionY, entity->motionZ);
-        player->sendPacket(std::move(velPkt));
-    }
-}
-
-void EntityTracker::sendDestroyPacket(int entityId, EntityPlayerMP* player) {
-    if (!player || !player->netHandler) return;
-    player->sendPacket(std::make_unique<Packet29DestroyEntity>(entityId));
-}
-
-void EntityTracker::sendUpdatePackets(Entity* entity, EntityPlayerMP* player) {
-    if (!entity || !player || !player->netHandler) return;
-
-    // Check if entity moved significantly
-    double dx = entity->posX - entity->lastX;
-    double dy = entity->posY - entity->lastY;
-    double dz = entity->posZ - entity->lastZ;
-    double distSq = dx*dx + dy*dy + dz*dz;
-
-    bool hasMovement = distSq > 0.001;
-    bool hasRotation = std::abs(entity->rotationYaw - entity->lastYaw) > 1.0f ||
-                       std::abs(entity->rotationPitch - entity->lastPitch) > 1.0f;
-
-    // Convert rotation to byte format
-    int yaw = static_cast<int>(entity->rotationYaw * 256.0f / 360.0f);
-    int pitch = static_cast<int>(entity->rotationPitch * 256.0f / 360.0f);
-
-    if (hasMovement && hasRotation) {
-        // Relative move + look
-        int8_t relX = static_cast<int8_t>(std::clamp(dx * 32.0, -128.0, 127.0));
-        int8_t relY = static_cast<int8_t>(std::clamp(dy * 32.0, -128.0, 127.0));
-        int8_t relZ = static_cast<int8_t>(std::clamp(dz * 32.0, -128.0, 127.0));
-        int8_t yawByte = static_cast<int8_t>(yaw & 0xFF);
-        int8_t pitchByte = static_cast<int8_t>(pitch & 0xFF);
-
-        player->sendPacket(std::make_unique<Packet33RelEntityMoveLook>(
-            entity->entityId, relX, relY, relZ, yawByte, pitchByte));
-    } else if (hasMovement) {
-        // Relative move only
-        int8_t relX = static_cast<int8_t>(std::clamp(dx * 32.0, -128.0, 127.0));
-        int8_t relY = static_cast<int8_t>(std::clamp(dy * 32.0, -128.0, 127.0));
-        int8_t relZ = static_cast<int8_t>(std::clamp(dz * 32.0, -128.0, 127.0));
-
-        player->sendPacket(std::make_unique<Packet31RelEntityMove>(
-            entity->entityId, relX, relY, relZ));
-    } else if (hasRotation) {
-        // Look only
-        int8_t yawByte = static_cast<int8_t>(yaw & 0xFF);
-        int8_t pitchByte = static_cast<int8_t>(pitch & 0xFF);
-
-        player->sendPacket(std::make_unique<Packet32EntityLook>(
-            entity->entityId, yawByte, pitchByte));
-    }
-
-    // Send velocity if moving
-    if (entity->motionX != 0 || entity->motionY != 0 || entity->motionZ != 0) {
-        player->sendPacket(std::make_unique<Packet28EntityVelocity>(
-            entity->entityId, entity->motionX, entity->motionY, entity->motionZ));
     }
 }

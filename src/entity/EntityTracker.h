@@ -3,64 +3,81 @@
 #include "../entity/Entity.h"
 #include "../entity/EntityPlayerMP.h"
 #include "../network/packets/AllPackets.h"
-#include "core/ServerConstants.h"
 
 #include <unordered_map>
 #include <unordered_set>
-#include <vector>
-#include <mutex>
 #include <memory>
-#include <cstdint>
 
 class MinecraftServer;
 
-// Tracks which entities are visible to which players
+// Mirrors Java's EntityTrackerEntry
+struct TrackerEntry {
+    Entity* entity;
+    int trackingRange;   // max distance in blocks
+    int updateRate;      // ticks between updates
+    bool sendVelocity;
+
+    // Last sent fixed-point position (posX * 32)
+    int lastFixedX, lastFixedY, lastFixedZ;
+    int lastYawByte, lastPitchByte;
+
+    // Last sent held item (players only)
+    int lastHeldItemId = 0;
+    bool lastSneaking = false;
+
+    int tickCounter = 0;
+
+    // Players currently receiving updates for this entity
+    std::unordered_set<EntityPlayerMP*> trackingPlayers;
+
+    TrackerEntry(Entity* e, int range, int rate, bool vel)
+        : entity(e), trackingRange(range), updateRate(rate), sendVelocity(vel) {
+        lastFixedX = (int)(e->posX * 32.0);
+        lastFixedY = (int)(e->posY * 32.0);
+        lastFixedZ = (int)(e->posZ * 32.0);
+        lastYawByte = (int)(e->rotationYaw * 256.0f / 360.0f);
+        lastPitchByte = (int)(e->rotationPitch * 256.0f / 360.0f);
+    }
+
+    // Build the initial spawn packet for this entity
+    std::unique_ptr<Packet> makeSpawnPacket() const;
+
+    // Send this entry's spawn packet + initial state to one player
+    void sendSpawnTo(EntityPlayerMP* player) const;
+
+    // Broadcast a packet to all tracking players
+    void broadcast(std::unique_ptr<Packet> pkt) const;
+
+    // Broadcast to all tracking players AND to the entity itself if it's a player
+    void broadcastIncludingSelf(std::unique_ptr<Packet> pkt) const;
+
+    // Check/update which players should track this entry
+    void updateTracking(const std::vector<EntityPlayerMP*>& allPlayers);
+
+    // Send movement/look/held-item updates to all tracking players
+    void sendUpdates();
+};
+
 class EntityTracker {
 public:
     explicit EntityTracker(MinecraftServer* server);
-    ~EntityTracker() = default;
 
-    // Add an entity to tracking
     void addEntity(Entity* entity);
-    
-    // Remove an entity from tracking (and notify players)
     void removeEntity(Entity* entity);
 
-    // Called when an entity moves/changes state
-    void updateEntity(Entity* entity);
-
-    // Called each tick to sync entities with players
+    // Called each server tick
     void tick();
 
-    // Start tracking an entity for a specific player
-    void startTracking(Entity* entity, EntityPlayerMP* player);
-    
-    // Stop tracking an entity for a specific player
-    void stopTracking(Entity* entity, EntityPlayerMP* player);
+    // Broadcast a packet from an entity to all players tracking it
+    void broadcastPacket(Entity* entity, std::unique_ptr<Packet> pkt);
+
+    // Broadcast including the entity's own connection (e.g. arm animation)
+    void broadcastPacketIncludingSelf(Entity* entity, std::unique_ptr<Packet> pkt);
+
+    // When a new player logs in, send them all currently tracked entities
+    void sendAllToPlayer(EntityPlayerMP* player);
 
 private:
     MinecraftServer* mcServer_;
-
-    // Map: entityId -> list of players tracking this entity
-    std::unordered_map<int, std::vector<EntityPlayerMP*>> trackedEntities_;
-
-    // Map: entityId -> entity pointer
-    std::unordered_map<int, Entity*> entities_;
-
-    // Players currently tracking each entity (for dirty flag)
-    std::unordered_map<int, std::unordered_set<EntityPlayerMP*>> trackingPlayers_;
-
-    std::mutex trackerMutex_;
-
-    // Check if a player should track an entity based on distance
-    bool shouldTrack(Entity* entity, EntityPlayerMP* player) const;
-
-    // Send spawn packet for entity
-    void sendSpawnPacket(Entity* entity, EntityPlayerMP* player);
-    
-    // Send destroy packet for entity
-    void sendDestroyPacket(int entityId, EntityPlayerMP* player);
-    
-    // Send movement/update packets
-    void sendUpdatePackets(Entity* entity, EntityPlayerMP* player);
+    std::unordered_map<int, std::unique_ptr<TrackerEntry>> entries_; // entityId -> entry
 };

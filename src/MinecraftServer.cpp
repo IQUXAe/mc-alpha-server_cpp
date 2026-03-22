@@ -158,6 +158,7 @@ void MinecraftServer::run() {
     // Shutdown
     Logger::info("Stopping server");
     if (configManager) {
+        configManager->syncHeldItems();
         configManager->savePlayerStates();
     }
     if (worldMngr) {

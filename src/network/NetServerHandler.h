@@ -27,6 +27,7 @@ public:
     void sendChunks();
     void sendInventory();
     void restoreHeldItem(int itemId);  // called on login to restore saved held item
+    int getHeldItemId() const;
     bool hasChunkLoaded(int64_t key) const { return sentChunks_.find(key) != sentChunks_.end(); }
     std::unordered_set<int64_t> sentChunks_;
 
