@@ -30,7 +30,7 @@ public:
     }
 
     ItemStack* getCurrentItem() {
-        if (currentItem >= 0 && currentItem < 9) {
+        if (currentItem >= 0 && currentItem < (int)mainInventory.size()) {
             return mainInventory[currentItem];
         }
         return nullptr;
