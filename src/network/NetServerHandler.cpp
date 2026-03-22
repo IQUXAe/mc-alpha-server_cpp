@@ -288,8 +288,7 @@ void NetServerHandler::handleBlockDig(Packet14BlockDig& pkt) {
     int z = pkt.z;
     int face = pkt.face;
 
-    std::cout << "[DEBUG] BlockDig status=" << (int)pkt.status << " at " << x << "," << y << "," << z << std::endl;
-    
+
     if (checkDist) {
         double dX = player_->posX - (x + 0.5);
         double dY = player_->posY - (y + 0.5);
@@ -345,7 +344,28 @@ void NetServerHandler::handlePlace(Packet15Place& pkt) {
         int dist = std::max(distX, distZ);
         
         if (dist > 16 || isOp) {
-            ItemStack* itemstack = player_->inventory.getCurrentItem();
+            // In Alpha, Packet15 carries the itemId the client is holding.
+            // Use it directly — server inventory may be out of sync.
+            ItemStack* itemstack = nullptr;
+            ItemStack fromPacket;
+            if (pkt.itemId >= 0) {
+                // Find matching slot in inventory to get correct stackSize/damage,
+                // but trust pkt.itemId as the actual item being placed.
+                ItemStack* held = player_->inventory.getCurrentItem();
+                if (held && held->itemID == pkt.itemId) {
+                    itemstack = held;
+                } else {
+                    // Scan all slots for this itemId
+                    for (auto* s : player_->inventory.mainInventory) {
+                        if (s && s->itemID == pkt.itemId) { itemstack = s; break; }
+                    }
+                }
+                // Fallback: construct a temporary stack from packet
+                if (!itemstack) {
+                    fromPacket = ItemStack(pkt.itemId, 1, 0);
+                    itemstack = &fromPacket;
+                }
+            }
             player_->itemInWorldManager->activeBlockOrUseItem(
                 player_, mcServer_->worldMngr.get(), itemstack, x, y, z, direction);
         }
@@ -371,8 +391,16 @@ void NetServerHandler::handlePlace(Packet15Place& pkt) {
 }
 
 void NetServerHandler::handleBlockItemSwitch(Packet16BlockItemSwitch& pkt) {
-    if (pkt.itemId >= 0 && pkt.itemId < 9) {
-        player_->inventory.currentItem = pkt.itemId;
+    // In Alpha, Packet16.itemId is the itemID being held (not slot number)
+    // Store it in the last slot of mainInventory (mirrors Java behavior)
+    int lastSlot = static_cast<int>(player_->inventory.mainInventory.size()) - 1;
+    player_->inventory.currentItem = lastSlot;
+
+    delete player_->inventory.mainInventory[lastSlot];
+    if (pkt.itemId > 0) {
+        player_->inventory.mainInventory[lastSlot] = new ItemStack(pkt.itemId, 1, 0);
+    } else {
+        player_->inventory.mainInventory[lastSlot] = nullptr;
     }
 }
 

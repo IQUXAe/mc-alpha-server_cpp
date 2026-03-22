@@ -37,6 +37,7 @@ public:
     static Material clay;
     static Material pumpkin;
     static Material portal;
+    static Material web;
 
 private:
     bool canBurn_ = false;

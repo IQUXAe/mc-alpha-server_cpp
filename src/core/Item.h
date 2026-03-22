@@ -4,6 +4,9 @@
 #include <vector>
 
 class Block;
+class World;
+class EntityPlayerMP;
+class ItemStack;
 
 class Item {
 public:
@@ -110,11 +113,83 @@ public:
     int maxStackSize = 64;
     int maxDamage = 0;
 
-    Item(int id);
+    Item(int id); // id is offset from 256, registers at itemID = id+256
     virtual ~Item() = default;
 
     Item* setMaxStackSize(int size);
     Item* setMaxDamage(int damage);
 
+    virtual bool onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side);
+
     static void initItems();
+
+protected:
+    Item() {} // for subclasses that handle registration themselves
+};
+
+// Represents a placeable block as an item (mirrors Java's ItemBlock)
+class ItemBlock : public Item {
+public:
+    int blockID;
+
+    ItemBlock(int blockId);
+    bool onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side) override;
+};
+
+// Tool material levels: 0=wood, 1=stone, 2=steel, 3=diamond, 4=gold
+class ItemTool : public Item {
+public:
+    float digSpeed;
+    int toolLevel;
+    std::vector<int> effectiveBlockIDs;
+
+    ItemTool(int id, float speed, int level, std::vector<int> blocks)
+        : digSpeed(speed), toolLevel(level), effectiveBlockIDs(std::move(blocks)) {
+        itemID = id;
+        maxStackSize = 1;
+        maxDamage = 32 << level;
+        if (level == 3) maxDamage *= 4;
+        itemsList[id] = this;
+    }
+
+    float getStrVsBlock(int blockId) const {
+        for (int id : effectiveBlockIDs)
+            if (id == blockId) return digSpeed;
+        return 1.0f;
+    }
+
+    virtual bool canHarvestBlock(int blockId) const { return false; }
+};
+
+class ItemPickaxe : public ItemTool {
+public:
+    ItemPickaxe(int id, int level) : ItemTool(id, (level + 1) * 2.0f, level,
+        {4,43,44,1,48,15,42,7,14,56,57,79,87}) {}
+
+    bool canHarvestBlock(int blockId) const override;
+};
+
+class ItemSpade : public ItemTool {
+public:
+    ItemSpade(int id, int level) : ItemTool(id, (level + 1) * 2.0f, level,
+        {2,3,12,13,78,80,82}) {}
+
+    bool canHarvestBlock(int blockId) const override { return blockId == 78 || blockId == 80; }
+};
+
+class ItemAxe : public ItemTool {
+public:
+    ItemAxe(int id, int level) : ItemTool(id, (level + 1) * 2.0f, level,
+        {5,47,17,54}) {}
+};
+
+class ItemSword : public Item {
+public:
+    ItemSword(int id, int level) {
+        itemID = id;
+        maxStackSize = 1;
+        maxDamage = 32 << level;
+        if (level == 3) maxDamage *= 4;
+        itemsList[id] = this;
+    }
 };

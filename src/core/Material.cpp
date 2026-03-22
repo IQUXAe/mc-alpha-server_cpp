@@ -25,6 +25,7 @@ Material Material::cactus;
 Material Material::clay;
 Material Material::pumpkin;
 Material Material::portal;
+Material Material::web;
 
 // Note: In the actual initialization, these would be proper subtypes.
 // For the server, the key properties are just the flags.

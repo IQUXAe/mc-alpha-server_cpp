@@ -1,4 +1,10 @@
 #include "Item.h"
+#include "../block/Block.h"
+#include "../world/World.h"
+#include "../entity/EntityPlayerMP.h"
+#include "ItemStack.h"
+#include "AxisAlignedBB.h"
+#include "Material.h"
 #include <iostream>
 
 Item* Item::itemsList[32000] = {nullptr};
@@ -105,9 +111,9 @@ Item::Item(int id) : itemID(id + 256) {
 }
 
 void Item::initItems() {
-    shovelSteel = (new Item(0))->setMaxStackSize(1)->setMaxDamage(250);
-    pickaxeSteel = (new Item(1))->setMaxStackSize(1)->setMaxDamage(250);
-    axeSteel = (new Item(2))->setMaxStackSize(1)->setMaxDamage(250);
+    shovelSteel = (new ItemSpade(256 + 0, 2));
+    pickaxeSteel = (new ItemPickaxe(256 + 1, 2));
+    axeSteel = (new ItemAxe(256 + 2, 2));
     flintAndSteel = (new Item(3))->setMaxStackSize(1)->setMaxDamage(64);
     appleRed = (new Item(4));
     bow = (new Item(5))->setMaxStackSize(1)->setMaxDamage(384);
@@ -116,26 +122,26 @@ void Item::initItems() {
     diamond = (new Item(8));
     ingotIron = (new Item(9));
     ingotGold = (new Item(10));
-    swordSteel = (new Item(11))->setMaxStackSize(1)->setMaxDamage(250);
-    swordWood = (new Item(12))->setMaxStackSize(1)->setMaxDamage(59);
-    shovelWood = (new Item(13))->setMaxStackSize(1)->setMaxDamage(59);
-    pickaxeWood = (new Item(14))->setMaxStackSize(1)->setMaxDamage(59);
-    axeWood = (new Item(15))->setMaxStackSize(1)->setMaxDamage(59);
-    swordStone = (new Item(16))->setMaxStackSize(1)->setMaxDamage(131);
-    shovelStone = (new Item(17))->setMaxStackSize(1)->setMaxDamage(131);
-    pickaxeStone = (new Item(18))->setMaxStackSize(1)->setMaxDamage(131);
-    axeStone = (new Item(19))->setMaxStackSize(1)->setMaxDamage(131);
-    swordDiamond = (new Item(20))->setMaxStackSize(1)->setMaxDamage(1561);
-    shovelDiamond = (new Item(21))->setMaxStackSize(1)->setMaxDamage(1561);
-    pickaxeDiamond = (new Item(22))->setMaxStackSize(1)->setMaxDamage(1561);
-    axeDiamond = (new Item(23))->setMaxStackSize(1)->setMaxDamage(1561);
+    swordSteel = (new ItemSword(256 + 11, 2));
+    swordWood = (new ItemSword(256 + 12, 0));
+    shovelWood = (new ItemSpade(256 + 13, 0));
+    pickaxeWood = (new ItemPickaxe(256 + 14, 0));
+    axeWood = (new ItemAxe(256 + 15, 0));
+    swordStone = (new ItemSword(256 + 16, 1));
+    shovelStone = (new ItemSpade(256 + 17, 1));
+    pickaxeStone = (new ItemPickaxe(256 + 18, 1));
+    axeStone = (new ItemAxe(256 + 19, 1));
+    swordDiamond = (new ItemSword(256 + 20, 3));
+    shovelDiamond = (new ItemSpade(256 + 21, 3));
+    pickaxeDiamond = (new ItemPickaxe(256 + 22, 3));
+    axeDiamond = (new ItemAxe(256 + 23, 3));
     stick = (new Item(24));
     bowlEmpty = (new Item(25));
     bowlSoup = (new Item(26))->setMaxStackSize(1);
-    swordGold = (new Item(27))->setMaxStackSize(1)->setMaxDamage(32);
-    shovelGold = (new Item(28))->setMaxStackSize(1)->setMaxDamage(32);
-    pickaxeGold = (new Item(29))->setMaxStackSize(1)->setMaxDamage(32);
-    axeGold = (new Item(30))->setMaxStackSize(1)->setMaxDamage(32);
+    swordGold = (new ItemSword(256 + 27, 0));
+    shovelGold = (new ItemSpade(256 + 28, 0));
+    pickaxeGold = (new ItemPickaxe(256 + 29, 0));
+    axeGold = (new ItemAxe(256 + 30, 0));
     silk = (new Item(31));
     feather = (new Item(32));
     gunpowder = (new Item(33));
@@ -201,6 +207,15 @@ void Item::initItems() {
     fishRaw = (new Item(93));
     fishCooked = (new Item(94));
 
+    // Register ItemBlock for every block (IDs 1-255 map to item IDs 1-255)
+    // In Java: Item.itemsList[blockID] = new ItemBlock(blockID - 256, blockID)
+    // In our system: Item(id) sets itemID = id+256, so ItemBlock(blockId-256, blockId)
+    for (int i = 1; i < 256; i++) {
+        if (Block::blocksList[i] != nullptr && itemsList[i] == nullptr) {
+            new ItemBlock(i);
+        }
+    }
+
     std::cout << "[INFO] Registered all standard items." << std::endl;
 }
 
@@ -212,4 +227,68 @@ Item* Item::setMaxStackSize(int size) {
 Item* Item::setMaxDamage(int damage) {
     maxDamage = damage;
     return this;
+}
+
+bool Item::onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side) {
+    return false;
+}
+
+bool ItemPickaxe::canHarvestBlock(int blockId) const {
+    if (blockId == 49) return toolLevel == 3;
+    if (blockId == 56 || blockId == 57 || blockId == 14 || blockId == 41) return toolLevel >= 2;
+    if (blockId == 15 || blockId == 42 || blockId == 73 || blockId == 74) return toolLevel >= 1;
+    Block* b = (blockId > 0 && blockId < 256) ? Block::blocksList[blockId] : nullptr;
+    return b && (b->blockMaterial == &Material::rock || b->blockMaterial == &Material::iron);
+}
+
+// ItemBlock registers directly at blockID slot (not offset+256)
+ItemBlock::ItemBlock(int blockId) : blockID(blockId) {
+    itemID = blockId;
+    itemsList[blockId] = this;
+}
+
+bool ItemBlock::onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side) {
+    // Special case: placing on snow replaces it
+    int existingId = world->getBlockId(x, y, z);
+    if (existingId != 79 /* snow */) { // not snow layer
+        // Offset target position by face direction (mirrors Java ItemBlock)
+        switch (side) {
+            case 0: y--; break;
+            case 1: y++; break;
+            case 2: z--; break;
+            case 3: z++; break;
+            case 4: x--; break;
+            case 5: x++; break;
+        }
+    }
+
+    if (stack->stackSize == 0) return false;
+    if (y < 0 || y >= 128) return false;
+
+    // Target position must be air or replaceable
+    int targetId = world->getBlockId(x, y, z);
+    Block* targetBlock = targetId > 0 ? Block::blocksList[targetId] : nullptr;
+    if (targetId != 0 && !(targetBlock && targetBlock->isReplaceable())) return false;
+
+    Block* block = Block::blocksList[blockID];
+    if (!block) return false;
+
+    // Check block can stay here
+    if (!block->canBlockStay(world, x, y, z)) return false;
+
+    // Check player bbox doesn't intersect placed block
+    auto bb = block->getCollisionBoundingBoxFromPool(world, x, y, z);
+    if (bb) {
+        double px = player->posX, py = player->posY, pz = player->posZ;
+        double hw = player->width / 2.0;
+        AxisAlignedBB playerBB(px - hw, py, pz - hw, px + hw, py + player->height, pz + hw);
+        if (playerBB.intersectsWith(*bb)) return false;
+    }
+
+    if (world->setBlockWithNotify(x, y, z, blockID)) {
+        block->onBlockPlaced(world, x, y, z, side);
+        stack->stackSize--;
+        return true;
+    }
+    return false;
 }

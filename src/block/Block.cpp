@@ -3,6 +3,8 @@
 #include "../core/AxisAlignedBB.h"
 #include "../world/World.h"
 #include "../entity/EntityItem.h"
+#include "../entity/EntityPlayerMP.h"
+#include "../core/Item.h"
 #include "../MinecraftServer.h"
 #include <iostream>
 #include <random>
@@ -114,6 +116,82 @@ private:
     }
 };
 
+class BlockFlower : public Block {
+public:
+    BlockFlower(int id, Material* mat) : Block(id, mat) {}
+    bool canBlockStay(World* world, int x, int y, int z) const override {
+        int below = world->getBlockId(x, y - 1, z);
+        return below == 2 || below == 3 || below == 60; // grass, dirt, farmland
+    }
+    bool isReplaceable() const override { return true; }
+    std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World*, int, int, int) override { return std::nullopt; }
+};
+
+class BlockMushroom : public Block {
+public:
+    BlockMushroom(int id, Material* mat) : Block(id, mat) {}
+    bool canBlockStay(World* world, int x, int y, int z) const override {
+        int below = world->getBlockId(x, y - 1, z);
+        return below > 0 && Block::blocksList[below] != nullptr;
+    }
+    bool isReplaceable() const override { return true; }
+    std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World*, int, int, int) override { return std::nullopt; }
+};
+
+class BlockTorch : public Block {
+public:
+    BlockTorch(int id, Material* mat) : Block(id, mat) {}
+    bool canBlockStay(World* world, int x, int y, int z) const override {
+        // Can attach to solid block on any side or below
+        auto isSolid = [&](int bx, int by, int bz) {
+            int id = world->getBlockId(bx, by, bz);
+            if (id == 0) return false;
+            Block* b = Block::blocksList[id];
+            return b && b->blockMaterial->isSolid();
+        };
+        return isSolid(x, y-1, z) || isSolid(x-1, y, z) || isSolid(x+1, y, z)
+            || isSolid(x, y, z-1) || isSolid(x, y, z+1);
+    }
+    bool isReplaceable() const override { return true; }
+    std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World*, int, int, int) override { return std::nullopt; }
+};
+
+class BlockCactus : public Block {
+public:
+    BlockCactus(int id, Material* mat) : Block(id, mat) {}
+    bool canBlockStay(World* world, int x, int y, int z) const override {
+        // No solid blocks on sides, sand or cactus below
+        auto isSolid = [&](int bx, int by, int bz) {
+            int id = world->getBlockId(bx, by, bz);
+            if (id == 0) return false;
+            Block* b = Block::blocksList[id];
+            return b && b->blockMaterial->isSolid();
+        };
+        if (isSolid(x-1,y,z) || isSolid(x+1,y,z) || isSolid(x,y,z-1) || isSolid(x,y,z+1))
+            return false;
+        int below = world->getBlockId(x, y-1, z);
+        return below == 12 || below == 81; // sand or cactus
+    }
+};
+
+class BlockReed : public Block {
+public:
+    BlockReed(int id, Material* mat) : Block(id, mat) {}
+    bool canBlockStay(World* world, int x, int y, int z) const override {
+        int below = world->getBlockId(x, y-1, z);
+        if (below == 83) return true; // reed on reed
+        if (below != 2 && below != 3 && below != 12) return false; // grass/dirt/sand
+        // needs water adjacent at ground level
+        return world->getBlockId(x-1,y-1,z) == 8 || world->getBlockId(x-1,y-1,z) == 9
+            || world->getBlockId(x+1,y-1,z) == 8 || world->getBlockId(x+1,y-1,z) == 9
+            || world->getBlockId(x,y-1,z-1) == 8 || world->getBlockId(x,y-1,z-1) == 9
+            || world->getBlockId(x,y-1,z+1) == 8 || world->getBlockId(x,y-1,z+1) == 9;
+    }
+    bool isReplaceable() const override { return true; }
+    std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World*, int, int, int) override { return std::nullopt; }
+};
+
+
 Block* Block::blocksList[256] = {nullptr};
 bool Block::tickOnLoad[256] = {false};
 bool Block::isBlockContainer[256] = {false};
@@ -203,20 +281,75 @@ void Block::initBlocks() {
     oreCoal = (new Block(16, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
     wood = (new Block(17, &Material::wood))->setHardness(2.0f);
     leaves = (new BlockLeaves(18, &Material::leaves))->setHardness(0.2f)->setLightOpacity(1);
-    plantYellow = (new Block(37, &Material::plants))->setHardness(0.0f);
-    plantRed = (new Block(38, &Material::plants))->setHardness(0.0f);
-    mushroomBrown = (new Block(39, &Material::plants))->setHardness(0.0f);
-    mushroomRed = (new Block(40, &Material::plants))->setHardness(0.0f);
+    (new Block(19, &Material::ground))->setHardness(0.4f);   // sponge
+    glass = (new Block(20, &Material::glass))->setHardness(0.3f)->setLightOpacity(0);
+    (new Block(21, &Material::rock))->setHardness(3.0f);     // lapis ore
+    (new Block(22, &Material::rock))->setHardness(3.0f);     // lapis block
+    (new Block(23, &Material::rock))->setHardness(3.5f);     // dispenser
+    (new Block(24, &Material::rock))->setHardness(0.8f);     // sandstone
+    (new Block(25, &Material::wood))->setHardness(0.8f);     // noteblock
+    (new Block(27, &Material::ground))->setHardness(0.7f);   // powered rail
+    (new Block(28, &Material::ground))->setHardness(0.7f);   // detector rail
+    (new Block(29, &Material::rock))->setHardness(3.5f);     // sticky piston
+    (new Block(30, &Material::web))->setHardness(4.0f);      // web
+    (new Block(31, &Material::plants))->setHardness(0.0f);   // tall grass
+    (new Block(32, &Material::plants))->setHardness(0.0f);   // dead bush
+    (new Block(33, &Material::rock))->setHardness(3.5f);     // piston
+    (new Block(35, &Material::cloth))->setHardness(0.8f);    // wool
+    plantYellow = (new BlockFlower(37, &Material::plants))->setHardness(0.0f);
+    plantRed = (new BlockFlower(38, &Material::plants))->setHardness(0.0f);
+    mushroomBrown = (new BlockMushroom(39, &Material::plants))->setHardness(0.0f);
+    mushroomRed = (new BlockMushroom(40, &Material::plants))->setHardness(0.0f);
+    (new Block(41, &Material::iron))->setHardness(3.0f);     // gold block
+    (new Block(42, &Material::iron))->setHardness(5.0f);     // iron block
+    (new Block(43, &Material::rock))->setHardness(2.0f);     // double slab
+    (new Block(44, &Material::rock))->setHardness(2.0f);     // slab
+    (new Block(45, &Material::rock))->setHardness(2.0f);     // brick block
+    (new Block(46, &Material::tnt))->setHardness(0.0f);      // TNT
+    (new Block(47, &Material::wood))->setHardness(1.5f);     // bookshelf
     cobblestoneMossy = (new Block(48, &Material::rock))->setHardness(2.0f)->setResistance(10.0f);
+    (new Block(49, &Material::rock))->setHardness(2000.0f);  // obsidian
+    (new BlockTorch(50, &Material::circuits))->setHardness(0.0f)->setLightOpacity(0); // torch
+    (new Block(51, &Material::fire))->setHardness(0.0f);     // fire
     mobSpawner = (new Block(52, &Material::rock))->setHardness(5.0f);
+    (new Block(53, &Material::wood))->setHardness(2.0f);     // wood stairs
+    (new Block(54, &Material::wood))->setHardness(2.5f);     // chest
+    (new Block(55, &Material::circuits))->setHardness(0.0f)->setLightOpacity(0); // redstone wire
     oreDiamond = (new Block(56, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
+    (new Block(57, &Material::iron))->setHardness(5.0f);     // diamond block
+    (new Block(58, &Material::wood))->setHardness(2.5f);     // crafting table
+    (new Block(59, &Material::plants))->setHardness(0.0f);   // crops
+    (new Block(60, &Material::ground))->setHardness(0.6f);   // farmland
+    (new Block(61, &Material::rock))->setHardness(3.5f);     // furnace
+    (new Block(62, &Material::rock))->setHardness(3.5f);     // burning furnace
+    (new Block(63, &Material::wood))->setHardness(1.0f);     // sign post
+    (new Block(64, &Material::wood))->setHardness(3.0f);     // wood door
+    (new Block(65, &Material::wood))->setHardness(0.4f);     // ladder
+    (new Block(66, &Material::ground))->setHardness(0.7f);   // rail
+    (new Block(67, &Material::rock))->setHardness(2.0f);     // cobblestone stairs
+    (new Block(68, &Material::wood))->setHardness(1.0f);     // wall sign
+    (new Block(69, &Material::circuits))->setHardness(0.5f); // lever
+    (new Block(70, &Material::rock))->setHardness(0.5f);     // stone pressure plate
+    (new Block(71, &Material::iron))->setHardness(3.0f);     // iron door
+    (new Block(72, &Material::wood))->setHardness(0.5f);     // wood pressure plate
     oreRedstone = (new Block(73, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
+    (new Block(74, &Material::rock))->setHardness(3.0f);     // glowing redstone ore
+    (new Block(75, &Material::circuits))->setHardness(0.0f); // redstone torch off
+    (new Block(76, &Material::circuits))->setHardness(0.0f); // redstone torch on
+    (new Block(77, &Material::circuits))->setHardness(0.5f); // stone button
     snow = (new Block(78, &Material::snow))->setHardness(0.1f);
     ice = (new Block(79, &Material::ice))->setHardness(0.5f);
-    cactus = (new Block(81, &Material::cactus))->setHardness(0.4f);
+    (new Block(80, &Material::snow))->setHardness(0.2f);     // snow block
+    cactus = (new BlockCactus(81, &Material::cactus))->setHardness(0.4f);
     blockClay = (new Block(82, &Material::clay))->setHardness(0.6f);
-    reed = (new Block(83, &Material::plants))->setHardness(0.0f);
+    reed = (new BlockReed(83, &Material::plants))->setHardness(0.0f);
+    (new Block(84, &Material::wood))->setHardness(0.8f);     // jukebox
+    (new Block(85, &Material::wood))->setHardness(2.0f);     // fence
     pumpkin = (new Block(86, &Material::pumpkin))->setHardness(1.0f);
+    (new Block(87, &Material::rock))->setHardness(0.4f);     // netherrack
+    (new Block(88, &Material::sand))->setHardness(0.5f);     // soul sand
+    (new Block(89, &Material::rock))->setHardness(0.3f);     // glowstone
+    (new Block(91, &Material::pumpkin))->setHardness(1.0f);  // jack-o-lantern
 
     std::cout << "[INFO] Registered all standard blocks." << std::endl;
 }
@@ -296,32 +429,30 @@ void Block::dropBlockAsItemWithChance(World* world, int x, int y, int z, int met
 }
 
 float Block::checkHardness(EntityPlayer* player) const {
-    if (blockHardness < 0.0f) return 0.0f; // Unbreakable
-    
-    // Simplistic version. Proper version would call player->getCurrentPlayerStrVsBlock(this);
-    // Since we don't have that fully integrated across EntityPlayerMP->Inventory yet,
-    // let's do a basic emulation. Hand = 1.0f str.
+    if (blockHardness < 0.0f) return 0.0f;
+
     float str = 1.0f;
-    
-    // Cast player to EntityPlayerMP for inventory access, if valid
-    // For now we'll just check canHarvest:
-    // If you can't harvest, it takes 3.33x longer (100 vs 30)
-    // Actually wait, canHarvestBlock(player) isn't correctly implemented yet.
-    // In Alpha, you can harvest dirt with hand, so it returns true.
-    // If you can harvest, divisor is 30. If not, 100.
-    
-    bool canHarvest = true;
-    // We already have check against BlockStone that overrides it to false for hand
-    if (!this->canHarvestBlock(player)) {
-        canHarvest = false; 
-        // We'd correctly check player's inventory here, but for now block's inherent canHarvest is a good fallback
-    } else {
-        canHarvest = true;
+    bool canHarvest = canHarvestBlock(player);
+
+    if (player) {
+        auto* mp = dynamic_cast<EntityPlayerMP*>(player);
+        if (mp) {
+            ItemStack* held = mp->inventory.getCurrentItem();
+            if (held) {
+                Item* item = Item::itemsList[held->itemID];
+                if (item) {
+                    auto* tool = dynamic_cast<ItemTool*>(item);
+                    if (tool) {
+                        float toolStr = tool->getStrVsBlock(blockID);
+                        if (toolStr > 1.0f) str = toolStr;
+                        if (!canHarvest && tool->canHarvestBlock(blockID))
+                            canHarvest = true;
+                    }
+                }
+            }
+        }
     }
 
-    if (!canHarvest) {
-        return str / blockHardness / 100.0f;
-    } else {
-        return str / blockHardness / 30.0f;
-    }
+    return canHarvest ? str / blockHardness / 30.0f
+                      : str / blockHardness / 100.0f;
 }

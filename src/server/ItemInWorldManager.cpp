@@ -3,6 +3,8 @@
 #include "../entity/EntityPlayerMP.h"
 #include "../block/Block.h"
 #include "../core/ItemStack.h"
+#include "../core/Item.h"
+#include "../core/AxisAlignedBB.h"
 
 ItemInWorldManager::ItemInWorldManager(World* world) {
     this->worldObj = world;
@@ -72,38 +74,50 @@ bool ItemInWorldManager::harvestBlock(int x, int y, int z) {
 
     ItemStack* stack = thisPlayerMP->getCurrentEquippedItem();
     if (stack) {
-        stack->hitBlock(x, y, z, 0); // Side is not strictly sent properly here in Alpha
-        if (stack->stackSize == 0) {
-            thisPlayerMP->destroyCurrentEquippedItem();
+        // Damage tool on block hit (mirrors Java ItemTool.hitBlock: -1 durability)
+        Item* item = Item::itemsList[stack->itemID];
+        if (item && dynamic_cast<ItemTool*>(item)) {
+            stack->damageItem(1);
+            if (stack->stackSize <= 0 || stack->itemDamage > item->maxDamage) {
+                thisPlayerMP->destroyCurrentEquippedItem();
+                stack = nullptr;
+            }
         }
     }
 
-    if (removed && thisPlayerMP->canHarvestBlock(Block::blocksList[id])) {
-        Block::blocksList[id]->dropBlockAsItemWithChance(worldObj, x, y, z, meta, 1.0f);
+    if (removed) {
+        bool canHarvest = thisPlayerMP->canHarvestBlock(Block::blocksList[id]);
+        if (!canHarvest && stack) {
+            Item* item = Item::itemsList[stack->itemID];
+            auto* tool = dynamic_cast<ItemTool*>(item);
+            if (tool && tool->canHarvestBlock(id)) canHarvest = true;
+        }
+        if (canHarvest)
+            Block::blocksList[id]->dropBlockAsItemWithChance(worldObj, x, y, z, meta, 1.0f);
     }
     return removed;
 }
 
 bool ItemInWorldManager::useItem(EntityPlayerMP* player, World* world, ItemStack* itemstack) {
-    int count = itemstack->stackSize;
-    ItemStack* result = new ItemStack(itemstack->useItemRightClick(world, player));
-    if (result == itemstack || (result && result->stackSize != count)) {
-        player->inventory.mainInventory[player->inventory.currentItem] = result;
-        if (result->stackSize == 0) {
-            player->inventory.mainInventory[player->inventory.currentItem] = nullptr;
-        }
-        return true;
-    }
+    if (!itemstack || itemstack->stackSize <= 0) return false;
+    Item* item = Item::itemsList[itemstack->itemID];
+    if (!item) return false;
+    // onItemRightClick for non-block items (food, bow etc.) - not implemented yet
     return false;
 }
 
 bool ItemInWorldManager::activeBlockOrUseItem(EntityPlayerMP* player, World* world, ItemStack* itemstack, int x, int y, int z, int side) {
     int id = world->getBlockId(x, y, z);
-    if (id > 0 && Block::blocksList[id]->blockActivated(world, x, y, z, player)) {
+    if (id > 0 && Block::blocksList[id] && Block::blocksList[id]->blockActivated(world, x, y, z, player))
         return true;
+    if (!itemstack || itemstack->stackSize <= 0) return false;
+
+    Item* item = Item::itemsList[itemstack->itemID];
+    if (!item) return false;
+
+    bool used = item->onItemUse(itemstack, player, world, x, y, z, side);
+    if (used) {
+        if (player->netHandler) player->netHandler->sendInventory();
     }
-    if (!itemstack) {
-        return false;
-    }
-    return itemstack->useItem(player, world, x, y, z, side);
+    return used;
 }
