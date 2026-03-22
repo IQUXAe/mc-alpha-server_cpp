@@ -224,9 +224,13 @@ void World::tick() {
                     double dx = player->posX - item->posX;
                     double dy = player->posY - item->posY;
                     double dz = player->posZ - item->posZ;
-                    double distSq = dx*dx + dy*dy + dz*dz;
                     
-                    if (distSq < 2.25) { // 1.5 blocks radius
+                    // Java: boundingBox.expands(1.0, 0.0, 1.0) — expand player bbox by 1 on X/Z, 0 on Y
+                    double ex = (player->width / 2.0) + 1.0;
+                    double ey = player->height;
+                    double ez = (player->width / 2.0) + 1.0;
+                    bool inRange = std::abs(dx) < ex && std::abs(dy) >= 0.0 && std::abs(dy) < ey && std::abs(dz) < ez;
+                    if (inRange) {
                         ItemStack stack(item->itemID, item->count, item->metadata);
                         int initialCount = item->count;
                         player->inventory.addItemStackToInventory(&stack);
