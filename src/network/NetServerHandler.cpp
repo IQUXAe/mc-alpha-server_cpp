@@ -2,6 +2,7 @@
 #include "NetServerHandler.h"
 #include "../MinecraftServer.h"
 #include "../entity/EntityPlayerMP.h"
+#include "../entity/EntityTracker.h"
 #include "../world/Chunk.h"
 #include "../block/Block.h"
 #include "../entity/EntityItem.h"
@@ -187,8 +188,11 @@ void NetServerHandler::sendInventory() {
     sendPacket(buildPacket(-3, player_->inventory.armorInventory));
 }
 
-void NetServerHandler::restoreHeldItem(int itemId) {
-    int lastSlot = static_cast<int>(player_->inventory.mainInventory.size()) - 1;
+int NetServerHandler::getHeldItemId() const {
+    return heldItem_ ? heldItem_->itemID : 0;
+}
+
+void NetServerHandler::restoreHeldItem(int itemId) {    int lastSlot = static_cast<int>(player_->inventory.mainInventory.size()) - 1;
     heldItem_ = itemId > 0 ? new ItemStack(itemId, 1, 0) : nullptr;
     player_->inventory.currentItem = lastSlot;
     player_->inventory.mainInventory[lastSlot] = heldItem_;
@@ -422,8 +426,12 @@ void NetServerHandler::handleBlockItemSwitch(Packet16BlockItemSwitch& pkt) {
 
 void NetServerHandler::handleArmAnimation(Packet18ArmAnimation& pkt) {
     if (pkt.animate == 1) {
-        // Broadcast arm swing to other players
-        // TODO: implement when entity tracking is complete
+        auto broadcastPkt = std::make_unique<Packet18ArmAnimation>(player_->entityId, 1);
+        mcServer_->entityTracker->broadcastPacket(player_, std::move(broadcastPkt));
+    } else if (pkt.animate == 104) {
+        player_->isSneaking = true;
+    } else if (pkt.animate == 105) {
+        player_->isSneaking = false;
     }
 }
 

@@ -1,6 +1,7 @@
 #include "ServerConfigurationManager.h"
 #include "../MinecraftServer.h"
 #include "../network/NetLoginHandler.h"
+#include "../entity/EntityTracker.h"
 #include "../world/World.h"
 
 #include <fstream>
@@ -81,9 +82,19 @@ void ServerConfigurationManager::playerLoggedIn(EntityPlayerMP* player) {
             }
         }
     }
+
+    // Register with entity tracker (sends spawn to nearby players)
+    if (mcServer_->entityTracker) {
+        mcServer_->entityTracker->addEntity(player);
+    }
 }
 
 void ServerConfigurationManager::playerLoggedOut(EntityPlayerMP* player) {
+    // Remove from entity tracker first (sends Packet29 to other players)
+    if (mcServer_->entityTracker) {
+        mcServer_->entityTracker->removeEntity(player);
+    }
+
     std::string saveDir = "player_states";
     std::system(("mkdir -p " + saveDir).c_str());
     
@@ -174,6 +185,14 @@ void ServerConfigurationManager::deopPlayer(const std::string& name) {
 
 bool ServerConfigurationManager::isOp(const std::string& name) const {
     return ops_.count(toLower(name)) > 0;
+}
+
+void ServerConfigurationManager::syncHeldItems() {
+    for (auto* player : playerEntities) {
+        if (player->netHandler) {
+            player->savedHeldItemId = player->netHandler->getHeldItemId();
+        }
+    }
 }
 
 void ServerConfigurationManager::savePlayerStates() {
