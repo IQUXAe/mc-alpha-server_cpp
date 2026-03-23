@@ -3,9 +3,10 @@
 #include "../network/NetLoginHandler.h"
 #include "../entity/EntityTracker.h"
 #include "../world/World.h"
+#include "../core/Logger.h"
 
 #include <fstream>
-#include <iostream>
+#include <filesystem>
 #include <algorithm>
 
 ServerConfigurationManager::ServerConfigurationManager(MinecraftServer* server)
@@ -63,52 +64,35 @@ EntityPlayerMP* ServerConfigurationManager::login(NetLoginHandler* handler, cons
 void ServerConfigurationManager::playerLoggedIn(EntityPlayerMP* player) {
     playerEntities.push_back(player);
 
-    // Try to load player data from NBT file
-    std::string saveDir = "player_states";
+    const auto& saveDir = mcServer_->playerSaveDir;
     std::string saveFile = saveDir + "/" + toLower(player->username) + ".dat";
-    
+
     if (player->loadFromFile(saveFile)) {
-        std::cout << "[INFO] Loaded player data for " << player->username << std::endl;
+        Logger::info("Loaded player data for {}", player->username);
     } else {
-        // Fallback: try old .pos format
-        std::string oldFile = saveDir + "/" + toLower(player->username) + ".pos";
-        std::ifstream file(oldFile);
-        if (file.is_open()) {
-            double x, y, z;
-            float yaw, pitch;
-            if (file >> x >> y >> z >> yaw >> pitch) {
+        // Fallback: legacy player_states/<name>.pos
+        std::string oldFile = "player_states/" + toLower(player->username) + ".pos";
+        if (std::ifstream file(oldFile); file.is_open()) {
+            double x, y, z; float yaw, pitch;
+            if (file >> x >> y >> z >> yaw >> pitch)
                 player->setPositionAndRotation(x, y, z, yaw, pitch);
-                std::cout << "[INFO] Loaded player position (legacy) for " << player->username << std::endl;
-            }
         }
     }
 
-    // Register with entity tracker (sends spawn to nearby players)
-    if (mcServer_->entityTracker) {
-        mcServer_->entityTracker->addEntity(player);
-    }
+    if (mcServer_->entityTracker) mcServer_->entityTracker->addEntity(player);
 }
 
 void ServerConfigurationManager::playerLoggedOut(EntityPlayerMP* player) {
-    // Remove from entity tracker first (sends Packet29 to other players)
-    if (mcServer_->entityTracker) {
-        mcServer_->entityTracker->removeEntity(player);
-    }
+    if (mcServer_->entityTracker) mcServer_->entityTracker->removeEntity(player);
 
-    std::string saveDir = "player_states";
-    std::system(("mkdir -p " + saveDir).c_str());
-    
-    // Save to NBT format
+    const auto& saveDir = mcServer_->playerSaveDir;
     std::string saveFile = saveDir + "/" + toLower(player->username) + ".dat";
-    if (player->saveToFile(saveFile)) {
-        std::cout << "[INFO] Saved player data for " << player->username << std::endl;
-    } else {
-        std::cerr << "[WARNING] Failed to save player data for " << player->username << std::endl;
-    }
+    if (!player->saveToFile(saveFile))
+        Logger::warning("Failed to save player data for {}", player->username);
+    else
+        Logger::info("Saved player data for {}", player->username);
 
-    playerEntities.erase(
-        std::remove(playerEntities.begin(), playerEntities.end(), player),
-        playerEntities.end());
+    std::erase(playerEntities, player);
 }
 
 void ServerConfigurationManager::broadcastPacket(std::unique_ptr<Packet> pkt) {
@@ -137,10 +121,11 @@ void ServerConfigurationManager::sendChatToPlayer(const std::string& username, c
 }
 
 std::string ServerConfigurationManager::getPlayerList() const {
+    if (playerEntities.empty()) return "";
     std::string result;
-    for (size_t i = 0; i < playerEntities.size(); ++i) {
-        if (i > 0) result += ", ";
-        result += playerEntities[i]->username;
+    for (auto* p : playerEntities) {
+        if (!result.empty()) result += ", ";
+        result += p->username;
     }
     return result;
 }
@@ -196,14 +181,11 @@ void ServerConfigurationManager::syncHeldItems() {
 }
 
 void ServerConfigurationManager::savePlayerStates() {
-    std::string saveDir = "player_states";
-    std::system(("mkdir -p " + saveDir).c_str());
-
+    const auto& saveDir = mcServer_->playerSaveDir;
     for (auto* player : playerEntities) {
         std::string saveFile = saveDir + "/" + toLower(player->username) + ".dat";
-        if (!player->saveToFile(saveFile)) {
-            std::cerr << "[WARNING] Failed to save player data for " << player->username << std::endl;
-        }
+        if (!player->saveToFile(saveFile))
+            Logger::warning("Failed to save player data for {}", player->username);
     }
 }
 
@@ -227,11 +209,9 @@ void ServerConfigurationManager::loadList(const std::string& filename, std::set<
 void ServerConfigurationManager::saveList(const std::string& filename, const std::set<std::string>& list) {
     try {
         std::ofstream file(filename);
-        for (const auto& entry : list) {
-            file << entry << "\n";
-        }
+        for (const auto& entry : list) file << entry << '\n';
     } catch (...) {
-        std::cerr << "[WARNING] Failed to save " << filename << std::endl;
+        Logger::warning("Failed to save {}", filename);
     }
 }
 

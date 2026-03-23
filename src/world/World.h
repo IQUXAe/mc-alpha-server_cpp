@@ -95,7 +95,7 @@ public:
 
 private:
     void findSafeSpawnPoint();
-    void saveWorker();
+    void saveWorker(std::stop_token st);
     bool loadLevelDat();
     void saveLevelDat();
     std::vector<uint8_t> compressChunkData(Chunk* chunk);
@@ -115,7 +115,7 @@ private:
     std::queue<SaveTask> saveQueue_;
     std::mutex saveMutex_;
     std::condition_variable saveCondition_;
-    std::thread saveThread_;
+    std::jthread saveThread_;
     std::atomic<bool> stopSaving_{false};
     leveldb::DB* db_ = nullptr;
 

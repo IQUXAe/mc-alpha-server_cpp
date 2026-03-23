@@ -1,8 +1,8 @@
 #include "Chunk.h"
 #include "World.h"
 #include <stdexcept>
-#include <cstring>
-#include <iostream>
+#include <algorithm>
+#include <ranges>
 #include <queue>
 
 struct LightNode {
@@ -227,36 +227,22 @@ void Chunk::generateSkylightMap() {
 #include <zlib.h>
 
 std::vector<uint8_t> Chunk::getChunkData() const {
-    std::vector<uint8_t> rawData(CHUNK_VOLUME * 5 / 2, 0); // 81920 bytes
-    
-    // Memory copy blocks
-    std::memcpy(rawData.data(), blocks.data(), CHUNK_VOLUME);
-    
-    // Memory copy nibbles
-    std::memcpy(rawData.data() + CHUNK_VOLUME, data.data.data(), CHUNK_VOLUME / 2);
-    std::memcpy(rawData.data() + CHUNK_VOLUME + CHUNK_VOLUME / 2, blocklight.data.data(), CHUNK_VOLUME / 2);
-    std::memcpy(rawData.data() + CHUNK_VOLUME + CHUNK_VOLUME, skylight.data.data(), CHUNK_VOLUME / 2);
-    
-    // Compress raw chunk data using zlib (Deflater level 1, like Java)
+    std::vector<uint8_t> rawData(CHUNK_VOLUME * 5 / 2, 0);
+
+    std::ranges::copy(blocks,           rawData.begin());
+    std::ranges::copy(data.data,        rawData.begin() + CHUNK_VOLUME);
+    std::ranges::copy(blocklight.data,  rawData.begin() + CHUNK_VOLUME + CHUNK_VOLUME / 2);
+    std::ranges::copy(skylight.data,    rawData.begin() + CHUNK_VOLUME + CHUNK_VOLUME);
+
     std::vector<uint8_t> compressed(compressBound(rawData.size()));
-
     z_stream strm{};
-    strm.zalloc = Z_NULL;
-    strm.zfree = Z_NULL;
-    strm.opaque = Z_NULL;
-
-    deflateInit(&strm, 1); // Level 1 = best speed
-
-    strm.avail_in = static_cast<uInt>(rawData.size());
-    strm.next_in = const_cast<Bytef*>(rawData.data());
+    deflateInit(&strm, 1);
+    strm.avail_in  = static_cast<uInt>(rawData.size());
+    strm.next_in   = const_cast<Bytef*>(rawData.data());
     strm.avail_out = static_cast<uInt>(compressed.size());
-    strm.next_out = compressed.data();
-
+    strm.next_out  = compressed.data();
     deflate(&strm, Z_FINISH);
-    
-    size_t compressedSize = strm.total_out;
+    compressed.resize(strm.total_out);
     deflateEnd(&strm);
-
-    compressed.resize(compressedSize);
     return compressed;
 }

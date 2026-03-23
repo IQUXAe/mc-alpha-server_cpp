@@ -13,6 +13,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <ranges>
 #include <ctime>
 
 World::World(MinecraftServer* server, const std::string& savePath, int64_t seed)
@@ -25,7 +26,7 @@ World::World(MinecraftServer* server, const std::string& savePath, int64_t seed)
     options.create_if_missing = true;
     leveldb::Status status = leveldb::DB::Open(options, worldPath_ + "/db", &db_);
     if (!status.ok()) {
-        Logger::severe("Failed to open LevelDB: " + status.ToString());
+        Logger::severe("Failed to open LevelDB: {}", status.ToString());
         db_ = nullptr;
     } else {
         Logger::info("LevelDB world storage initialized at {}/db", worldPath_);
@@ -35,11 +36,7 @@ World::World(MinecraftServer* server, const std::string& savePath, int64_t seed)
     bool hasLevelDat = loadLevelDat();
     if (!hasLevelDat) {
         // Use provided seed, or generate random if seed is 0
-        if (seed != 0) {
-            randomSeed = seed;
-        } else {
-            randomSeed = time(nullptr);
-        }
+            randomSeed = (seed != 0) ? seed : static_cast<int64_t>(time(nullptr));
         worldTime = 0;
         Logger::info("No level.dat found, generated new seed: {}", randomSeed);
     } else {
@@ -54,8 +51,7 @@ World::World(MinecraftServer* server, const std::string& savePath, int64_t seed)
     chunkProvider = std::make_unique<ChunkProviderGenerate>(this, randomSeed);
     rand.seed(randomSeed);
 
-    // Initialize background saving
-    saveThread_ = std::thread(&World::saveWorker, this);
+    saveThread_ = std::jthread([this](std::stop_token st) { saveWorker(st); });
     
     // Load spawn and entities
     if (!hasLevelDat) {
@@ -71,20 +67,14 @@ void World::saveWorld() {
 
     int savedCount = 0;
     for (const auto& [key, chunk] : chunks_) {
-        bool shouldSave = true;
-        if (mcServer && mcServer->saveModifiedChunksOnly && !chunk->isModified) {
-            shouldSave = false;
+        if (mcServer && mcServer->saveModifiedChunksOnly && !chunk->isModified) continue;
+        auto data = compressChunkData(chunk.get());
+        {
+            std::lock_guard lock(saveMutex_);
+            saveQueue_.push({key, std::move(data)});
         }
-        
-        if (shouldSave) {
-            std::vector<uint8_t> data = compressChunkData(chunk.get());
-            {
-                std::lock_guard<std::mutex> lock(saveMutex_);
-                saveQueue_.push({key, data});
-            }
-            chunk->isModified = false;
-            savedCount++;
-        }
+        chunk->isModified = false;
+        ++savedCount;
     }
     if (savedCount > 0) saveCondition_.notify_one();
     Logger::info("Saved level.dat and queued {} chunks.", savedCount);
@@ -175,18 +165,16 @@ void World::saveLevelDat() {
 }
 
 World::~World() {
-    saveWorld();
-
+    // saveWorld() уже вызван из MinecraftServer::run() — не вызываем повторно.
+    // Останавливаем saveThread_ явно ДО удаления db_, иначе saveWorker
+    // может обратиться к db_ после его удаления.
     stopSaving_ = true;
     saveCondition_.notify_all();
-    if (saveThread_.joinable()) {
-        saveThread_.join();
-    }
+    saveThread_.request_stop();
+    saveThread_.join(); // ждём завершения всех pending записей
 
-    if (db_) {
-        delete db_;
-        db_ = nullptr;
-    }
+    delete db_;
+    db_ = nullptr;
 }
 
 void World::tick() {
@@ -333,27 +321,20 @@ void World::tick() {
         }
     }
 
-    // Auto-saving logic
     if (mcServer && mcServer->autoSaveInterval > 0 && worldTime % mcServer->autoSaveInterval == 0) {
         int savedCount = 0;
         for (const auto& [key, chunk] : chunks_) {
-            bool shouldSave = true;
-            if (mcServer && mcServer->saveModifiedChunksOnly && !chunk->isModified) {
-                shouldSave = false;
+            if (mcServer->saveModifiedChunksOnly && !chunk->isModified) continue;
+            auto data = compressChunkData(chunk.get());
+            {
+                std::lock_guard lock(saveMutex_);
+                saveQueue_.push({key, std::move(data)});
             }
-            
-            if (shouldSave) {
-                std::vector<uint8_t> data = compressChunkData(chunk.get());
-                {
-                    std::lock_guard<std::mutex> lock(saveMutex_);
-                    saveQueue_.push({key, data});
-                }
-                chunk->isModified = false; // Reset modification flag after queueing
-                savedCount++;
-            }
+            chunk->isModified = false;
+            ++savedCount;
         }
         if (savedCount > 0) {
-            std::cout << "[INFO] Auto-saved " << savedCount << " chunks." << std::endl;
+            Logger::info("Auto-saved {} chunks.", savedCount);
             saveCondition_.notify_one();
         }
     }
@@ -581,48 +562,32 @@ void World::getCollidingBoundingBoxes(Entity* entity, const AxisAlignedBB& mask,
 }
 
 void World::findSafeSpawnPoint() {
-    bool found = false;
-    int searchChunkX = 0;
-    int searchChunkZ = 0;
-
-    std::cout << "[INFO] Searching for safe spawn point..." << std::endl;
-
-    while (!found) {
-        // Load/generate chunk to check
-        Chunk* chunk = getChunk(searchChunkX, searchChunkZ, true);
-        
+    Logger::info("Searching for safe spawn point...");
+    for (int sx = 0, sz = 0; ; sx += (std::rand() % 3) - 1, sz += (std::rand() % 3) - 1) {
+        Chunk* chunk = getChunk(sx, sz, true);
+        bool found = false;
         for (int x = 0; x < 16 && !found; ++x) {
             for (int z = 0; z < 16 && !found; ++z) {
-                // Get highest point in these coordinates
-                int y = chunk->getHeightValue(x, z); 
-                
-                // Check block directly UNDER feet (y - 1)
-                uint8_t groundBlock = chunk->getBlockID(x, y - 1, z);
-                
-                // Search for grass (2) or sand (12)
-                if (groundBlock == 2 || groundBlock == 12) {
-                    spawnX = (searchChunkX * 16) + x;
-                    spawnZ = (searchChunkZ * 16) + z;
-                    spawnY = y; // Set player coordinates
+                int y = chunk->getHeightValue(x, z);
+                uint8_t ground = chunk->getBlockID(x, y - 1, z);
+                if (ground == 2 || ground == 12) {
+                    spawnX = sx * 16 + x;
+                    spawnZ = sz * 16 + z;
+                    spawnY = y;
                     found = true;
                 }
             }
         }
-
-        // If chunk is ocean or rock, spiral out randomly
-        if (!found) {
-            searchChunkX += (std::rand() % 3) - 1;
-            searchChunkZ += (std::rand() % 3) - 1;
-        }
+        if (found) break;
     }
-    std::cout << "[INFO] Spawn found: X=" << spawnX << " Y=" << spawnY << " Z=" << spawnZ << std::endl;
+    Logger::info("Spawn found: X={} Y={} Z={}", spawnX, spawnY, spawnZ);
 }
 
-void World::saveWorker() {
-    while (!stopSaving_ || !saveQueue_.empty()) {
-        std::unique_lock<std::mutex> lock(saveMutex_);
-        saveCondition_.wait_for(lock, std::chrono::seconds(1), [this] {
-            return !saveQueue_.empty() || stopSaving_;
+void World::saveWorker(std::stop_token st) {
+    while (true) {
+        std::unique_lock lock(saveMutex_);
+        saveCondition_.wait_for(lock, std::chrono::milliseconds(200), [&] {
+            return !saveQueue_.empty() || stopSaving_.load();
         });
 
         while (!saveQueue_.empty()) {
@@ -630,23 +595,19 @@ void World::saveWorker() {
             saveQueue_.pop();
             lock.unlock();
 
-            // Perform LevelDB I/O outside of main lock
             if (db_) {
-                int32_t cx = static_cast<int>(static_cast<int32_t>(task.key >> 32));
-                int32_t cz = static_cast<int>(static_cast<int32_t>(task.key & 0xFFFFFFFF));
-
                 leveldb::Slice keySlice(reinterpret_cast<const char*>(&task.key), sizeof(uint64_t));
                 leveldb::Slice valSlice(reinterpret_cast<const char*>(task.data.data()), task.data.size());
-
-                leveldb::Status status = db_->Put(leveldb::WriteOptions(), keySlice, valSlice);
-                if (!status.ok()) {
-                    std::cerr << "[ERROR] LevelDB save failed for chunk " << cx << "," << cz 
-                              << ": " << status.ToString() << std::endl;
-                }
+                auto status = db_->Put(leveldb::WriteOptions(), keySlice, valSlice);
+                if (!status.ok())
+                    Logger::severe("LevelDB save failed: {}", status.ToString());
             }
-            
+
             lock.lock();
         }
+
+        // Выходим только когда очередь пуста И попрошен останов
+        if (stopSaving_.load() && saveQueue_.empty()) break;
     }
 }
 
@@ -801,5 +762,5 @@ void World::loadEntities() {
         item->worldObj = this;
         entities_.push_back(std::move(item));
     }
-    if (count > 0) std::cout << "[INFO] Loaded " << count << " entities." << std::endl;
+    if (count > 0) Logger::info("Loaded {} entities.", count);
 }

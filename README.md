@@ -6,7 +6,7 @@ A C++ server implementation for Minecraft Alpha 1.2.6, written from scratch. Pro
 
 ## Building
 
-**Dependencies:** CMake 3.16+, GCC/Clang with C++20, zlib, LevelDB
+**Dependencies:** CMake 3.16+, GCC/Clang with C++23, zlib, LevelDB
 
 ```bash
 mkdir -p build && cd build

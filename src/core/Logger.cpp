@@ -1,33 +1,30 @@
 #include "Logger.h"
+#include <iomanip>
+#include <sstream>
 
-LogLevel Logger::minLevel_ = LogLevel::INFO;  // Default to INFO, can be changed via config
+LogLevel Logger::minLevel_ = LogLevel::INFO;
 
 void Logger::log(LogLevel level, const std::string& msg) {
     if (level < minLevel_) return;
 
-    const char* prefix = "";
+    const char* prefix = [&] {
+        switch (level) {
+            case LogLevel::DEBUG:   return "[D]";
+            case LogLevel::INFO:    return "[INFO]";
+            case LogLevel::WARNING: return "[WARNING]";
+            case LogLevel::SEVERE:  return "[SEVERE]";
+        }
+        return "[?]";
+    }();
 
-    switch (level) {
-        case LogLevel::DEBUG:   prefix = "[D]"; break;
-        case LogLevel::INFO:    prefix = "[INFO]"; break;
-        case LogLevel::WARNING: prefix = "[WARNING]"; break;
-        case LogLevel::SEVERE:  prefix = "[SEVERE]"; break;
-    }
-
-    // Get current timestamp
     auto now = std::chrono::system_clock::now();
     auto time = std::chrono::system_clock::to_time_t(now);
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now.time_since_epoch()) % 1000;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
 
     std::ostringstream oss;
     oss << std::put_time(std::localtime(&time), "%Y-%m-%d %H:%M:%S");
-    oss << '.' << std::setfill('0') << std::setw(3) << ms.count();
-    oss << " " << prefix << " " << msg;
+    oss << std::format(".{:03d} {} {}", ms.count(), prefix, msg);
 
-    if (level == LogLevel::SEVERE || level == LogLevel::WARNING) {
-        std::cerr << oss.str() << std::endl;
-    } else {
-        std::cout << oss.str() << std::endl;
-    }
+    auto& out = (level >= LogLevel::WARNING) ? std::cerr : std::cout;
+    out << oss.str() << '\n';
 }

@@ -7,7 +7,9 @@
 #include <unordered_map>
 #include <functional>
 #include <stdexcept>
-#include <cstring>
+#include <algorithm>
+#include <span>
+#include <bit>
 #include <arpa/inet.h>
 
 class NetHandler;
@@ -19,94 +21,65 @@ public:
     size_t readPos = 0;
 
     ByteBuffer() = default;
-    explicit ByteBuffer(const std::vector<uint8_t>& d) : data(d) {}
+    explicit ByteBuffer(std::vector<uint8_t> d) : data(std::move(d)) {}
 
-    // Write methods (big-endian)
-    void writeByte(int8_t v) { data.push_back(static_cast<uint8_t>(v)); }
+    void writeByte(int8_t v)   { data.push_back(static_cast<uint8_t>(v)); }
     void writeUByte(uint8_t v) { data.push_back(v); }
 
     void writeShort(int16_t v) {
-        uint16_t u = static_cast<uint16_t>(v);
-        data.push_back((u >> 8) & 0xFF);
-        data.push_back(u & 0xFF);
+        auto u = static_cast<uint16_t>(v);
+        data.push_back(u >> 8); data.push_back(u & 0xFF);
     }
 
     void writeInt(int32_t v) {
-        uint32_t u = static_cast<uint32_t>(v);
-        data.push_back((u >> 24) & 0xFF);
-        data.push_back((u >> 16) & 0xFF);
-        data.push_back((u >> 8) & 0xFF);
-        data.push_back(u & 0xFF);
+        auto u = static_cast<uint32_t>(v);
+        data.push_back(u >> 24); data.push_back((u >> 16) & 0xFF);
+        data.push_back((u >> 8) & 0xFF); data.push_back(u & 0xFF);
     }
 
     void writeLong(int64_t v) {
-        uint64_t u = static_cast<uint64_t>(v);
-        for (int i = 56; i >= 0; i -= 8) {
-            data.push_back((u >> i) & 0xFF);
-        }
+        auto u = static_cast<uint64_t>(v);
+        for (int i = 56; i >= 0; i -= 8) data.push_back((u >> i) & 0xFF);
     }
 
-    void writeFloat(float v) {
-        uint32_t u;
-        std::memcpy(&u, &v, sizeof(u));
-        writeInt(static_cast<int32_t>(u));
-    }
+    void writeFloat(float v)   { writeInt(std::bit_cast<int32_t>(v)); }
+    void writeDouble(double v) { writeLong(std::bit_cast<int64_t>(v)); }
+    void writeBool(bool v)     { writeByte(v ? 1 : 0); }
 
-    void writeDouble(double v) {
-        uint64_t u;
-        std::memcpy(&u, &v, sizeof(u));
-        writeLong(static_cast<int64_t>(u));
-    }
-
-    // Java's DataOutputStream.writeUTF: 2-byte length prefix + modified UTF-8
     void writeUTF(const std::string& s) {
-        // Simplified: assume ASCII for alpha protocol
         if (s.size() > 65535) throw std::runtime_error("String too long for writeUTF");
         writeShort(static_cast<int16_t>(s.size()));
-        for (char c : s) {
-            data.push_back(static_cast<uint8_t>(c));
-        }
+        data.insert(data.end(), s.begin(), s.end());
     }
 
-    void writeBytes(const uint8_t* buf, size_t len) {
-        data.insert(data.end(), buf, buf + len);
-    }
-
-    void writeBytes(const std::vector<uint8_t>& buf) {
+    void writeBytes(std::span<const uint8_t> buf) {
         data.insert(data.end(), buf.begin(), buf.end());
     }
+    void writeBytes(const uint8_t* buf, size_t len) { writeBytes({buf, len}); }
+    void writeBytes(const std::vector<uint8_t>& buf) { writeBytes(std::span(buf)); }
 
-    // Read methods (big-endian) — virtual so SocketReader can override
     void ensureReadable(size_t n) const {
         if (readPos + n > data.size()) throw std::runtime_error("Buffer underflow");
     }
 
     virtual ~ByteBuffer() = default;
 
-    virtual int8_t readByte() {
-        ensureReadable(1);
-        return static_cast<int8_t>(data[readPos++]);
-    }
-
-    virtual uint8_t readUByte() {
-        ensureReadable(1);
-        return data[readPos++];
-    }
+    virtual int8_t  readByte()  { ensureReadable(1); return static_cast<int8_t>(data[readPos++]); }
+    virtual uint8_t readUByte() { ensureReadable(1); return data[readPos++]; }
 
     virtual int16_t readShort() {
         ensureReadable(2);
-        uint16_t v = (static_cast<uint16_t>(data[readPos]) << 8) |
-                      static_cast<uint16_t>(data[readPos + 1]);
+        uint16_t v = (static_cast<uint16_t>(data[readPos]) << 8) | data[readPos + 1];
         readPos += 2;
         return static_cast<int16_t>(v);
     }
 
     virtual int32_t readInt() {
         ensureReadable(4);
-        uint32_t v = (static_cast<uint32_t>(data[readPos]) << 24) |
-                     (static_cast<uint32_t>(data[readPos + 1]) << 16) |
-                     (static_cast<uint32_t>(data[readPos + 2]) << 8) |
-                      static_cast<uint32_t>(data[readPos + 3]);
+        uint32_t v = (static_cast<uint32_t>(data[readPos]) << 24)
+                   | (static_cast<uint32_t>(data[readPos+1]) << 16)
+                   | (static_cast<uint32_t>(data[readPos+2]) << 8)
+                   |  static_cast<uint32_t>(data[readPos+3]);
         readPos += 4;
         return static_cast<int32_t>(v);
     }
@@ -114,27 +87,13 @@ public:
     virtual int64_t readLong() {
         ensureReadable(8);
         uint64_t v = 0;
-        for (int i = 0; i < 8; ++i) {
-            v = (v << 8) | static_cast<uint64_t>(data[readPos++]);
-        }
+        for (int i = 0; i < 8; ++i) v = (v << 8) | data[readPos++];
         return static_cast<int64_t>(v);
     }
 
-    virtual float readFloat() {
-        int32_t i = readInt();
-        uint32_t u = static_cast<uint32_t>(i);
-        float f;
-        std::memcpy(&f, &u, sizeof(f));
-        return f;
-    }
-
-    virtual double readDouble() {
-        int64_t i = readLong();
-        uint64_t u = static_cast<uint64_t>(i);
-        double d;
-        std::memcpy(&d, &u, sizeof(d));
-        return d;
-    }
+    virtual float  readFloat()  { return std::bit_cast<float>(static_cast<uint32_t>(readInt())); }
+    virtual double readDouble() { return std::bit_cast<double>(static_cast<uint64_t>(readLong())); }
+    virtual bool   readBool()   { return readByte() != 0; }
 
     virtual std::string readUTF() {
         int16_t len = readShort();
@@ -147,7 +106,7 @@ public:
 
     virtual void readBytes(uint8_t* buf, size_t len) {
         ensureReadable(len);
-        std::memcpy(buf, &data[readPos], len);
+        std::copy(&data[readPos], &data[readPos + len], buf);
         readPos += len;
     }
 
@@ -158,15 +117,7 @@ public:
         return result;
     }
 
-    virtual bool readBool() {
-        return readByte() != 0;
-    }
-
-    void writeBool(bool v) {
-        writeByte(v ? 1 : 0);
-    }
-
-    size_t remaining() const { return data.size() - readPos; }
+    [[nodiscard]] size_t remaining() const { return data.size() - readPos; }
 };
 
 // Base packet class

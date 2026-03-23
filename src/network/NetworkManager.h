@@ -22,36 +22,24 @@ class NetworkManager {
 public:
     NetworkManager(int socketFd, const std::string& desc, NetHandler* handler)
         : socketFd_(socketFd), netHandler_(handler), description_(desc) {
-        // Start read and write threads
-        readThread_ = std::thread([this]() { readLoop(); });
-        writeThread_ = std::thread([this]() { writeLoop(); });
+        readThread_  = std::jthread([this](std::stop_token st) { readLoop(st); });
+        writeThread_ = std::jthread([this](std::stop_token st) { writeLoop(st); });
     }
 
     ~NetworkManager() {
         shutdown("Destructor");
-        if (readThread_.joinable()) readThread_.join();
-        if (writeThread_.joinable()) writeThread_.join();
     }
 
-    void setNetHandler(NetHandler* handler) {
-        netHandler_ = handler;
-    }
+    void setNetHandler(NetHandler* handler) { netHandler_ = handler; }
 
     void addToSendQueue(std::unique_ptr<Packet> pkt) {
         if (isServerTerminating_) return;
-        std::lock_guard<std::mutex> lock(sendMutex_);
+        std::lock_guard lock(sendMutex_);
         sendQueueByteLength_ += pkt->getPacketSize() + 1;
-        if (pkt->isChunkDataPacket) {
+        if (pkt->isChunkDataPacket)
             chunkDataPackets_.push(std::move(pkt));
-        } else {
+        else
             dataPackets_.push(std::move(pkt));
-        }
-    }
-
-    // Convenience: create and queue a packet
-    template<typename T, typename... Args>
-    void sendPacket(Args&&... args) {
-        addToSendQueue(std::make_unique<T>(std::forward<Args>(args)...));
     }
 
     void processReadPackets() {
@@ -61,17 +49,13 @@ public:
 
         std::vector<std::unique_ptr<Packet>> toProcess;
         {
-            std::lock_guard<std::mutex> lock(readMutex_);
+            std::lock_guard lock(readMutex_);
             if (readPackets_.empty()) {
-                if (++timeSinceLastRead_ >= 1200) {
-                    shutdown("Timed out");
-                }
+                if (++timeSinceLastRead_ >= 1200) shutdown("Timed out");
             } else {
                 timeSinceLastRead_ = 0;
             }
-
-            int count = 100;
-            while (!readPackets_.empty() && count-- >= 0) {
+            for (int count = 100; !readPackets_.empty() && count-- > 0; ) {
                 toProcess.push_back(std::move(readPackets_.front()));
                 readPackets_.pop();
             }
@@ -82,56 +66,41 @@ public:
                 pkt->processPacket(*netHandler_);
             } catch (const std::exception& e) {
                 Logger::warning("Failed to process packet: {} - {}", pkt->getPacketId(), e.what());
-                // Kick the player on packet processing error
-                if (netHandler_) {
-                    netHandler_->handleErrorMessage("Packet processing error: " + std::string(e.what()));
-                }
+                if (netHandler_) netHandler_->handleErrorMessage("Packet processing error: " + std::string(e.what()));
             }
         }
 
         if (isTerminating_) {
-            std::lock_guard<std::mutex> lock(readMutex_);
-            if (readPackets_.empty()) {
-                netHandler_->handleErrorMessage(terminationReason_);
-            }
+            std::lock_guard lock(readMutex_);
+            if (readPackets_.empty()) netHandler_->handleErrorMessage(terminationReason_);
         }
     }
 
     void shutdown(const std::string& reason) {
-        if (!isRunning_) return;
+        if (!isRunning_.exchange(false)) return;
         isTerminating_ = true;
         terminationReason_ = reason;
-        isRunning_ = false;
-
         if (socketFd_ >= 0) {
             ::shutdown(socketFd_, SHUT_RDWR);
             ::close(socketFd_);
             socketFd_ = -1;
         }
+        readThread_.request_stop();
+        writeThread_.request_stop();
     }
 
     void serverShutdown() {
         isServerTerminating_ = true;
-        // Wait a bit for remaining packets to send, then close
-        std::thread([this]() {
+        std::thread([this] {
             std::this_thread::sleep_for(std::chrono::seconds(5));
             shutdown("Server shutdown");
         }).detach();
     }
 
-    std::string getRemoteAddress() const {
-        return remoteAddress_;
-    }
-
-    void setRemoteAddress(const std::string& addr) {
-        remoteAddress_ = addr;
-    }
-
-    int getNumChunkDataPackets() const {
-        return static_cast<int>(chunkDataPackets_.size());
-    }
-
-    bool isRunning() const { return isRunning_; }
+    [[nodiscard]] std::string getRemoteAddress() const { return remoteAddress_; }
+    void setRemoteAddress(const std::string& addr) { remoteAddress_ = addr; }
+    [[nodiscard]] int getNumChunkDataPackets() const { return static_cast<int>(chunkDataPackets_.size()); }
+    [[nodiscard]] bool isRunning() const { return isRunning_; }
 
 private:
     int socketFd_;
@@ -151,21 +120,17 @@ private:
     std::queue<std::unique_ptr<Packet>> dataPackets_;
     std::queue<std::unique_ptr<Packet>> chunkDataPackets_;
     std::atomic<int> sendQueueByteLength_{0};
-    int chunkDataSendCounter_ = 0;
     int timeSinceLastRead_ = 0;
 
-    std::thread readThread_;
-    std::thread writeThread_;
+    std::jthread readThread_;
+    std::jthread writeThread_;
 
-    void readLoop() {
-        while (isRunning_) {
+    void readLoop(std::stop_token st) {
+        while (!st.stop_requested() && isRunning_) {
             try {
                 auto pkt = Packet::readPacket(socketFd_);
-                if (!pkt) {
-                    shutdown("End of stream");
-                    return;
-                }
-                std::lock_guard<std::mutex> lock(readMutex_);
+                if (!pkt) { shutdown("End of stream"); return; }
+                std::lock_guard lock(readMutex_);
                 readPackets_.push(std::move(pkt));
             } catch (const std::exception& e) {
                 if (!isTerminating_) {
@@ -177,16 +142,15 @@ private:
         }
     }
 
-    void writeLoop() {
-        while (isRunning_ || isServerTerminating_) {
+    void writeLoop(std::stop_token st) {
+        while (!st.stop_requested() && (isRunning_ || isServerTerminating_)) {
             try {
                 bool idle = true;
 
-                // Drain all pending data packets first (movement, chat, block updates, etc.)
                 while (true) {
                     std::unique_ptr<Packet> pkt;
                     {
-                        std::lock_guard<std::mutex> lock(sendMutex_);
+                        std::lock_guard lock(sendMutex_);
                         if (dataPackets_.empty()) break;
                         pkt = std::move(dataPackets_.front());
                         dataPackets_.pop();
@@ -196,11 +160,10 @@ private:
                     idle = false;
                 }
 
-                // Send one chunk packet per iteration (rate limited to avoid flooding)
                 {
                     std::unique_ptr<Packet> pkt;
                     {
-                        std::lock_guard<std::mutex> lock(sendMutex_);
+                        std::lock_guard lock(sendMutex_);
                         if (!chunkDataPackets_.empty()) {
                             pkt = std::move(chunkDataPackets_.front());
                             chunkDataPackets_.pop();
@@ -211,9 +174,7 @@ private:
                     if (pkt) Packet::writePacket(*pkt, socketFd_);
                 }
 
-                if (idle) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-                }
+                if (idle) std::this_thread::sleep_for(std::chrono::milliseconds(5));
             } catch (const std::exception& e) {
                 if (!isTerminating_) {
                     Logger::warning("Write error on {}: {}", description_, e.what());
