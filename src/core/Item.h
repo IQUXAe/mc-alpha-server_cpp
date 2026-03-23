@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include "Material.h"
 
 class Block;
 class World;
@@ -152,13 +153,14 @@ public:
         itemsList[id] = this;
     }
 
-    float getStrVsBlock(int blockId) const {
-        for (int id : effectiveBlockIDs)
-            if (id == blockId) return digSpeed;
-        return 1.0f;
-    }
+    // Returns dig speed multiplier for a block.
+    // Checks explicit list first, then material-based fallback.
+    float getStrVsBlock(int blockId) const;
 
     virtual bool canHarvestBlock(int blockId) const { return false; }
+
+protected:
+    virtual bool isEffectiveAgainst(Block* block) const { return false; }
 };
 
 class ItemPickaxe : public ItemTool {
@@ -167,6 +169,9 @@ public:
         {4,43,44,1,48,15,42,7,14,56,57,79,87}) {}
 
     bool canHarvestBlock(int blockId) const override;
+protected:
+    // Pickaxe is effective against all rock and iron material blocks
+    bool isEffectiveAgainst(Block* block) const override;
 };
 
 class ItemSpade : public ItemTool {
@@ -175,12 +180,18 @@ public:
         {2,3,12,13,78,80,82}) {}
 
     bool canHarvestBlock(int blockId) const override { return blockId == 78 || blockId == 80; }
+protected:
+    // Spade is effective against ground/sand/snow material blocks
+    bool isEffectiveAgainst(Block* block) const override;
 };
 
 class ItemAxe : public ItemTool {
 public:
     ItemAxe(int id, int level) : ItemTool(id, (level + 1) * 2.0f, level,
         {5,47,17,54}) {}
+protected:
+    // Axe is effective against wood material blocks
+    bool isEffectiveAgainst(Block* block) const override;
 };
 
 class ItemSword : public Item {

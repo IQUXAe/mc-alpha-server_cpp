@@ -261,6 +261,18 @@ Block::Block(int id, Material* material)
     isBlockContainer[id] = false;
 }
 
+class BlockOre : public Block {
+public:
+    BlockOre(int id, Material* material) : Block(id, material) {}
+
+    int idDropped(int metadata) const override {
+        if (blockID == 16) return 263; // coal ore -> coal (Item id 7 -> itemID 263)
+        if (blockID == 56) return 264; // diamond ore -> diamond (Item id 8 -> itemID 264)
+        if (blockID == 21) return 351; // lapis ore -> lapis (Item id 95 -> itemID 351)
+        return blockID;                // iron/gold/redstone ore drop themselves
+    }
+};
+
 class BlockStone : public Block {
 public:
     BlockStone(int id, Material* material) : Block(id, material) {}
@@ -296,9 +308,9 @@ void Block::initBlocks() {
     blocksList[11] = new BlockFluid(11, &Material::lava);
     sand = (new BlockSand(12, &Material::sand))->setHardness(0.5f);
     gravel = (new BlockSand(13, &Material::sand))->setHardness(0.6f);
-    oreGold = (new Block(14, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
-    oreIron = (new Block(15, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
-    oreCoal = (new Block(16, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
+    oreGold = (new BlockOre(14, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
+    oreIron = (new BlockOre(15, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
+    oreCoal = (new BlockOre(16, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
     wood = (new Block(17, &Material::wood))->setHardness(2.0f);
     leaves = (new BlockLeaves(18, &Material::leaves))->setHardness(0.2f)->setLightOpacity(1);
     (new Block(19, &Material::ground))->setHardness(0.4f);   // sponge
@@ -335,7 +347,7 @@ void Block::initBlocks() {
     (new Block(53, &Material::wood))->setHardness(2.0f);     // wood stairs
     (new Block(54, &Material::wood))->setHardness(2.5f);     // chest
     (new Block(55, &Material::circuits))->setHardness(0.0f)->setLightOpacity(0); // redstone wire
-    oreDiamond = (new Block(56, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
+    oreDiamond = (new BlockOre(56, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
     (new Block(57, &Material::iron))->setHardness(5.0f);     // diamond block
     (new Block(58, &Material::wood))->setHardness(2.5f);     // crafting table
     (new Block(59, &Material::plants))->setHardness(0.0f);   // crops
@@ -352,8 +364,8 @@ void Block::initBlocks() {
     (new Block(70, &Material::rock))->setHardness(0.5f);     // stone pressure plate
     (new Block(71, &Material::iron))->setHardness(3.0f);     // iron door
     (new Block(72, &Material::wood))->setHardness(0.5f);     // wood pressure plate
-    oreRedstone = (new Block(73, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
-    (new Block(74, &Material::rock))->setHardness(3.0f);     // glowing redstone ore
+    oreRedstone = (new BlockOre(73, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
+    (new BlockOre(74, &Material::rock))->setHardness(3.0f);     // glowing redstone ore
     (new Block(75, &Material::circuits))->setHardness(0.0f); // redstone torch off
     (new Block(76, &Material::circuits))->setHardness(0.0f); // redstone torch on
     (new Block(77, &Material::circuits))->setHardness(0.5f); // stone button
@@ -419,11 +431,7 @@ void Block::getCollidingBoundingBoxes(World* world, int x, int y, int z, const A
 }
 
 void Block::dropBlockAsItem(World* world, int x, int y, int z, int metadata) {
-    // Standard Alpha behavior: most blocks drop with 100% chance if canHarvest
-    // We don't have player tool check yet, so we use a simplified version
-    if (canHarvestBlock(nullptr)) { 
-        dropBlockAsItemWithChance(world, x, y, z, metadata, 1.0f);
-    }
+    dropBlockAsItemWithChance(world, x, y, z, metadata, 1.0f);
 }
 
 void Block::dropBlockAsItemWithChance(World* world, int x, int y, int z, int metadata, float chance) {
@@ -457,22 +465,18 @@ float Block::checkHardness(EntityPlayer* player) const {
     if (player) {
         auto* mp = dynamic_cast<EntityPlayerMP*>(player);
         if (mp) {
+            canHarvest = mp->inventory.canHarvestBlock(const_cast<Block*>(this));
             ItemStack* held = mp->inventory.getCurrentItem();
-            if (held) {
+            if (held && held->itemID > 0 && held->itemID < 32000) {
                 Item* item = Item::itemsList[held->itemID];
-                if (item) {
-                    auto* tool = dynamic_cast<ItemTool*>(item);
-                    if (tool) {
-                        float toolStr = tool->getStrVsBlock(blockID);
-                        if (toolStr > 1.0f) str = toolStr;
-                        if (!canHarvest && tool->canHarvestBlock(blockID))
-                            canHarvest = true;
-                    }
+                if (auto* tool = dynamic_cast<ItemTool*>(item)) {
+                    float toolStr = tool->getStrVsBlock(blockID);
+                    if (toolStr > 1.0f) str = toolStr;
                 }
             }
         }
     }
 
     return canHarvest ? str / blockHardness / 30.0f
-                      : str / blockHardness / 100.0f;
+                      : 1.0f / blockHardness / 100.0f;
 }

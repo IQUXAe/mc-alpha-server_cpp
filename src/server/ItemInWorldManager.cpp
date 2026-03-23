@@ -5,6 +5,7 @@
 #include "../core/ItemStack.h"
 #include "../core/Item.h"
 #include "../core/AxisAlignedBB.h"
+#include "../core/Logger.h"
 
 ItemInWorldManager::ItemInWorldManager(World* world) {
     this->worldObj = world;
@@ -39,7 +40,8 @@ void ItemInWorldManager::blockRemoving(int x, int y, int z, int side) {
             int id = worldObj->getBlockId(x, y, z);
             if (id == 0) return;
             Block* block = Block::blocksList[id];
-            curblockDamage += block->checkHardness(thisPlayerMP);
+            float hardnessTick = block->checkHardness(thisPlayerMP);
+            curblockDamage += hardnessTick;
             blockDamage += 1.0f;
             if (curblockDamage >= 1.0f) {
                 harvestBlock(x, y, z);
@@ -73,8 +75,8 @@ bool ItemInWorldManager::harvestBlock(int x, int y, int z) {
     bool removed = removeBlock(x, y, z);
 
     ItemStack* stack = thisPlayerMP->getCurrentEquippedItem();
-    if (stack) {
-        // Damage tool on block hit (mirrors Java ItemTool.hitBlock: -1 durability)
+    if (stack && stack->itemID > 0 && stack->itemID < 32000) {
+        // Java: ItemTool.hitBlock damages tool by 1
         Item* item = Item::itemsList[stack->itemID];
         if (item && dynamic_cast<ItemTool*>(item)) {
             stack->damageItem(1);
@@ -85,14 +87,10 @@ bool ItemInWorldManager::harvestBlock(int x, int y, int z) {
         }
     }
 
-    if (removed) {
-        bool canHarvest = thisPlayerMP->canHarvestBlock(Block::blocksList[id]);
-        if (!canHarvest && stack) {
-            Item* item = Item::itemsList[stack->itemID];
-            auto* tool = dynamic_cast<ItemTool*>(item);
-            if (tool && tool->canHarvestBlock(id)) canHarvest = true;
-        }
-        if (canHarvest)
+    // Java func_325_c: drop only if player.func_167_b(block) == true
+    // func_167_b = inventory.canHarvestBlock(block)
+    if (removed && id > 0 && Block::blocksList[id]) {
+        if (thisPlayerMP->canHarvestBlock(Block::blocksList[id]))
             Block::blocksList[id]->dropBlockAsItemWithChance(worldObj, x, y, z, meta, 1.0f);
     }
     return removed;

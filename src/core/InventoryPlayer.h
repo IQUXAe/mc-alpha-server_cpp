@@ -2,7 +2,9 @@
 
 #include "IInventory.h"
 #include "ItemStack.h"
+#include "Item.h"
 #include "NBT.h"
+#include "Material.h"
 #include <vector>
 
 class EntityPlayer;
@@ -209,13 +211,21 @@ public:
     }
 
     bool canHarvestBlock(Block* block) {
-        if (block->canHarvestBlock(player)) {
+        // Java InventoryPlayer.canHarvestBlock:
+        // Materials rock, iron, snow, builtSnow require a tool — bare hand returns false.
+        // Everything else (wood, ground, sand, plants, etc.) can be harvested by hand.
+        if (block->blockMaterial != &Material::rock
+         && block->blockMaterial != &Material::iron
+         && block->blockMaterial != &Material::snow
+         && block->blockMaterial != &Material::builtSnow) {
             return true;
         }
-        if (mainInventory[currentItem] != nullptr) {
-            return mainInventory[currentItem]->canHarvestBlock(block);
-        }
-        return false;
+        // Need a tool: check held item
+        ItemStack* held = mainInventory[currentItem];
+        if (!held || held->itemID <= 0 || held->itemID >= 32000) return false;
+        Item* item = Item::itemsList[held->itemID];
+        auto* tool = dynamic_cast<ItemTool*>(item);
+        return tool && tool->canHarvestBlock(block->blockID);
     }
 
     // NBT serialization (mirrors Java's InventoryPlayer.writeToNBT/readFromNBT)
