@@ -38,7 +38,7 @@ void NetLoginHandler::kickUser(const std::string& reason) {
 }
 
 void NetLoginHandler::handleHandshake(Packet2Handshake& pkt) {
-    if (mcServer_->onlineMode) {
+    if (mcServer_->isOnlineMode()) {
         // Generate server ID for auth
         std::uniform_int_distribution<int64_t> dist;
         int64_t randVal = dist(rng_);
@@ -63,7 +63,7 @@ void NetLoginHandler::handleLogin(Packet1Login& pkt) {
     }
 
     // In offline mode, login directly
-    if (!mcServer_->onlineMode) {
+    if (!mcServer_->isOnlineMode()) {
         doLogin(pkt);
     } else {
         // TODO: online auth verification

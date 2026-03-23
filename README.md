@@ -46,7 +46,7 @@ Instead of a bulky list of pros and cons, here is how `alpha_server` fundamental
 | **Terrain & Biomes** | Original algorithm | **Identical to original (1:1 generation)** |
 | Mobs & AI | Fully implemented | 🚧 Work in progress |
 | Redstone Logic | Fully implemented | 🚧 Work in progress |
-| Tile Entities | Chest, Furnace, Sign logic | 🚧 Stubs only |
+| Tile Entities | Chest, Furnace, Sign logic | Fully work (test) |
 | Dimensions | Overworld & Nether | Overworld only |
 | Authentication | Online mode (HTTP session check) | Server ID sent, HTTP session check not implemented |
 

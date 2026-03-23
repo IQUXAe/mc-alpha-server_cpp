@@ -112,16 +112,21 @@ void Chunk::generateSkylightMap() {
     std::queue<LightNode> skyQueue;
     std::queue<LightNode> blockQueue;
 
-    // Use Block::lightOpacity for transparency — respects setLightOpacity(0) calls
+    // A block is transparent if lightOpacity < 15 (doesn't fully block light).
     auto isTransparent = [](uint8_t id) -> bool {
-        if (id == 0) return true;
-        return Block::lightOpacity[id] == 0;
+        return Block::lightOpacity[id] < 15;
     };
 
-    // Attenuation for semi-transparent blocks (leaves, liquids)
-    auto getOpacity = [](uint8_t id) -> int {
-        if (id == 18 || id == 8 || id == 9 || id == 10 || id == 11) return 3;
-        return 1;
+    // Attenuation for vertical skylight pass: how much currentSky drops per block.
+    // Air and zero-opacity blocks cost nothing; semi-transparent blocks cost their opacity.
+    auto getVerticalOpacity = [](uint8_t id) -> int {
+        return Block::lightOpacity[id]; // 0 for air/glass/flowers, 1 for leaves, 3 for water, 255 for stone
+    };
+
+    // Attenuation for BFS spread: minimum 1 per step (light always weakens when moving sideways/down).
+    auto getBFSOpacity = [](uint8_t id) -> int {
+        int op = Block::lightOpacity[id];
+        return op < 1 ? 1 : op;
     };
 
     int globalX = xPosition * 16;
@@ -137,10 +142,9 @@ void Chunk::generateSkylightMap() {
                 if (!isTransparent(id)) {
                     currentSky = 0;
                 } else {
-                    currentSky -= getOpacity(id) - 1; // leaves/liquids attenuate extra
+                    currentSky -= getVerticalOpacity(id);
+                    if (currentSky < 0) currentSky = 0;
                 }
-                
-                if (currentSky < 0) currentSky = 0;
                 skylight.setNibble(x, y, z, currentSky);
                 
                 // Add to queue if has skylight using GLOBAL coordinates
@@ -178,7 +182,7 @@ void Chunk::generateSkylightMap() {
                 uint8_t id = neighborChunk->getBlockID(nx & 15, ny, nz & 15);
                 if (!isTransparent(id)) return;
 
-                int opacity = getOpacity(id);
+                int opacity = getBFSOpacity(id);
 
                 int neighborLight = neighborChunk->getSavedLightValue(0, nx & 15, ny, nz & 15);
                 int newLight = currentLight - opacity;
@@ -213,7 +217,7 @@ void Chunk::generateSkylightMap() {
                 uint8_t id = neighborChunk->getBlockID(nx & 15, ny, nz & 15);
                 if (!isTransparent(id)) return;
 
-                int opacity = getOpacity(id);
+                int opacity = getBFSOpacity(id);
 
                 int neighborLight = neighborChunk->getSavedLightValue(1, nx & 15, ny, nz & 15);
                 int newLight = currentLight - opacity;

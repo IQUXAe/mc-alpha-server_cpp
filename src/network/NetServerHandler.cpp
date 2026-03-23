@@ -42,7 +42,7 @@ void NetServerHandler::tick() {
         lastChunkX_ = cx;
         lastChunkZ_ = cz;
 
-        int r = mcServer_->viewDistance;
+        int r = mcServer_->getViewDistance();
         int genR = r + 3; // extra ring: +1 for population neighbors, +2 buffer
 
         // Unload chunks that are now outside the view distance.
@@ -261,7 +261,7 @@ void NetServerHandler::restoreHeldItem(int itemId) {
 void NetServerHandler::sendChunks() {
     int chunkX = static_cast<int>(player_->posX) >> 4;
     int chunkZ = static_cast<int>(player_->posZ) >> 4;
-    int r = mcServer_->viewDistance;
+    int r = mcServer_->getViewDistance();
 
     std::vector<std::pair<int, int>> chunksToLoad;
     int genR = r + 3; // Generate 3 extra rings for full population guarantee

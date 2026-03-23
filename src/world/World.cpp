@@ -44,7 +44,7 @@ World::World(MinecraftServer* server, const std::string& savePath, int64_t seed)
     bool hasLevelDat = loadLevelDat();
     if (!hasLevelDat) {
         // Use provided seed, or generate random if seed is 0
-            randomSeed = (seed != 0) ? seed : static_cast<int64_t>(time(nullptr));
+        randomSeed = (seed != 0) ? seed : static_cast<int64_t>(time(nullptr));
         worldTime = 0;
         Logger::info("No level.dat found, generated new seed: {}", randomSeed);
     } else {
@@ -75,7 +75,7 @@ void World::saveWorld() {
 
     int savedCount = 0;
     for (const auto& [key, chunk] : chunks_) {
-        if (mcServer && mcServer->saveModifiedChunksOnly && !chunk->isModified) continue;
+        if (mcServer && mcServer->isSaveModifiedChunksOnly() && !chunk->isModified) continue;
         auto data = compressChunkData(chunk.get());
         {
             std::lock_guard lock(saveMutex_);
@@ -281,7 +281,7 @@ void World::tick() {
     if (worldTime % 100 == 0) {
         int r = 0;
         if (mcServer) {
-            r = mcServer->viewDistance + 2; // Generation radius mapping
+            r = mcServer->getViewDistance() + 2; // generation radius mapping
         }
 
         std::vector<uint64_t> toUnload;
@@ -318,7 +318,7 @@ void World::tick() {
             auto it = chunks_.find(key);
             if (it != chunks_.end()) {
                 bool shouldSave = true;
-                if (mcServer && mcServer->saveModifiedChunksOnly && !it->second->isModified) {
+                if (mcServer && mcServer->isSaveModifiedChunksOnly() && !it->second->isModified) {
                     shouldSave = false;
                 }
                 
@@ -337,10 +337,10 @@ void World::tick() {
         }
     }
 
-    if (mcServer && mcServer->autoSaveInterval > 0 && worldTime % mcServer->autoSaveInterval == 0) {
+    if (mcServer && mcServer->getAutoSaveInterval() > 0 && worldTime % mcServer->getAutoSaveInterval() == 0) {
         int savedCount = 0;
         for (const auto& [key, chunk] : chunks_) {
-            if (mcServer->saveModifiedChunksOnly && !chunk->isModified) continue;
+            if (mcServer->isSaveModifiedChunksOnly() && !chunk->isModified) continue;
             auto data = compressChunkData(chunk.get());
             {
                 std::lock_guard lock(saveMutex_);
@@ -685,7 +685,8 @@ void World::getCollidingBoundingBoxes(Entity* entity, const AxisAlignedBB& mask,
 
 void World::findSafeSpawnPoint() {
     Logger::info("Searching for safe spawn point...");
-    for (int sx = 0, sz = 0; ; sx += (std::rand() % 3) - 1, sz += (std::rand() % 3) - 1) {
+    std::uniform_int_distribution<int> dist(-1, 1);
+    for (int sx = 0, sz = 0; ; sx += dist(rand), sz += dist(rand)) {
         Chunk* chunk = getChunk(sx, sz, true);
         bool found = false;
         for (int x = 0; x < 16 && !found; ++x) {

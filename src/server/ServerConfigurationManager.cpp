@@ -67,7 +67,7 @@ EntityPlayerMP* ServerConfigurationManager::login(NetLoginHandler* handler, cons
 void ServerConfigurationManager::playerLoggedIn(EntityPlayerMP* player) {
     playerEntities.push_back(player);
 
-    const auto& saveDir = mcServer_->playerSaveDir;
+    const auto& saveDir = mcServer_->getPlayerSaveDir();
     std::string saveFile = saveDir + "/" + toLower(player->username) + ".dat";
 
     if (player->loadFromFile(saveFile)) {
@@ -88,7 +88,7 @@ void ServerConfigurationManager::playerLoggedIn(EntityPlayerMP* player) {
 void ServerConfigurationManager::playerLoggedOut(EntityPlayerMP* player) {
     if (mcServer_->entityTracker) mcServer_->entityTracker->removeEntity(player);
 
-    const auto& saveDir = mcServer_->playerSaveDir;
+    const auto& saveDir = mcServer_->getPlayerSaveDir();
     std::string saveFile = saveDir + "/" + toLower(player->username) + ".dat";
     if (!player->saveToFile(saveFile))
         Logger::warning("Failed to save player data for {}", player->username);
@@ -230,7 +230,7 @@ void ServerConfigurationManager::syncHeldItems() {
 }
 
 void ServerConfigurationManager::savePlayerStates() {
-    const auto& saveDir = mcServer_->playerSaveDir;
+    const auto& saveDir = mcServer_->getPlayerSaveDir();
     for (auto* player : playerEntities) {
         std::string saveFile = saveDir + "/" + toLower(player->username) + ".dat";
         if (!player->saveToFile(saveFile))

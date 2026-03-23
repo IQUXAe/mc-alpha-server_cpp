@@ -59,5 +59,5 @@ int main(int argc, char* argv[]) {
 
     // Use _Exit instead of exit to bypass the std::cin mutex deadlock,
     // which is still held by the sleeping detached consoleThread.
-    std::_Exit(0);
+    std::_Exit(0); // its just work
 }

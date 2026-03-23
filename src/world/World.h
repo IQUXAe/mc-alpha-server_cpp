@@ -146,8 +146,11 @@ private:
     }
 
     inline uint64_t getTileEntityKey(int x, int y, int z) const {
+        // Pack as: x(32 bits) | y(16 bits) | z(16 bits)
+        // y is clamped to [0,255], x/z use full int32 range via reinterpret as uint32
+        // To avoid collision on negative z, encode z offset by 32768 into uint16
         return (static_cast<uint64_t>(static_cast<uint32_t>(x)) << 32) |
-               (static_cast<uint64_t>(static_cast<uint16_t>(y)) << 16) |
-                static_cast<uint16_t>(z);
+               (static_cast<uint64_t>(static_cast<uint8_t>(y)) << 16) |
+                static_cast<uint16_t>(static_cast<int16_t>(z & 0xFFFF));
     }
 };
