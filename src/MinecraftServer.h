@@ -15,11 +15,17 @@
 
 class MinecraftServer {
 public:
+    // Деструкция идёт снизу вверх (последний объявленный уничтожается первым):
+    // 1. networkListenThread  — сначала закрываем сеть
+    // 2. entityTracker        — потом трекер
+    // 3. configManager        — потом игроки
+    // 4. worldMngr            — потом мир
+    // 5. propertyManager      — последним
     std::unique_ptr<PropertyManager> propertyManager;
-    std::unique_ptr<NetworkListenThread> networkListenThread;
-    std::unique_ptr<ServerConfigurationManager> configManager;
     std::unique_ptr<World> worldMngr;
+    std::unique_ptr<ServerConfigurationManager> configManager;
     std::unique_ptr<EntityTracker> entityTracker;
+    std::unique_ptr<NetworkListenThread> networkListenThread;
 
     bool onlineMode = true;
     bool spawnAnimals = true;
@@ -27,6 +33,7 @@ public:
     int viewDistance = 10;
     int autoSaveInterval = 6000;
     bool saveModifiedChunksOnly = false;
+    std::string playerSaveDir;  // world/<levelname>/players
 
     MinecraftServer();
     ~MinecraftServer();

@@ -13,6 +13,13 @@
 #include <thread>
 #include <random>
 #include <algorithm>
+#include <ranges>
+#include <filesystem>
+
+static std::string_view trimLeft(std::string_view s) {
+    auto it = std::ranges::find_if_not(s, [](char c){ return c == ' '; });
+    return s.substr(static_cast<size_t>(it - s.begin()));
+}
 
 MinecraftServer::MinecraftServer() {
     MathHelper::init();
@@ -20,8 +27,9 @@ MinecraftServer::MinecraftServer() {
 }
 
 MinecraftServer::~MinecraftServer() {
+    // stop() уже вызван из run() или signalHandler — повторный вызов безопасен
     stop();
-    if (worldMngr) worldMngr->saveWorld();
+    // saveWorld() уже вызван в run() перед выходом из цикла — не вызываем повторно
 }
 
 bool MinecraftServer::initialize() {
@@ -105,6 +113,10 @@ bool MinecraftServer::initialize() {
     worldMngr = std::make_unique<World>(this, "world/" + levelName, worldSeed_);
     worldSeed_ = worldMngr->randomSeed;
 
+    // Player saves go inside the world folder, mirroring Java's PlayerNBTManager
+    playerSaveDir = "world/" + levelName + "/players";
+    std::filesystem::create_directories(playerSaveDir);
+
     Logger::info("Actual world seed: {}", worldSeed_);
     Logger::info("Spawn position: {}, {}, {}", spawnX_, spawnY_, spawnZ_);
 
@@ -157,15 +169,26 @@ void MinecraftServer::run() {
 
     // Shutdown
     Logger::info("Stopping server");
+
+    // 1. Кикаем всех игроков — NetServerHandler отпишется от configManager
     if (configManager) {
+        // Копируем список т.к. kick() модифицирует playerEntities
+        auto players = configManager->playerEntities;
+        for (auto* p : players) {
+            if (p && p->netHandler)
+                p->netHandler->kick("Server shutting down");
+        }
         configManager->syncHeldItems();
         configManager->savePlayerStates();
     }
-    if (worldMngr) {
-        worldMngr->saveWorld();
-    }
 
-    std::cout << "[INFO] Server stopped." << std::endl;
+    // 2. Останавливаем сеть — после этого никаких новых пакетов
+    networkListenThread.reset();
+
+    // 3. Сохраняем мир
+    if (worldMngr) worldMngr->saveWorld();
+
+    std::cout << "[INFO] Server stopped.\n";
 }
 
 void MinecraftServer::stop() {
@@ -218,125 +241,104 @@ void MinecraftServer::processCommands() {
 
 void MinecraftServer::handleCommand(const std::string& cmd) {
     std::string lower = cmd;
-    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    std::ranges::transform(lower, lower.begin(), ::tolower);
+    std::string_view sv(cmd);
+
+    auto argOf = [&](std::string_view prefix) -> std::string {
+        return std::string(trimLeft(sv.substr(prefix.size())));
+    };
+    auto splitTwo = [](std::string_view s) -> std::pair<std::string, std::string> {
+        auto sp = s.find(' ');
+        if (sp == std::string_view::npos) return {std::string(s), {}};
+        return {std::string(s.substr(0, sp)), std::string(trimLeft(s.substr(sp + 1)))};
+    };
 
     if (lower.starts_with("help") || lower.starts_with("?")) {
-        std::cout << "Console commands:" << std::endl;
-        std::cout << "   help  or  ?               shows this message" << std::endl;
-        std::cout << "   kick <player>             removes a player from the server" << std::endl;
-        std::cout << "   ban <player>              bans a player from the server" << std::endl;
-        std::cout << "   pardon <player>           pardons a banned player" << std::endl;
-        std::cout << "   ban-ip <ip>               bans an IP address" << std::endl;
-        std::cout << "   pardon-ip <ip>            pardons a banned IP address" << std::endl;
-        std::cout << "   op <player>               turns a player into an op" << std::endl;
-        std::cout << "   deop <player>             removes op status" << std::endl;
-        std::cout << "   tp <player1> <player2>    teleports player1 to player2" << std::endl;
-        std::cout << "   give <player> <id> [num]  gives a player a resource" << std::endl;
-        std::cout << "   tell <player> <message>   sends a private message" << std::endl;
-        std::cout << "   stop                      gracefully stops the server" << std::endl;
-        std::cout << "   save-all                  forces a server-wide level save" << std::endl;
-        std::cout << "   list                      lists all connected players" << std::endl;
-        std::cout << "   say <message>             broadcasts a message" << std::endl;
+        std::cout <<
+            "Console commands:\n"
+            "   help  or  ?               shows this message\n"
+            "   kick <player>             removes a player from the server\n"
+            "   ban <player>              bans a player from the server\n"
+            "   pardon <player>           pardons a banned player\n"
+            "   ban-ip <ip>               bans an IP address\n"
+            "   pardon-ip <ip>            pardons a banned IP address\n"
+            "   op <player>               turns a player into an op\n"
+            "   deop <player>             removes op status\n"
+            "   tp <player1> <player2>    teleports player1 to player2\n"
+            "   give <player> <id> [num]  gives a player a resource\n"
+            "   tell <player> <message>   sends a private message\n"
+            "   stop                      gracefully stops the server\n"
+            "   save-all                  forces a server-wide level save\n"
+            "   list                      lists all connected players\n"
+            "   say <message>             broadcasts a message\n";
     } else if (lower.starts_with("list")) {
-        std::cout << "Connected players: " << configManager->getPlayerList() << std::endl;
+        std::cout << "Connected players: " << configManager->getPlayerList() << '\n';
     } else if (lower.starts_with("stop")) {
-        std::cout << "CONSOLE: Stopping the server.." << std::endl;
+        std::cout << "CONSOLE: Stopping the server..\n";
         running_ = false;
     } else if (lower.starts_with("save-all")) {
-        std::cout << "CONSOLE: Forcing save.." << std::endl;
+        std::cout << "CONSOLE: Forcing save..\n";
         if (worldMngr) worldMngr->saveWorld();
         if (configManager) configManager->savePlayerStates();
-        std::cout << "CONSOLE: Save complete." << std::endl;
+        std::cout << "CONSOLE: Save complete.\n";
     } else if (lower.starts_with("op ")) {
-        std::string name = cmd.substr(3);
-        while (!name.empty() && name.front() == ' ') name.erase(name.begin());
+        auto name = argOf("op ");
         configManager->opPlayer(name);
-        std::cout << "CONSOLE: Opping " << name << std::endl;
+        std::cout << "CONSOLE: Opping " << name << '\n';
         configManager->sendChatToPlayer(name, "\u00a7eYou are now op!");
     } else if (lower.starts_with("deop ")) {
-        std::string name = cmd.substr(5);
-        while (!name.empty() && name.front() == ' ') name.erase(name.begin());
+        auto name = argOf("deop ");
         configManager->deopPlayer(name);
-        std::cout << "CONSOLE: De-opping " << name << std::endl;
+        std::cout << "CONSOLE: De-opping " << name << '\n';
         configManager->sendChatToPlayer(name, "\u00a7eYou are no longer op!");
     } else if (lower.starts_with("ban-ip ")) {
-        std::string ip = cmd.substr(7);
-        while (!ip.empty() && ip.front() == ' ') ip.erase(ip.begin());
+        auto ip = argOf("ban-ip ");
         configManager->banIP(ip);
-        std::cout << "CONSOLE: Banning ip " << ip << std::endl;
+        std::cout << "CONSOLE: Banning ip " << ip << '\n';
     } else if (lower.starts_with("pardon-ip ")) {
-        std::string ip = cmd.substr(10);
-        while (!ip.empty() && ip.front() == ' ') ip.erase(ip.begin());
+        auto ip = argOf("pardon-ip ");
         configManager->unbanIP(ip);
-        std::cout << "CONSOLE: Pardoning ip " << ip << std::endl;
+        std::cout << "CONSOLE: Pardoning ip " << ip << '\n';
     } else if (lower.starts_with("ban ")) {
-        std::string name = cmd.substr(4);
-        while (!name.empty() && name.front() == ' ') name.erase(name.begin());
+        auto name = argOf("ban ");
         configManager->banPlayer(name);
-        std::cout << "CONSOLE: Banning " << name << std::endl;
-        auto* player = configManager->getPlayerEntity(name);
-        if (player && player->netHandler) {
+        std::cout << "CONSOLE: Banning " << name << '\n';
+        if (auto* player = configManager->getPlayerEntity(name); player && player->netHandler)
             player->netHandler->kick("Banned by admin");
-        }
     } else if (lower.starts_with("pardon ")) {
-        std::string name = cmd.substr(7);
-        while (!name.empty() && name.front() == ' ') name.erase(name.begin());
+        auto name = argOf("pardon ");
         configManager->unbanPlayer(name);
-        std::cout << "CONSOLE: Pardoning " << name << std::endl;
+        std::cout << "CONSOLE: Pardoning " << name << '\n';
     } else if (lower.starts_with("kick ")) {
-        std::string name = cmd.substr(5);
-        while (!name.empty() && name.front() == ' ') name.erase(name.begin());
-        auto* player = configManager->getPlayerEntity(name);
-        if (player && player->netHandler) {
+        auto name = argOf("kick ");
+        if (auto* player = configManager->getPlayerEntity(name); player && player->netHandler) {
             player->netHandler->kick("Kicked by admin");
-            std::cout << "CONSOLE: Kicking " << player->username << std::endl;
+            std::cout << "CONSOLE: Kicking " << player->username << '\n';
         } else {
-            std::cout << "Can't find user " << name << ". No kick." << std::endl;
+            std::cout << "Can't find user " << name << ". No kick.\n";
         }
     } else if (lower.starts_with("tp ")) {
-        // Parse: tp <player1> <player2>
-        auto parts = cmd.substr(3);
-        while (!parts.empty() && parts.front() == ' ') parts.erase(parts.begin());
-        auto spaceIdx = parts.find(' ');
-        if (spaceIdx != std::string::npos) {
-            std::string p1 = parts.substr(0, spaceIdx);
-            std::string p2 = parts.substr(spaceIdx + 1);
-            while (!p2.empty() && p2.front() == ' ') p2.erase(p2.begin());
-
-            auto* player1 = configManager->getPlayerEntity(p1);
-            auto* player2 = configManager->getPlayerEntity(p2);
-            if (!player1) {
-                std::cout << "Can't find user " << p1 << ". No tp." << std::endl;
-            } else if (!player2) {
-                std::cout << "Can't find user " << p2 << ". No tp." << std::endl;
-            } else {
-                player1->netHandler->teleport(player2->posX, player2->posY, player2->posZ,
-                                               player2->rotationYaw, player2->rotationPitch);
-                std::cout << "CONSOLE: Teleporting " << p1 << " to " << p2 << "." << std::endl;
-            }
-        } else {
-            std::cout << "Syntax error, please provide a source and a target." << std::endl;
+        auto [p1, p2] = splitTwo(trimLeft(sv.substr(3)));
+        auto* player1 = configManager->getPlayerEntity(p1);
+        auto* player2 = configManager->getPlayerEntity(p2);
+        if (!player1)       std::cout << "Can't find user " << p1 << ". No tp.\n";
+        else if (!player2)  std::cout << "Can't find user " << p2 << ". No tp.\n";
+        else {
+            player1->netHandler->teleport(player2->posX, player2->posY, player2->posZ,
+                                          player2->rotationYaw, player2->rotationPitch);
+            std::cout << "CONSOLE: Teleporting " << p1 << " to " << p2 << ".\n";
         }
     } else if (lower.starts_with("say ")) {
-        std::string msg = cmd.substr(4);
-        while (!msg.empty() && msg.front() == ' ') msg.erase(msg.begin());
-        std::cout << "[Server] " << msg << std::endl;
+        auto msg = argOf("say ");
+        std::cout << "[Server] " << msg << '\n';
         configManager->broadcastPacket(std::make_unique<Packet3Chat>("\u00a7d[Server] " + msg));
     } else if (lower.starts_with("tell ")) {
-        auto parts = cmd.substr(5);
-        while (!parts.empty() && parts.front() == ' ') parts.erase(parts.begin());
-        auto spaceIdx = parts.find(' ');
-        if (spaceIdx != std::string::npos) {
-            std::string target = parts.substr(0, spaceIdx);
-            std::string msg = parts.substr(spaceIdx + 1);
-            while (!msg.empty() && msg.front() == ' ') msg.erase(msg.begin());
-            std::cout << "[CONSOLE->" << target << "] " << msg << std::endl;
-            if (!configManager->sendPacketToPlayer(target,
-                    std::make_unique<Packet3Chat>("\u00a77CONSOLE whispers " + msg))) {
-                std::cout << "There's no player by that name online." << std::endl;
-            }
-        }
+        auto [target, msg] = splitTwo(trimLeft(sv.substr(5)));
+        std::cout << "[CONSOLE->" << target << "] " << msg << '\n';
+        if (!configManager->sendPacketToPlayer(target,
+                std::make_unique<Packet3Chat>("\u00a77CONSOLE whispers " + msg)))
+            std::cout << "There's no player by that name online.\n";
     } else {
-        std::cout << "Unknown console command. Type \"help\" for help." << std::endl;
+        std::cout << "Unknown console command. Type \"help\" for help.\n";
     }
 }

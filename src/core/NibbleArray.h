@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <span>
 #include <cstdint>
 
 class NibbleArray {
@@ -8,34 +9,24 @@ public:
     std::vector<uint8_t> data;
 
     NibbleArray() = default;
-
     explicit NibbleArray(int size) : data(size >> 1, 0) {}
-
     explicit NibbleArray(std::vector<uint8_t> d) : data(std::move(d)) {}
 
-    int getNibble(int x, int y, int z) const {
+    [[nodiscard]] int getNibble(int x, int y, int z) const {
         int index = (x << 11) | (z << 7) | y;
-        int halfIndex = index >> 1;
-        int oddBit = index & 1;
-        if (oddBit == 0) {
-            return data[halfIndex] & 15;
-        } else {
-            return (data[halfIndex] >> 4) & 15;
-        }
+        uint8_t byte = data[index >> 1];
+        return (index & 1) ? (byte >> 4) & 0xF : byte & 0xF;
     }
 
     void setNibble(int x, int y, int z, int value) {
         int index = (x << 11) | (z << 7) | y;
-        int halfIndex = index >> 1;
-        int oddBit = index & 1;
-        if (oddBit == 0) {
-            data[halfIndex] = static_cast<uint8_t>((data[halfIndex] & 0xF0) | (value & 0x0F));
-        } else {
-            data[halfIndex] = static_cast<uint8_t>((data[halfIndex] & 0x0F) | ((value & 0x0F) << 4));
-        }
+        auto& byte = data[index >> 1];
+        if (index & 1)
+            byte = static_cast<uint8_t>((byte & 0x0F) | ((value & 0xF) << 4));
+        else
+            byte = static_cast<uint8_t>((byte & 0xF0) | (value & 0xF));
     }
 
-    bool isValid() const {
-        return !data.empty();
-    }
+    [[nodiscard]] bool isValid() const { return !data.empty(); }
+    [[nodiscard]] std::span<const uint8_t> view() const { return data; }
 };

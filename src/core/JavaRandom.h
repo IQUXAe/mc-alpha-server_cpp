@@ -1,27 +1,27 @@
 #pragma once
+
 #include <cstdint>
+#include <bit>
 
 class JavaRandom {
-private:
-    uint64_t seed;
 public:
-    JavaRandom() : seed(0) {}
-    explicit JavaRandom(int64_t s) {
-        setSeed(s);
-    }
+    JavaRandom() : seed_(0) {}
+    explicit JavaRandom(int64_t s) { setSeed(s); }
+
     void setSeed(int64_t s) {
-        seed = (s ^ 0x5DEECE66DLL) & ((1LL << 48) - 1);
+        seed_ = (static_cast<uint64_t>(s) ^ 0x5DEECE66DULL) & MASK;
     }
+
     int next(int bits) {
-        seed = (seed * 0x5DEECE66DLL + 0xBLL) & ((1LL << 48) - 1);
-        return (int)(((uint64_t)seed) >> (48 - bits));
+        seed_ = (seed_ * 0x5DEECE66DULL + 0xBULL) & MASK;
+        return static_cast<int>(seed_ >> (48 - bits));
     }
-    int nextInt() {
-        return next(32);
-    }
+
+    int nextInt() { return next(32); }
+
     int nextInt(int bound) {
-        if ((bound & -bound) == bound)
-            return (int)((bound * (uint64_t)next(31)) >> 31);
+        if (std::has_single_bit(static_cast<unsigned>(bound)))
+            return static_cast<int>((static_cast<uint64_t>(bound) * static_cast<uint64_t>(next(31))) >> 31);
         int bits, val;
         do {
             bits = next(31);
@@ -29,13 +29,20 @@ public:
         } while (bits - val + (bound - 1) < 0);
         return val;
     }
+
     int64_t nextLong() {
-        return ((int64_t)(next(32)) << 32) + next(32);
+        return (static_cast<int64_t>(next(32)) << 32) + next(32);
     }
+
     double nextDouble() {
-        return (((int64_t)(next(26)) << 27) + next(27)) / (double)(1LL << 53);
+        return ((static_cast<int64_t>(next(26)) << 27) + next(27)) / static_cast<double>(1LL << 53);
     }
+
     float nextFloat() {
-        return next(24) / (float)(1 << 24);
+        return next(24) / static_cast<float>(1 << 24);
     }
+
+private:
+    static constexpr uint64_t MASK = (1ULL << 48) - 1;
+    uint64_t seed_;
 };
