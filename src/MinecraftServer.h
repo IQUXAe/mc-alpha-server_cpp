@@ -15,12 +15,12 @@
 
 class MinecraftServer {
 public:
-    // Деструкция идёт снизу вверх (последний объявленный уничтожается первым):
-    // 1. networkListenThread  — сначала закрываем сеть
-    // 2. entityTracker        — потом трекер
-    // 3. configManager        — потом игроки
-    // 4. worldMngr            — потом мир
-    // 5. propertyManager      — последним
+    // Destruction order is bottom-up (last declared = first destroyed):
+    // 1. networkListenThread  — close network first
+    // 2. entityTracker        — then tracker
+    // 3. configManager        — then players
+    // 4. worldMngr            — then world
+    // 5. propertyManager      — last
     std::unique_ptr<PropertyManager> propertyManager;
     std::unique_ptr<World> worldMngr;
     std::unique_ptr<ServerConfigurationManager> configManager;

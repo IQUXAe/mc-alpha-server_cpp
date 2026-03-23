@@ -27,9 +27,9 @@ MinecraftServer::MinecraftServer() {
 }
 
 MinecraftServer::~MinecraftServer() {
-    // stop() уже вызван из run() или signalHandler — повторный вызов безопасен
+    // stop() is safe to call multiple times
     stop();
-    // saveWorld() уже вызван в run() перед выходом из цикла — не вызываем повторно
+    // saveWorld() is already called in run() before the loop exits
 }
 
 bool MinecraftServer::initialize() {
@@ -170,9 +170,9 @@ void MinecraftServer::run() {
     // Shutdown
     Logger::info("Stopping server");
 
-    // 1. Кикаем всех игроков — NetServerHandler отпишется от configManager
+    // 1. Kick all players so NetServerHandler unregisters from configManager
     if (configManager) {
-        // Копируем список т.к. kick() модифицирует playerEntities
+        // Copy the list since kick() modifies playerEntities
         auto players = configManager->playerEntities;
         for (auto* p : players) {
             if (p && p->netHandler)
@@ -182,10 +182,10 @@ void MinecraftServer::run() {
         configManager->savePlayerStates();
     }
 
-    // 2. Останавливаем сеть — после этого никаких новых пакетов
+    // 2. Stop network — no new packets after this
     networkListenThread.reset();
 
-    // 3. Сохраняем мир
+    // 3. Save world
     if (worldMngr) worldMngr->saveWorld();
 
     std::cout << "[INFO] Server stopped.\n";
