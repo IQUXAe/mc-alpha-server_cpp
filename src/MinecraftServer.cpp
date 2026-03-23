@@ -40,20 +40,20 @@ bool MinecraftServer::initialize() {
     propertyManager = std::make_unique<PropertyManager>("server.properties");
 
     std::string bindAddress = propertyManager->getStringProperty("server-ip", "");
-    onlineMode = propertyManager->getBooleanProperty("online-mode", true);
-    spawnAnimals = propertyManager->getBooleanProperty("spawn-animals", true);
-    pvpEnabled = propertyManager->getBooleanProperty("pvp", true);
-    viewDistance = propertyManager->getIntProperty("view-distance", 10);
-    if (viewDistance < 3) viewDistance = 3;
-    if (viewDistance > 15) viewDistance = 15;
-    autoSaveInterval = propertyManager->getIntProperty("auto-save-interval", 6000);
-    saveModifiedChunksOnly = propertyManager->getBooleanProperty("save-modified-chunks-only", false);
+    onlineMode_             = propertyManager->getBooleanProperty("online-mode", true);
+    spawnAnimals_           = propertyManager->getBooleanProperty("spawn-animals", true);
+    pvpEnabled_             = propertyManager->getBooleanProperty("pvp", true);
+    viewDistance_           = propertyManager->getIntProperty("view-distance", 10);
+    if (viewDistance_ < 3)  viewDistance_ = 3;
+    if (viewDistance_ > 15) viewDistance_ = 15;
+    autoSaveInterval_       = propertyManager->getIntProperty("auto-save-interval", 6000);
+    saveModifiedChunksOnly_ = propertyManager->getBooleanProperty("save-modified-chunks-only", false);
     int port = propertyManager->getIntProperty("server-port", 25565);
 
     std::string displayAddr = bindAddress.empty() ? "*" : bindAddress;
     std::cout << "[INFO] Starting Minecraft server on " << displayAddr << ":" << port << std::endl;
 
-    if (!onlineMode) {
+    if (!onlineMode_) {
         std::cout << "[WARNING] **** SERVER IS RUNNING IN OFFLINE/INSECURE MODE!" << std::endl;
         std::cout << "[WARNING] The server will make no attempt to authenticate usernames. Beware." << std::endl;
         std::cout << "[WARNING] While this makes the game possible to play without internet access, "
@@ -120,8 +120,8 @@ bool MinecraftServer::initialize() {
     };
 
     // Player saves go inside the world folder, mirroring Java's PlayerNBTManager
-    playerSaveDir = "world/" + levelName + "/players";
-    std::filesystem::create_directories(playerSaveDir);
+    playerSaveDir_ = "world/" + levelName + "/players";
+    std::filesystem::create_directories(playerSaveDir_);
 
     Logger::info("Actual world seed: {}", worldSeed_);
     Logger::info("Spawn position: {}, {}, {}", spawnX_, spawnY_, spawnZ_);

@@ -349,13 +349,13 @@ void Block::initBlocks() {
     dirt = (new Block(3, &Material::ground))->setHardness(0.5f);
     cobblestone = (new Block(4, &Material::rock))->setHardness(2.0f)->setResistance(10.0f);
     planks = (new Block(5, &Material::wood))->setHardness(2.0f)->setResistance(5.0f);
-    sapling = (new Block(6, &Material::plants))->setHardness(0.0f);
+    sapling = (new Block(6, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);
     bedrock = (new Block(7, &Material::rock))->setHardness(-1.0f)->setResistance(6000000.0f);
     // water and lava
-    blocksList[8] = new BlockFluid(8, &Material::water);
-    blocksList[9] = new BlockFluid(9, &Material::water);
-    blocksList[10] = new BlockFluid(10, &Material::lava);
-    blocksList[11] = new BlockFluid(11, &Material::lava);
+    blocksList[8] = (new BlockFluid(8, &Material::water))->setLightOpacity(3);
+    blocksList[9] = (new BlockFluid(9, &Material::water))->setLightOpacity(3);
+    blocksList[10] = (new BlockFluid(10, &Material::lava))->setLightOpacity(255);
+    blocksList[11] = (new BlockFluid(11, &Material::lava))->setLightOpacity(255);
     sand = (new BlockSand(12, &Material::sand))->setHardness(0.5f);
     gravel = (new BlockSand(13, &Material::sand))->setHardness(0.6f);
     oreGold = (new BlockOre(14, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
@@ -373,15 +373,15 @@ void Block::initBlocks() {
     (new Block(27, &Material::ground))->setHardness(0.7f);   // powered rail
     (new Block(28, &Material::ground))->setHardness(0.7f);   // detector rail
     (new Block(29, &Material::rock))->setHardness(3.5f);     // sticky piston
-    (new Block(30, &Material::web))->setHardness(4.0f);      // web
-    (new Block(31, &Material::plants))->setHardness(0.0f);   // tall grass
-    (new Block(32, &Material::plants))->setHardness(0.0f);   // dead bush
+    (new Block(30, &Material::web))->setHardness(4.0f)->setLightOpacity(1);      // web
+    (new Block(31, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);   // tall grass
+    (new Block(32, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);   // dead bush
     (new Block(33, &Material::rock))->setHardness(3.5f);     // piston
     (new Block(35, &Material::cloth))->setHardness(0.8f);    // wool
-    plantYellow = (new BlockFlower(37, &Material::plants))->setHardness(0.0f);
-    plantRed = (new BlockFlower(38, &Material::plants))->setHardness(0.0f);
-    mushroomBrown = (new BlockMushroom(39, &Material::plants))->setHardness(0.0f);
-    mushroomRed = (new BlockMushroom(40, &Material::plants))->setHardness(0.0f);
+    plantYellow = (new BlockFlower(37, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);
+    plantRed = (new BlockFlower(38, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);
+    mushroomBrown = (new BlockMushroom(39, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);
+    mushroomRed = (new BlockMushroom(40, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);
     (new Block(41, &Material::iron))->setHardness(3.0f);     // gold block
     (new Block(42, &Material::iron))->setHardness(5.0f);     // iron block
     (new Block(43, &Material::rock))->setHardness(2.0f);     // double slab
@@ -401,7 +401,7 @@ void Block::initBlocks() {
     oreDiamond = (new BlockOre(56, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
     (new Block(57, &Material::iron))->setHardness(5.0f);     // diamond block
     (new Block(58, &Material::wood))->setHardness(2.5f);     // crafting table
-    (new Block(59, &Material::plants))->setHardness(0.0f);   // crops
+    (new Block(59, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);   // crops
     (new Block(60, &Material::ground))->setHardness(0.6f);   // farmland
     blocksList[61] = new BlockFurnace(61, false);            // furnace idle
     blocksList[61]->setHardness(3.5f);
@@ -427,9 +427,9 @@ void Block::initBlocks() {
     snow = (new Block(78, &Material::snow))->setHardness(0.1f);
     ice = (new Block(79, &Material::ice))->setHardness(0.5f);
     (new Block(80, &Material::snow))->setHardness(0.2f);     // snow block
-    cactus = (new BlockCactus(81, &Material::cactus))->setHardness(0.4f);
+    cactus = (new BlockCactus(81, &Material::cactus))->setHardness(0.4f)->setLightOpacity(0);
     blockClay = (new Block(82, &Material::clay))->setHardness(0.6f);
-    reed = (new BlockReed(83, &Material::plants))->setHardness(0.0f);
+    reed = (new BlockReed(83, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);
     (new Block(84, &Material::wood))->setHardness(0.8f);     // jukebox
     (new Block(85, &Material::wood))->setHardness(2.0f);     // fence
     pumpkin = (new Block(86, &Material::pumpkin))->setHardness(1.0f);
