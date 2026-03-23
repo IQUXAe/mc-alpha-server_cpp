@@ -107,12 +107,25 @@ void NetServerHandler::tick() {
         int px = it->first;
         int pz = it->second;
 
-        // Force-generate all 4 neighbors needed for population
-        mcServer_->worldMngr->getChunk(px + 1, pz);
-        mcServer_->worldMngr->getChunk(px, pz + 1);
-        mcServer_->worldMngr->getChunk(px + 1, pz + 1);
-        // Also ensure this chunk itself exists
-        auto* chunk = mcServer_->worldMngr->getChunk(px, pz);
+        // Generate 3x3 grid around this chunk to ensure all cross-chunk decorations are complete
+        // Population places objects with +8 offset which can affect neighboring chunks
+        // getChunk() is fast if chunk already exists (just a map lookup)
+        for (int dx = -1; dx <= 1; ++dx) {
+            for (int dz = -1; dz <= 1; ++dz) {
+                mcServer_->worldMngr->getChunk(px + dx, pz + dz);
+            }
+        }
+        
+        // Ensure all chunks in 3x3 grid are populated
+        // ensureChunkPopulated() returns immediately if already populated
+        for (int dx = -1; dx <= 1; ++dx) {
+            for (int dz = -1; dz <= 1; ++dz) {
+                mcServer_->worldMngr->ensureChunkPopulated(px + dx, pz + dz);
+            }
+        }
+        
+        // Get the center chunk (no generation, just lookup)
+        auto* chunk = mcServer_->worldMngr->getChunk(px, pz, false);
 
         if (chunk && chunk->isTerrainPopulated) {
             sendPacket(std::make_unique<Packet50PreChunk>(px, pz, true));

@@ -1,6 +1,7 @@
 #include "ChunkProviderGenerate.h"
 #include "block/Block.h"
 #include "Decorators.h"
+#include "core/Logger.h"
 #include <cmath>
 
 ChunkProviderGenerate::ChunkProviderGenerate(World* world, int64_t seed)
@@ -239,11 +240,21 @@ void ChunkProviderGenerate::replaceBlocksForBiome(int chunkX, int chunkZ, std::v
     }
 }
 
-// Exact port of Java's func_363_b (provide chunk)
-Chunk* ChunkProviderGenerate::provideChunk(int chunkX, int chunkZ) {
+// Check if chunk can be populated (all 3 neighbors exist)
+bool ChunkProviderGenerate::canPopulateChunk(int chunkX, int chunkZ) {
+    return worldObj->chunkExists(chunkX + 1, chunkZ) &&
+           worldObj->chunkExists(chunkX, chunkZ + 1) &&
+           worldObj->chunkExists(chunkX + 1, chunkZ + 1);
+}
+
+// Generate terrain for existing chunk (modified to work with pre-created chunk)
+void ChunkProviderGenerate::provideChunk(int chunkX, int chunkZ) {
     rand.setSeed((int64_t)chunkX * 341873128712LL + (int64_t)chunkZ * 132897987541LL);
 
-    auto chunk = new Chunk(worldObj, chunkX, chunkZ);
+    // Get the chunk that was already created and added to World::chunks_
+    Chunk* chunk = worldObj->getChunk(chunkX, chunkZ, false);
+    if (!chunk) return;  // Should never happen
+    
     std::vector<uint8_t>& blocks = chunk->blocks;
 
     // Get biome data from WorldChunkManager
@@ -260,7 +271,20 @@ Chunk* ChunkProviderGenerate::provideChunk(int chunkX, int chunkZ) {
     // IMPORTANT: Update heightmap AFTER terrain generation and cave carving
     chunk->generateHeightMap();
     chunk->generateSkylightMap();
-    return chunk;
+    
+    // IMMEDIATE POPULATION: If all neighbors exist, populate right now
+    if (canPopulateChunk(chunkX, chunkZ)) {
+        chunk->isTerrainPopulated = true;
+        worldObj->isPopulating = true;
+        populate(chunkX, chunkZ);
+        
+        // Recalculate lighting after population (trees/ores added)
+        chunk->generateSkylightMap();
+        if (auto* c1 = worldObj->getChunk(chunkX + 1, chunkZ, false)) c1->generateSkylightMap();
+        if (auto* c2 = worldObj->getChunk(chunkX, chunkZ + 1, false)) c2->generateSkylightMap();
+        if (auto* c3 = worldObj->getChunk(chunkX + 1, chunkZ + 1, false)) c3->generateSkylightMap();
+        worldObj->isPopulating = false;
+    }
 }
 
 // Exact port of Java's populate

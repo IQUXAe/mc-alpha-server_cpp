@@ -46,6 +46,7 @@ private:
 
 public:
     ChunkProviderGenerate(World* world, int64_t seed);
-    Chunk* provideChunk(int chunkX, int chunkZ);
+    void provideChunk(int chunkX, int chunkZ);  // Generate terrain for pre-created chunk
     void populate(int chunkX, int chunkZ);
+    bool canPopulateChunk(int chunkX, int chunkZ);  // Check if all neighbors exist for population
 };
