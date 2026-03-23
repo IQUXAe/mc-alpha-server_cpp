@@ -1,10 +1,13 @@
 #include "Item.h"
 #include "../block/Block.h"
+#include "../block/BlockSign.h"
 #include "../world/World.h"
+#include "../world/TileEntitySign.h"
 #include "../entity/EntityPlayerMP.h"
 #include "ItemStack.h"
 #include "AxisAlignedBB.h"
 #include "Material.h"
+#include "MathHelper.h"
 #include <iostream>
 
 Item* Item::itemsList[32000] = {nullptr};
@@ -178,7 +181,7 @@ void Item::initItems() {
     porkCooked = (new Item(64));
     painting = (new Item(65));
     appleGold = (new Item(66));
-    sign = (new Item(67))->setMaxStackSize(1);
+    sign = new ItemSign(323);  // Item ID 323 = 256 + 67
     doorWood = (new Item(68))->setMaxStackSize(1);
     bucketEmpty = (new Item(69))->setMaxStackSize(1);
     bucketWater = (new Item(70))->setMaxStackSize(1);
@@ -255,6 +258,43 @@ bool ItemSpade::isEffectiveAgainst(Block* block) const {
 
 bool ItemAxe::isEffectiveAgainst(Block* block) const {
     return block->blockMaterial == &Material::wood;
+}
+
+bool ItemSign::onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side) {
+    // Cannot place on bottom face
+    if (side == 0) return false;
+    // Target block must be solid
+    if (!world->getBlockMaterial(x, y, z)->isSolid()) return false;
+
+    // Offset target position by face
+    switch (side) {
+        case 1: y++; break;
+        case 2: z--; break;
+        case 3: z++; break;
+        case 4: x--; break;
+        case 5: x++; break;
+    }
+
+    if (y < 0 || y >= 128) return false;
+    if (world->getBlockId(x, y, z) != 0) return false;
+
+    if (side == 1) {
+        // Placed on top face: sign post (ID 63), metadata = yaw direction (0-15)
+        int meta = static_cast<int>(std::floor(
+            static_cast<double>(player->rotationYaw + 180.0f) * 16.0 / 360.0 + 0.5)) & 15;
+        world->setBlockAndMetadataWithNotify(x, y, z, 63, static_cast<uint8_t>(meta));
+    } else {
+        // Placed on side face: wall sign (ID 68), metadata = face direction
+        world->setBlockAndMetadataWithNotify(x, y, z, 68, static_cast<uint8_t>(side));
+    }
+
+    // Send Packet59 so client opens the sign edit GUI
+    TileEntity* te = world->getTileEntity(x, y, z);
+    if (te && player->netHandler)
+        player->netHandler->sendTileEntityPacket(te);
+
+    stack->stackSize--;
+    return true;
 }
 
 float ItemTool::getStrVsBlock(int blockId) const {

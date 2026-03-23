@@ -1,6 +1,7 @@
 #include "Chunk.h"
 #include "World.h"
 #include "TileEntity.h"
+#include "../block/Block.h"
 #include <stdexcept>
 #include <algorithm>
 #include <ranges>
@@ -48,13 +49,13 @@ bool Chunk::setBlockIDWithMetadata(int x, int y, int z, uint8_t blockID, uint8_t
     data.setNibble(x, y, z, metadata);
     
     int oldHeight = heightMap[(z << 4) | x];
-    if (blockID != 0) {
+    if (blockID != 0 && Block::lightOpacity[blockID] > 0) {
         if (y >= oldHeight) heightMap[(z << 4) | x] = static_cast<uint8_t>(y + 1);
     } else {
         if (y == oldHeight - 1) {
-            // Recalculate height
+            // Recalculate height downward
             int newY = y;
-            while (newY > 0 && blocks[getIndex(x, newY - 1, z)] == 0) --newY;
+            while (newY > 0 && Block::lightOpacity[blocks[getIndex(x, newY - 1, z)]] == 0) --newY;
             heightMap[(z << 4) | x] = static_cast<uint8_t>(newY);
         }
     }
@@ -98,7 +99,8 @@ void Chunk::generateHeightMap() {
     for (int x = 0; x < CHUNK_SIZE_X; ++x) {
         for (int z = 0; z < CHUNK_SIZE_Z; ++z) {
             int y = CHUNK_SIZE_Y - 1;
-            while (y > 0 && blocks[getIndex(x, y - 1, z)] == 0) { // Air
+            // Only opaque blocks (lightOpacity > 0) count as the height ceiling
+            while (y > 0 && Block::lightOpacity[blocks[getIndex(x, y - 1, z)]] == 0) {
                 --y;
             }
             heightMap[(z << 4) | x] = static_cast<uint8_t>(y);
@@ -110,14 +112,16 @@ void Chunk::generateSkylightMap() {
     std::queue<LightNode> skyQueue;
     std::queue<LightNode> blockQueue;
 
-    // Fast local transparency check
-    auto isTransparent = [](uint8_t id) {
-        if (id == 0) return true; // Air
-        if (id == 8 || id == 9 || id == 10 || id == 11) return true; // Liquids
-        if (id == 78 || id == 37 || id == 38 || id == 39 || id == 40) return true; // Snow, flowers, mushrooms
-        if (id == 83 || id == 51 || id == 6) return true; // Reeds, fire, sapling
-        if (id == 18 || id == 20) return true; // Leaves and glass
-        return false; 
+    // Use Block::lightOpacity for transparency — respects setLightOpacity(0) calls
+    auto isTransparent = [](uint8_t id) -> bool {
+        if (id == 0) return true;
+        return Block::lightOpacity[id] == 0;
+    };
+
+    // Attenuation for semi-transparent blocks (leaves, liquids)
+    auto getOpacity = [](uint8_t id) -> int {
+        if (id == 18 || id == 8 || id == 9 || id == 10 || id == 11) return 3;
+        return 1;
     };
 
     int globalX = xPosition * 16;
@@ -131,9 +135,9 @@ void Chunk::generateSkylightMap() {
                 uint8_t id = getBlockID(x, y, z);
                 
                 if (!isTransparent(id)) {
-                    currentSky = 0; // Solid block blocks sunlight
-                } else if (id == 18 || id == 8 || id == 9 || id == 10 || id == 11) {
-                    currentSky -= 3; // Leaves and liquids attenuate light
+                    currentSky = 0;
+                } else {
+                    currentSky -= getOpacity(id) - 1; // leaves/liquids attenuate extra
                 }
                 
                 if (currentSky < 0) currentSky = 0;
@@ -174,8 +178,7 @@ void Chunk::generateSkylightMap() {
                 uint8_t id = neighborChunk->getBlockID(nx & 15, ny, nz & 15);
                 if (!isTransparent(id)) return;
 
-                int opacity = 1;
-                if (id == 18 || id == 8 || id == 9 || id == 10 || id == 11) opacity = 3;
+                int opacity = getOpacity(id);
 
                 int neighborLight = neighborChunk->getSavedLightValue(0, nx & 15, ny, nz & 15);
                 int newLight = currentLight - opacity;
@@ -210,8 +213,7 @@ void Chunk::generateSkylightMap() {
                 uint8_t id = neighborChunk->getBlockID(nx & 15, ny, nz & 15);
                 if (!isTransparent(id)) return;
 
-                int opacity = 1;
-                if (id == 18 || id == 8 || id == 9 || id == 10 || id == 11) opacity = 3;
+                int opacity = getOpacity(id);
 
                 int neighborLight = neighborChunk->getSavedLightValue(1, nx & 15, ny, nz & 15);
                 int newLight = currentLight - opacity;
