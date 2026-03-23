@@ -66,6 +66,7 @@ public:
     Chunk* getChunk(int chunkX, int chunkZ, bool generate = true);
     Chunk* getChunkFromBlockCoords(int x, int z, bool generate = false);
     bool chunkExists(int chunkX, int chunkZ) const;
+    void ensureChunkPopulated(int chunkX, int chunkZ);  // Force population if not already done
 
     // Block access and modification
     uint8_t getBlockId(int x, int y, int z);

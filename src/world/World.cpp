@@ -384,39 +384,72 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
 
     if (!generate) return nullptr;
 
-    // Use ChunkProviderGenerate instead of inline procedural generator
-    Chunk* ptr = chunkProvider->provideChunk(chunkX, chunkZ);
+    // Create empty chunk and add to map FIRST, so neighbors can find it
+    auto chunk = std::make_unique<Chunk>(this, chunkX, chunkZ);
+    Chunk* ptr = chunk.get();
+    
     {
         std::lock_guard<std::mutex> lock(chunksMutex_);
-        chunks_[key] = std::unique_ptr<Chunk>(ptr);
+        chunks_[key] = std::move(chunk);
     }
+    
+    // Now generate terrain - provideChunk will populate immediately if neighbors exist
+    chunkProvider->provideChunk(chunkX, chunkZ);
 
-    // Instead of forcing THIS chunk to populate immediately,
-    // we evaluate if any of the surrounding chunks are now ready to populate.
+    // Exact port of Java's ChunkProviderLoadOrGenerate population logic
+    // When chunk (X, Z) is generated, check if any of 4 possible 2x2 regions can now be populated:
+    // 1. (X, Z) if neighbors (X+1, Z), (X, Z+1), (X+1, Z+1) exist
+    // 2. (X-1, Z) if neighbors (X-1, Z+1), (X, Z+1) exist
+    // 3. (X, Z-1) if neighbors (X+1, Z-1), (X+1, Z) exist
+    // 4. (X-1, Z-1) if neighbors (X, Z-1), (X-1, Z) exist
+    
     auto checkPopulate = [&](int px, int pz) {
-        auto itP = chunks_.find(getChunkKey(px, pz));
-        if (itP == chunks_.end()) return;
-        Chunk* c = itP->second.get();
-        if (c && !c->isTerrainPopulated) {
-            if (chunkExists(px + 1, pz) && chunkExists(px, pz + 1) && chunkExists(px + 1, pz + 1)) {
-                c->isTerrainPopulated = true;
-                this->isPopulating = true;
-                chunkProvider->populate(px, pz);
-                
-                // Recalculate lighting for the entire 2x2 area AFTER trees/ores are placed
-                c->generateSkylightMap();
-                if (Chunk* c1 = getChunk(px + 1, pz, false)) c1->generateSkylightMap();
-                if (Chunk* c2 = getChunk(px, pz + 1, false)) c2->generateSkylightMap();
-                if (Chunk* c3 = getChunk(px + 1, pz + 1, false)) c3->generateSkylightMap();
-                this->isPopulating = false;
+        Chunk* c = nullptr;
+        bool shouldPopulate = false;
+        Chunk* c1 = nullptr;
+        Chunk* c2 = nullptr;
+        Chunk* c3 = nullptr;
+        
+        {
+            std::lock_guard<std::mutex> lock(chunksMutex_);
+            auto itP = chunks_.find(getChunkKey(px, pz));
+            if (itP == chunks_.end()) return;
+            c = itP->second.get();
+            if (!c || c->isTerrainPopulated) return;
+            
+            // Check if all 3 neighbors for 2x2 region exist (px, pz) + (px+1, pz) + (px, pz+1) + (px+1, pz+1)
+            auto it1 = chunks_.find(getChunkKey(px + 1, pz));
+            auto it2 = chunks_.find(getChunkKey(px, pz + 1));
+            auto it3 = chunks_.find(getChunkKey(px + 1, pz + 1));
+            
+            if (it1 != chunks_.end() && it2 != chunks_.end() && it3 != chunks_.end()) {
+                shouldPopulate = true;
+                c1 = it1->second.get();
+                c2 = it2->second.get();
+                c3 = it3->second.get();
             }
+        }
+        
+        // Populate outside the mutex lock to avoid deadlock
+        if (shouldPopulate && c) {
+            c->isTerrainPopulated = true;
+            this->isPopulating = true;
+            chunkProvider->populate(px, pz);
+            
+            // Recalculate lighting for the entire 2x2 area AFTER trees/ores are placed
+            c->generateSkylightMap();
+            if (c1) c1->generateSkylightMap();
+            if (c2) c2->generateSkylightMap();
+            if (c3) c3->generateSkylightMap();
+            this->isPopulating = false;
         }
     };
 
-    checkPopulate(chunkX, chunkZ);
-    checkPopulate(chunkX - 1, chunkZ);
-    checkPopulate(chunkX, chunkZ - 1);
-    checkPopulate(chunkX - 1, chunkZ - 1);
+    // Check all 4 possible 2x2 regions that might now be ready
+    checkPopulate(chunkX, chunkZ);           // Current chunk
+    checkPopulate(chunkX - 1, chunkZ);       // Left neighbor
+    checkPopulate(chunkX, chunkZ - 1);       // Top neighbor
+    checkPopulate(chunkX - 1, chunkZ - 1);   // Diagonal neighbor
 
     return ptr;
 }
@@ -428,6 +461,49 @@ Chunk* World::getChunkFromBlockCoords(int x, int z, bool generate) {
 bool World::chunkExists(int chunkX, int chunkZ) const {
     std::lock_guard<std::mutex> lock(chunksMutex_);
     return chunks_.find(getChunkKey(chunkX, chunkZ)) != chunks_.end();
+}
+
+void World::ensureChunkPopulated(int chunkX, int chunkZ) {
+    Chunk* c = nullptr;
+    Chunk* c1 = nullptr;
+    Chunk* c2 = nullptr;
+    Chunk* c3 = nullptr;
+    bool shouldPopulate = false;
+    
+    {
+        std::lock_guard<std::mutex> lock(chunksMutex_);
+        auto it = chunks_.find(getChunkKey(chunkX, chunkZ));
+        if (it == chunks_.end()) return;  // Chunk doesn't exist
+        
+        c = it->second.get();
+        if (!c || c->isTerrainPopulated) return;  // Already populated
+        
+        // Check if all 3 neighbors exist for 2x2 region
+        auto it1 = chunks_.find(getChunkKey(chunkX + 1, chunkZ));
+        auto it2 = chunks_.find(getChunkKey(chunkX, chunkZ + 1));
+        auto it3 = chunks_.find(getChunkKey(chunkX + 1, chunkZ + 1));
+        
+        if (it1 != chunks_.end() && it2 != chunks_.end() && it3 != chunks_.end()) {
+            shouldPopulate = true;
+            c1 = it1->second.get();
+            c2 = it2->second.get();
+            c3 = it3->second.get();
+        }
+    }
+    
+    // Populate outside the mutex lock
+    if (shouldPopulate && c) {
+        c->isTerrainPopulated = true;
+        isPopulating = true;
+        chunkProvider->populate(chunkX, chunkZ);
+        
+        // Recalculate lighting for the entire 2x2 area
+        c->generateSkylightMap();
+        if (c1) c1->generateSkylightMap();
+        if (c2) c2->generateSkylightMap();
+        if (c3) c3->generateSkylightMap();
+        isPopulating = false;
+    }
 }
 
 uint8_t World::getBlockId(int x, int y, int z) {
