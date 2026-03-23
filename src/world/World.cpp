@@ -165,13 +165,13 @@ void World::saveLevelDat() {
 }
 
 World::~World() {
-    // saveWorld() уже вызван из MinecraftServer::run() — не вызываем повторно.
-    // Останавливаем saveThread_ явно ДО удаления db_, иначе saveWorker
-    // может обратиться к db_ после его удаления.
+    // saveWorld() is already called from MinecraftServer::run() — no double save.
+    // Stop saveThread_ explicitly BEFORE deleting db_, otherwise saveWorker
+    // could access db_ after it has been deleted.
     stopSaving_ = true;
     saveCondition_.notify_all();
     saveThread_.request_stop();
-    saveThread_.join(); // ждём завершения всех pending записей
+    saveThread_.join(); // wait for all pending writes to finish
 
     delete db_;
     db_ = nullptr;
@@ -229,12 +229,12 @@ void World::tick() {
                             mcServer->configManager->broadcastPacket(std::make_unique<Packet22Collect>(item->entityId, player->entityId));
 
                             if (player->netHandler) {
-                                // Packet17: показывает анимацию подбора
+                                // Packet17: shows pickup animation
                                 player->netHandler->sendPacket(std::make_unique<Packet17AddToInventory>(
                                     static_cast<int16_t>(item->itemID),
                                     static_cast<int8_t>(addedCount),
                                     static_cast<int16_t>(item->metadata)));
-                                // Packet5: синхронизирует реальное состояние инвентаря
+                                // Packet5: syncs actual inventory state to client
                                 player->netHandler->sendInventory();
                             }
 
@@ -606,7 +606,7 @@ void World::saveWorker(std::stop_token st) {
             lock.lock();
         }
 
-        // Выходим только когда очередь пуста И попрошен останов
+        // Exit only when queue is empty AND stop was requested
         if (stopSaving_.load() && saveQueue_.empty()) break;
     }
 }
