@@ -7,6 +7,9 @@
 #include "../network/packets/AllPackets.h"
 #include "../core/AxisAlignedBB.h"
 #include "../MinecraftServer.h"
+#include "TileEntity.h"
+#include "TileEntityChest.h"
+#include "TileEntityFurnace.h"
 #include "core/NBT.h"
 #include "core/Logger.h"
 #include <zlib.h>
@@ -184,6 +187,14 @@ World::~World() {
 
 void World::tick() {
     worldTime++;
+
+    // Update tile entities
+    {
+        std::lock_guard lock(tileEntitiesMutex_);
+        for (auto& [key, te] : tileEntities_) {
+            if (te) te->updateEntity();
+        }
+    }
 
     // Process scheduled block updates
     int maxTicks = 1000;
@@ -578,6 +589,16 @@ bool World::setBlockAndMetadataWithNotify(int x, int y, int z, uint8_t blockId, 
     return true;
 }
 
+bool World::setBlockMetadata(int x, int y, int z, uint8_t metadata) {
+    if (y < 0 || y >= CHUNK_SIZE_Y) return false;
+
+    Chunk* chunk = getChunkFromBlockCoords(x, z);
+    if (!chunk) return false;
+
+    chunk->setBlockMetadata(x & 15, y, z & 15, metadata);
+    return true;
+}
+
 void World::markBlockNeedsUpdate(int x, int y, int z) {
     if (!mcServer || !mcServer->configManager) return;
 
@@ -713,6 +734,24 @@ std::vector<uint8_t> World::compressChunkData(Chunk* chunk) {
     level.setByteArray("BlockLight", chunk->blocklight.data);
     level.setByteArray("HeightMap", chunk->heightMap);
 
+    // Save TileEntities
+    std::vector<std::shared_ptr<NBTTag>> tileEntityList;
+    for (const auto& [key, te] : chunk->getTileEntities()) {
+        if (te) {
+            auto teCompound = std::make_shared<NBTCompound>();
+            te->writeToNBT(*teCompound);
+            tileEntityList.push_back(teCompound);
+        }
+    }
+    
+    if (!tileEntityList.empty()) {
+        Logger::info("Saving {} TileEntities for chunk ({}, {})", tileEntityList.size(), chunk->xPosition, chunk->zPosition);
+        auto listTag = std::make_shared<NBTList>();
+        listTag->tags = tileEntityList;
+        listTag->tagType = NBTTagType::TAG_Compound;
+        level.tags["TileEntities"] = listTag;
+    }
+
     NBTCompound root;
     root.setCompound("Level", std::make_shared<NBTCompound>(level));
 
@@ -784,6 +823,32 @@ void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data) 
     chunk->blocklight.data = level->getByteArray("BlockLight");
     chunk->heightMap    = level->getByteArray("HeightMap");
 
+    // Load TileEntities
+    auto tileEntitiesTag = level->tags.find("TileEntities");
+    if (tileEntitiesTag != level->tags.end()) {
+        auto listTag = std::dynamic_pointer_cast<NBTList>(tileEntitiesTag->second);
+        if (listTag) {
+            Logger::info("Loading {} TileEntities for chunk ({}, {})", listTag->tags.size(), chunk->xPosition, chunk->zPosition);
+            for (const auto& tag : listTag->tags) {
+                auto teCompound = std::dynamic_pointer_cast<NBTCompound>(tag);
+                if (teCompound) {
+                    auto te = TileEntity::createFromNBT(*teCompound);
+                    if (te) {
+                        te->worldObj = this;
+                        int x = te->xCoord;
+                        int y = te->yCoord;
+                        int z = te->zCoord;
+                        
+                        chunk->addTileEntity(te.get());
+                        
+                        std::lock_guard lock(tileEntitiesMutex_);
+                        tileEntities_[getTileEntityKey(x, y, z)] = std::move(te);
+                    }
+                }
+            }
+        }
+    }
+
     if (chunk->heightMap.empty() || chunk->heightMap.size() < 256) {
         chunk->heightMap.assign(256, 0);
         chunk->generateHeightMap();
@@ -854,4 +919,71 @@ void World::loadEntities() {
         entities_.push_back(std::move(item));
     }
     if (count > 0) Logger::info("Loaded {} entities.", count);
+}
+
+TileEntity* World::getTileEntity(int x, int y, int z) {
+    std::lock_guard lock(tileEntitiesMutex_);
+    auto it = tileEntities_.find(getTileEntityKey(x, y, z));
+    return it != tileEntities_.end() ? it->second.get() : nullptr;
+}
+
+void World::setTileEntity(int x, int y, int z, std::unique_ptr<TileEntity> tileEntity) {
+    if (!tileEntity) return;
+    
+    tileEntity->worldObj = this;
+    tileEntity->xCoord = x;
+    tileEntity->yCoord = y;
+    tileEntity->zCoord = z;
+    
+    // Add to chunk for tracking
+    Chunk* chunk = getChunkFromBlockCoords(x, z);
+    if (chunk) {
+        chunk->addTileEntity(tileEntity.get());
+    }
+    
+    std::lock_guard lock(tileEntitiesMutex_);
+    tileEntities_[getTileEntityKey(x, y, z)] = std::move(tileEntity);
+}
+
+void World::removeTileEntity(int x, int y, int z) {
+    // Remove from chunk
+    Chunk* chunk = getChunkFromBlockCoords(x, z);
+    if (chunk) {
+        chunk->removeTileEntity(x & 15, y, z & 15);
+    }
+    
+    std::lock_guard lock(tileEntitiesMutex_);
+    tileEntities_.erase(getTileEntityKey(x, y, z));
+}
+
+void World::markTileEntityChanged(int x, int y, int z, TileEntity* te) {
+    // Mark chunk as modified so it gets saved
+    Chunk* chunk = getChunkFromBlockCoords(x, z);
+    if (chunk) {
+        chunk->isModified = true;
+    }
+    // Broadcast Packet59 to all nearby players (Java: IWorldAccess.func_686_a)
+    if (onTileEntityChanged) {
+        onTileEntityChanged(x, y, z, te);
+    }
+}
+
+void World::saveChunkImmediate(Chunk* chunk) {
+    if (!chunk || !db_) return;
+    
+    uint64_t key = getChunkKey(chunk->xPosition, chunk->zPosition);
+    auto data = compressChunkData(chunk);
+    
+    if (!data.empty()) {
+        leveldb::Slice keySlice(reinterpret_cast<const char*>(&key), sizeof(uint64_t));
+        leveldb::Slice valSlice(reinterpret_cast<const char*>(data.data()), data.size());
+        auto status = db_->Put(leveldb::WriteOptions(), keySlice, valSlice);
+        
+        if (status.ok()) {
+            chunk->isModified = false;
+            Logger::info("Immediately saved chunk ({}, {}) with TileEntities", chunk->xPosition, chunk->zPosition);
+        } else {
+            Logger::severe("Failed to immediately save chunk: {}", status.ToString());
+        }
+    }
 }

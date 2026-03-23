@@ -23,12 +23,13 @@ public:
     void tick();
     void kick(const std::string& reason);
     void sendPacket(std::unique_ptr<Packet> pkt);
+    void sendTileEntityPacket(TileEntity* te);  // Send Packet59 for a TileEntity
     void teleport(double x, double y, double z, float yaw, float pitch);
     void sendChunks();
     void sendInventory();
     void restoreHeldItem(int itemId);  // called on login to restore saved held item
     int getHeldItemId() const;
-    bool hasChunkLoaded(int64_t key) const { return sentChunks_.find(key) != sentChunks_.end(); }
+    bool hasChunkLoaded(int64_t key) const { return sentChunks_.contains(key); }
     static int64_t chunkKey(int x, int z) {
         return ((int64_t)(uint32_t)x) | (((int64_t)(uint32_t)z) << 32);
     }
@@ -47,6 +48,7 @@ public:
     void handleKickDisconnect(Packet255KickDisconnect& pkt) override;
     void handlePlayerInventory(Packet5PlayerInventory& pkt) override;
     void handlePickupSpawn(Packet21PickupSpawn& pkt) override;
+    void handleComplexEntity(Packet59ComplexEntity& pkt) override;
     void handleErrorMessage(const std::string& reason) override;
 
 private:

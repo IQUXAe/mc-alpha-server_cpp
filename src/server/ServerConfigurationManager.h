@@ -30,6 +30,10 @@ public:
     // Broadcast a packet to all players
     void broadcastPacket(std::unique_ptr<Packet> pkt);
 
+    // Send Packet59 to all players who have the chunk containing (x,y,z) loaded.
+    // Matches Java: configManager.sentTileEntityToPlayer -> playerManager.func_541_a
+    void sendTileEntityToNearbyPlayers(int x, int y, int z, TileEntity* te);
+
     // Send a chat message to all players
     void broadcastChatMessage(const std::string& msg);
 

@@ -113,6 +113,12 @@ bool MinecraftServer::initialize() {
     worldMngr = std::make_unique<World>(this, "world/" + levelName, worldSeed_);
     worldSeed_ = worldMngr->randomSeed;
 
+    // Register TileEntity change callback: broadcasts Packet59 to nearby players.
+    // Matches Java: IWorldAccess.func_686_a -> WorldManager -> configManager.sentTileEntityToPlayer
+    worldMngr->onTileEntityChanged = [this](int x, int y, int z, TileEntity* te) {
+        configManager->sendTileEntityToNearbyPlayers(x, y, z, te);
+    };
+
     // Player saves go inside the world folder, mirroring Java's PlayerNBTManager
     playerSaveDir = "world/" + levelName + "/players";
     std::filesystem::create_directories(playerSaveDir);

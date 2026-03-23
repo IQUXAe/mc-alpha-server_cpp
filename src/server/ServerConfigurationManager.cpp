@@ -1,13 +1,16 @@
 #include "ServerConfigurationManager.h"
 #include "../MinecraftServer.h"
 #include "../network/NetLoginHandler.h"
+#include "../network/NetServerHandler.h"
 #include "../entity/EntityTracker.h"
 #include "../world/World.h"
+#include "../world/TileEntity.h"
 #include "../core/Logger.h"
 
 #include <fstream>
 #include <filesystem>
 #include <algorithm>
+#include <zlib.h>
 
 ServerConfigurationManager::ServerConfigurationManager(MinecraftServer* server)
     : mcServer_(server) {
@@ -101,6 +104,52 @@ void ServerConfigurationManager::broadcastPacket(std::unique_ptr<Packet> pkt) {
             player->netHandler->sendPacket(pkt->clone());
         }
     }
+}
+
+void ServerConfigurationManager::sendTileEntityToNearbyPlayers(int x, int y, int z, TileEntity* te) {
+    if (!te) return;
+
+    // Serialize TileEntity to NBT, then GZip compress (Java: CompressedStreamTools.func_772_a)
+    NBTCompound nbt;
+    te->writeToNBT(nbt);
+    ByteBuffer rawBuf;
+    nbt.writeRoot(rawBuf, "");
+
+    z_stream strm{};
+    strm.zalloc = Z_NULL; strm.zfree = Z_NULL; strm.opaque = Z_NULL;
+    if (deflateInit2(&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK)
+        return;
+
+    std::vector<uint8_t> compressed(rawBuf.data.size() + 256);
+    strm.next_in   = rawBuf.data.data();
+    strm.avail_in  = static_cast<uInt>(rawBuf.data.size());
+    strm.next_out  = compressed.data();
+    strm.avail_out = static_cast<uInt>(compressed.size());
+    deflate(&strm, Z_FINISH);
+    compressed.resize(strm.total_out);
+    deflateEnd(&strm);
+
+    int chunkX = x >> 4;
+    int chunkZ = z >> 4;
+    int sentCount = 0;
+
+    for (auto* player : playerEntities) {
+        auto* handler = static_cast<NetServerHandler*>(player->netHandler);
+        if (!handler) continue;
+        if (!handler->hasChunkLoaded(NetServerHandler::chunkKey(chunkX, chunkZ))) continue;
+
+        auto pkt = std::make_unique<Packet59ComplexEntity>();
+        pkt->x = x;
+        pkt->y = static_cast<int16_t>(y);
+        pkt->z = z;
+        pkt->nbtData = compressed;
+        handler->sendPacket(std::move(pkt));
+        ++sentCount;
+    }
+
+    std::cout << "[Packet59] Broadcast " << te->getEntityId()
+              << " at (" << x << "," << y << "," << z << ")"
+              << " to " << sentCount << " players" << std::endl;
 }
 
 void ServerConfigurationManager::broadcastChatMessage(const std::string& msg) {
