@@ -241,6 +241,32 @@ bool ItemPickaxe::canHarvestBlock(int blockId) const {
     return b && (b->blockMaterial == &Material::rock || b->blockMaterial == &Material::iron);
 }
 
+bool ItemPickaxe::isEffectiveAgainst(Block* block) const {
+    return block->blockMaterial == &Material::rock
+        || block->blockMaterial == &Material::iron;
+}
+
+bool ItemSpade::isEffectiveAgainst(Block* block) const {
+    return block->blockMaterial == &Material::ground
+        || block->blockMaterial == &Material::sand
+        || block->blockMaterial == &Material::snow
+        || block->blockMaterial == &Material::builtSnow;
+}
+
+bool ItemAxe::isEffectiveAgainst(Block* block) const {
+    return block->blockMaterial == &Material::wood;
+}
+
+float ItemTool::getStrVsBlock(int blockId) const {
+    for (int id : effectiveBlockIDs)
+        if (id == blockId) return digSpeed;
+    if (blockId > 0 && blockId < 256) {
+        Block* b = Block::blocksList[blockId];
+        if (b && isEffectiveAgainst(b)) return digSpeed;
+    }
+    return 1.0f;
+}
+
 // ItemBlock registers directly at blockID slot (not offset+256)
 ItemBlock::ItemBlock(int blockId) : blockID(blockId) {
     itemID = blockId;

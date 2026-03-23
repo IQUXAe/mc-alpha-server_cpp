@@ -299,15 +299,27 @@ void NetServerHandler::handlePlayerLookMove(Packet13PlayerLookMove& pkt) {
 }
 
 void NetServerHandler::handleBlockDig(Packet14BlockDig& pkt) {
-    // Sync currentItem to the real slot holding heldItemId_
+    // Java: restore field_10_k (held item) into inventory slot before every dig packet
     if (heldItemId_ > 0) {
         int lastSlot = static_cast<int>(player_->inventory.mainInventory.size()) - 1;
+        // Ensure the held item placeholder is in the current slot
+        bool found = false;
         for (int i = 0; i < lastSlot; ++i) {
             auto* s = player_->inventory.mainInventory[i];
             if (s && s->itemID == heldItemId_) {
                 player_->inventory.currentItem = i;
+                found = true;
                 break;
             }
+        }
+        if (!found) {
+            // Use placeholder in lastSlot
+            if (!heldItem_ || heldItem_->itemID != heldItemId_) {
+                delete heldItem_;
+                heldItem_ = new ItemStack(heldItemId_, 1, 0);
+            }
+            player_->inventory.mainInventory[lastSlot] = heldItem_;
+            player_->inventory.currentItem = lastSlot;
         }
     }
 
