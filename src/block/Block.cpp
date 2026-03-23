@@ -2,12 +2,14 @@
 #include "BlockContainer.h"
 #include "BlockChest.h"
 #include "BlockFurnace.h"
+#include "BlockSign.h"
 #include "../core/Material.h"
 #include "../core/AxisAlignedBB.h"
 #include "../world/World.h"
 #include "../world/TileEntity.h"
 #include "../world/TileEntityChest.h"
 #include "../world/TileEntityFurnace.h"
+#include "../world/TileEntitySign.h"
 #include "../entity/EntityItem.h"
 #include "../entity/EntityFallingSand.h"
 #include "../entity/EntityPlayerMP.h"
@@ -405,12 +407,14 @@ void Block::initBlocks() {
     blocksList[61]->setHardness(3.5f);
     blocksList[62] = new BlockFurnace(62, true);             // furnace active
     blocksList[62]->setHardness(3.5f);
-    (new Block(63, &Material::wood))->setHardness(1.0f);     // sign post
+    blocksList[63] = new BlockSign(63, false);  // sign post (floor)
+    blocksList[63]->setHardness(1.0f)->setLightOpacity(0);
     (new Block(64, &Material::wood))->setHardness(3.0f);     // wood door
     (new Block(65, &Material::wood))->setHardness(0.4f);     // ladder
     (new Block(66, &Material::ground))->setHardness(0.7f);   // rail
     (new Block(67, &Material::rock))->setHardness(2.0f);     // cobblestone stairs
-    (new Block(68, &Material::wood))->setHardness(1.0f);     // wall sign
+    blocksList[68] = new BlockSign(68, true);   // wall sign
+    blocksList[68]->setHardness(1.0f)->setLightOpacity(0);
     (new Block(69, &Material::circuits))->setHardness(0.5f); // lever
     (new Block(70, &Material::rock))->setHardness(0.5f);     // stone pressure plate
     (new Block(71, &Material::iron))->setHardness(3.0f);     // iron door
@@ -437,6 +441,7 @@ void Block::initBlocks() {
     // Register tile entities
     static TileEntityRegistrar<TileEntityChest> chestRegistrar("Chest");
     static TileEntityRegistrar<TileEntityFurnace> furnaceRegistrar("Furnace");
+    static TileEntityRegistrar<TileEntitySign> signRegistrar("Sign");
 
     std::cout << "[INFO] Registered all standard blocks." << std::endl;
 }

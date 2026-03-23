@@ -584,6 +584,9 @@ bool World::setBlockAndMetadata(int x, int y, int z, uint8_t blockId, uint8_t me
 bool World::setBlockAndMetadataWithNotify(int x, int y, int z, uint8_t blockId, uint8_t metadata) {
     if (!setBlockAndMetadata(x, y, z, blockId, metadata)) return false;
 
+    if (blockId > 0 && Block::blocksList[blockId])
+        Block::blocksList[blockId]->onBlockAdded(this, x, y, z);
+
     markBlockNeedsUpdate(x, y, z);
     notifyBlocksOfNeighborChange(x, y, z, blockId);
     return true;
@@ -638,6 +641,13 @@ int World::getHeightValue(int x, int z) {
     Chunk* chunk = getChunkFromBlockCoords(x, z);
     if (!chunk) return 0;
     return chunk->getHeightValue(x & 15, z & 15);
+}
+
+// Returns the material of the block at the given position
+Material* World::getBlockMaterial(int x, int y, int z) {
+    uint8_t id = getBlockId(x, y, z);
+    if (id == 0 || !Block::blocksList[id]) return &Material::air;
+    return Block::blocksList[id]->blockMaterial;
 }
 
 // Check if block at position is solid (for snow placement etc.)

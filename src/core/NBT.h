@@ -197,6 +197,15 @@ public:
         return {};
     }
 
+    std::string getString(const std::string& name) const {
+        auto it = tags.find(name);
+        if (it != tags.end()) {
+            auto t = std::dynamic_pointer_cast<NBTString>(it->second);
+            if (t) return t->value;
+        }
+        return {};
+    }
+
     std::shared_ptr<NBTCompound> getCompound(const std::string& name) const {
         auto it = tags.find(name);
         if (it != tags.end()) {

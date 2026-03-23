@@ -90,6 +90,7 @@ public:
     int getHeightValue(int x, int z);
     int func_4075_e(int x, int z) { return getHeightValue(x, z); }
     bool isBlockSolid(int x, int y, int z);
+    Material* getBlockMaterial(int x, int y, int z);
 
     // Entity integration
     void getCollidingBoundingBoxes(Entity* entity, const AxisAlignedBB& mask, std::vector<AxisAlignedBB>& result);

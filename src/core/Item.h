@@ -138,6 +138,17 @@ public:
     bool onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side) override;
 };
 
+// Sign item: places sign post on top face, wall sign on side faces
+class ItemSign : public Item {
+public:
+    ItemSign(int id) : Item() {
+        itemID = id;
+        maxStackSize = 1;
+        itemsList[id] = this;
+    }
+    bool onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side) override;
+};
+
 // Tool material levels: 0=wood, 1=stone, 2=steel, 3=diamond, 4=gold
 class ItemTool : public Item {
 public:
