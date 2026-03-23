@@ -147,22 +147,64 @@ public:
 class BlockTorch : public Block {
 public:
     BlockTorch(int id, Material* mat) : Block(id, mat) {}
-    bool canBlockStay(World* world, int x, int y, int z) const override {
-        auto isSolid = [&](int bx, int by, int bz) {
-            int id = world->getBlockId(bx, by, bz);
-            if (id == 0) return false;
-            Block* b = Block::blocksList[id];
-            return b && b->blockMaterial->isSolid();
-        };
-        return isSolid(x, y-1, z) || isSolid(x-1, y, z) || isSolid(x+1, y, z)
-            || isSolid(x, y, z-1) || isSolid(x, y, z+1);
+
+    // Java: doesBlockAllowAttachment = block is solid and opaque
+    static bool allowsAttachment(World* world, int x, int y, int z) {
+        int id = world->getBlockId(x, y, z);
+        if (id == 0) return false;
+        Block* b = Block::blocksList[id];
+        return b && b->blockMaterial->isSolid() && b->isCollidable();
     }
+
+    // Java BlockTorch.onBlockPlaced: sets metadata based on which face was clicked
+    // side: 1=bottom(floor), 2=north(+z), 3=south(-z), 4=west(+x), 5=east(-x)
+    void onBlockPlaced(World* world, int x, int y, int z, int side) override {
+        uint8_t meta = 5; // default: floor
+        if (side == 2 && allowsAttachment(world, x, y, z + 1)) meta = 4;
+        else if (side == 3 && allowsAttachment(world, x, y, z - 1)) meta = 3;
+        else if (side == 4 && allowsAttachment(world, x + 1, y, z)) meta = 2;
+        else if (side == 5 && allowsAttachment(world, x - 1, y, z)) meta = 1;
+        world->setBlockAndMetadata(x, y, z, blockID, meta);
+        // markBlockNeedsUpdate is called by handlePlace after onBlockPlaced returns
+    }
+
+    void onBlockAdded(World* world, int x, int y, int z) override {
+        // Only auto-detect attachment when metadata is 0 AND no neighbors triggered
+        // onBlockPlaced yet. This handles world-gen torches and chunk loading.
+        // When placed by player, onBlockPlaced sets metadata after us —
+        // so we must NOT send markBlockNeedsUpdate here to avoid the flicker.
+        if (world->getBlockMetadata(x, y, z) != 0) return;
+        uint8_t meta = 0;
+        if      (allowsAttachment(world, x - 1, y, z)) meta = 1;
+        else if (allowsAttachment(world, x + 1, y, z)) meta = 2;
+        else if (allowsAttachment(world, x, y, z - 1)) meta = 3;
+        else if (allowsAttachment(world, x, y, z + 1)) meta = 4;
+        else if (allowsAttachment(world, x, y - 1, z)) meta = 5;
+        if (meta != 0)
+            world->setBlockAndMetadata(x, y, z, blockID, meta);
+        // No markBlockNeedsUpdate — setBlockWithNotify calls it after us with final metadata
+    }
+
+    bool canBlockStay(World* world, int x, int y, int z) const override {
+        return allowsAttachment(world, x-1, y, z) || allowsAttachment(world, x+1, y, z)
+            || allowsAttachment(world, x, y, z-1) || allowsAttachment(world, x, y, z+1)
+            || allowsAttachment(world, x, y-1, z);
+    }
+
     void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
-        if (!canBlockStay(world, x, y, z)) {
-            dropBlockAsItem(world, x, y, z, 0);
-            world->setBlockAndUpdate(x, y, z, 0);
+        uint8_t meta = world->getBlockMetadata(x, y, z);
+        bool detach = false;
+        if (meta == 1 && !allowsAttachment(world, x - 1, y, z)) detach = true;
+        if (meta == 2 && !allowsAttachment(world, x + 1, y, z)) detach = true;
+        if (meta == 3 && !allowsAttachment(world, x, y, z - 1)) detach = true;
+        if (meta == 4 && !allowsAttachment(world, x, y, z + 1)) detach = true;
+        if (meta == 5 && !allowsAttachment(world, x, y - 1, z)) detach = true;
+        if (detach) {
+            dropBlockAsItem(world, x, y, z, meta);
+            world->setBlockWithNotify(x, y, z, 0);
         }
     }
+
     bool isReplaceable() const override { return true; }
     std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World*, int, int, int) override { return std::nullopt; }
 };
@@ -439,8 +481,9 @@ void Block::dropBlockAsItemWithChance(World* world, int x, int y, int z, int met
         int dropId = idDropped(metadata);
         if (dropId > 0) {
             int count = quantityDropped();
+            int dropDamage = damageDropped(metadata); // mirrors Java Block.damageDropped()
             for (int i = 0; i < count; ++i) {
-                auto entity = std::make_unique<EntityItem>(dropId, 1, metadata);
+                auto entity = std::make_unique<EntityItem>(dropId, 1, dropDamage);
                 // Spawn slightly above block center so it doesn't get stuck inside
                 entity->setPosition(x + 0.5, y + 0.7, z + 0.5);
                 entity->worldObj = world;

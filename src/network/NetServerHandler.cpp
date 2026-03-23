@@ -37,7 +37,7 @@ void NetServerHandler::tick() {
         lastChunkZ_ = cz;
 
         int r = mcServer_->viewDistance;
-        int genR = r + 2; // extra generation ring so border chunks get populated
+        int genR = r + 3; // extra ring: +1 for population neighbors, +2 buffer
 
         // Unload chunks that are now outside the view distance.
         // The client will render garbage/stale data if we don't tell it to drop these.
@@ -107,27 +107,20 @@ void NetServerHandler::tick() {
         int px = it->first;
         int pz = it->second;
 
+        // Force-generate all 4 neighbors needed for population
+        mcServer_->worldMngr->getChunk(px + 1, pz);
+        mcServer_->worldMngr->getChunk(px, pz + 1);
+        mcServer_->worldMngr->getChunk(px + 1, pz + 1);
+        // Also ensure this chunk itself exists
         auto* chunk = mcServer_->worldMngr->getChunk(px, pz);
 
         if (chunk && chunk->isTerrainPopulated) {
-            // Generate the +1, +1 padding neighbors synchronously to ensure population
-            mcServer_->worldMngr->getChunk(px + 1, pz);
-            mcServer_->worldMngr->getChunk(px, pz + 1);
-            mcServer_->worldMngr->getChunk(px + 1, pz + 1);
-
             sendPacket(std::make_unique<Packet50PreChunk>(px, pz, true));
             sendPacket(std::make_unique<Packet51MapChunk>(px * 16, 0, pz * 16, 16, 128, 16, chunk->getChunkData()));
             sentChunks_.insert(chunkKey(px, pz));
             it = chunksToLoad_.erase(it);
             ++sent;
         } else {
-            // Chunk exists but not yet populated — its neighbors might not be generated yet.
-            // Force-generate the 2x2 block of neighbors so World::getChunk can trigger population.
-            if (chunk) {
-                mcServer_->worldMngr->getChunk(px + 1, pz);
-                mcServer_->worldMngr->getChunk(px, pz + 1);
-                mcServer_->worldMngr->getChunk(px + 1, pz + 1);
-            }
             ++it;
         }
     }
@@ -214,7 +207,7 @@ void NetServerHandler::sendChunks() {
     int r = mcServer_->viewDistance;
 
     std::vector<std::pair<int, int>> chunksToLoad;
-    int genR = r + 2; // Generate 2 extra rings for full population guarantee
+    int genR = r + 3; // Generate 3 extra rings for full population guarantee
     for (int cx = chunkX - genR; cx <= chunkX + genR; ++cx) {
         for (int cz = chunkZ - genR; cz <= chunkZ + genR; ++cz) {
             chunksToLoad.push_back({cx, cz});
@@ -488,7 +481,14 @@ void NetServerHandler::handlePlayerInventory(Packet5PlayerInventory& pkt) {
             if ((int)i == skipSlot) continue;
             delete inv[i];
             int16_t id = slots[i].itemId;
-            inv[i] = (id >= 0 && id < 32000) ? new ItemStack(id, slots[i].count, slots[i].damage) : nullptr;
+            if (id >= 0 && id < 32000) {
+                // Ignore damage from client for items with no durability
+                Item* item = Item::itemsList[id];
+                int16_t dmg = (item && item->maxDamage > 0) ? slots[i].damage : 0;
+                inv[i] = new ItemStack(id, slots[i].count, dmg);
+            } else {
+                inv[i] = nullptr;
+            }
         }
     };
 

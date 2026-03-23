@@ -72,7 +72,9 @@ public:
     uint8_t getBlockMetadata(int x, int y, int z);
     bool setBlock(int x, int y, int z, uint8_t blockId);
     bool setBlockWithNotify(int x, int y, int z, uint8_t blockId);
-    // Like setBlockWithNotify but without notifying neighbors — safe for use inside onNeighborBlockChange
+    // Like setBlockWithNotify but skips markBlockNeedsUpdate — caller sends the packet
+    bool setBlockWithNotifyNoClientUpdate(int x, int y, int z, uint8_t blockId);
+    // Like setBlockWithNotify but without notifying neighbors
     bool setBlockAndUpdate(int x, int y, int z, uint8_t blockId);
     bool setBlockAndMetadata(int x, int y, int z, uint8_t blockId, uint8_t metadata);
     bool setBlockAndMetadataWithNotify(int x, int y, int z, uint8_t blockId, uint8_t metadata);

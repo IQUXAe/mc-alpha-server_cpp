@@ -78,6 +78,7 @@ public:
     }
     
     void damageItem(int damage) {
+        if (getMaxDamage() <= 0) return; // item has no durability
         itemDamage += damage;
         if (itemDamage > getMaxDamage()) {
             stackSize--;

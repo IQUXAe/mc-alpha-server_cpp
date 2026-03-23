@@ -10,11 +10,16 @@
 #include "core/NBT.h"
 #include "core/Logger.h"
 #include <zlib.h>
+#include <zstd.h>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <ranges>
 #include <ctime>
+
+// Magic prefix to distinguish zstd chunks from legacy gzip chunks
+static constexpr uint32_t ZSTD_MAGIC = 0xFD2FB528; // native zstd frame magic
 
 World::World(MinecraftServer* server, const std::string& savePath, int64_t seed)
     : mcServer(server), worldPath_(savePath) {
@@ -456,8 +461,18 @@ bool World::setBlock(int x, int y, int z, uint8_t blockId) {
 bool World::setBlockWithNotify(int x, int y, int z, uint8_t blockId) {
     if (!setBlock(x, y, z, blockId)) return false;
 
+    // Call onBlockAdded BEFORE notifying client so metadata is set correctly
+    if (blockId > 0 && Block::blocksList[blockId])
+        Block::blocksList[blockId]->onBlockAdded(this, x, y, z);
+
+    // Send block update with final metadata (after onBlockAdded may have changed it)
     markBlockNeedsUpdate(x, y, z);
-    // Notify the placed block itself
+    notifyBlocksOfNeighborChange(x, y, z, blockId);
+    return true;
+}
+
+bool World::setBlockWithNotifyNoClientUpdate(int x, int y, int z, uint8_t blockId) {
+    if (!setBlock(x, y, z, blockId)) return false;
     if (blockId > 0 && Block::blocksList[blockId])
         Block::blocksList[blockId]->onBlockAdded(this, x, y, z);
     notifyBlocksOfNeighborChange(x, y, z, blockId);
@@ -626,59 +641,60 @@ std::vector<uint8_t> World::compressChunkData(Chunk* chunk) {
     root.setCompound("Level", std::make_shared<NBTCompound>(level));
 
     ByteBuffer buf;
-    root.writeRoot(buf, ""); // Outer tag name is usually empty in modern versions or specific in old
+    root.writeRoot(buf, "");
 
-    // Compress with zlib (GZIP)
-    z_stream strm;
-    strm.zalloc = Z_NULL;
-    strm.zfree = Z_NULL;
-    strm.opaque = Z_NULL;
-
-    // Use GZIP format (windowBits = 15 + 16)
-    if (deflateInit2(&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
-        return std::vector<uint8_t>();
+    // Compress with zstd (faster decompression than gzip, same ratio)
+    size_t bound = ZSTD_compressBound(buf.data.size());
+    std::vector<uint8_t> out(bound);
+    size_t compressed = ZSTD_compress(out.data(), bound,
+                                      buf.data.data(), buf.data.size(),
+                                      1); // level 1 = fastest
+    if (ZSTD_isError(compressed)) {
+        Logger::severe("zstd compress failed: {}", ZSTD_getErrorName(compressed));
+        return {};
     }
-
-    std::vector<uint8_t> outBuf(buf.data.size() + 1024);
-    strm.next_in = buf.data.data();
-    strm.avail_in = static_cast<uInt>(buf.data.size());
-    strm.next_out = outBuf.data();
-    strm.avail_out = static_cast<uInt>(outBuf.size());
-
-    deflate(&strm, Z_FINISH);
-    outBuf.resize(strm.total_out);
-    deflateEnd(&strm);
-
-    return outBuf;
+    out.resize(compressed);
+    return out;
 }
 
 void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data) {
-    // Decompress GZIP
-    z_stream strm;
-    strm.zalloc = Z_NULL;
-    strm.zfree = Z_NULL;
-    strm.opaque = Z_NULL;
-    strm.avail_in = 0;
-    strm.next_in = Z_NULL;
+    if (data.size() < 4) return;
 
-    if (inflateInit2(&strm, 15 + 16) != Z_OK) return;
+    std::vector<uint8_t> outBuf;
 
-    strm.next_in = const_cast<uint8_t*>(data.data());
-    strm.avail_in = static_cast<uInt>(data.size());
-
-    std::vector<uint8_t> outBuf(128 * 1024); // Start with 128KB
-    strm.next_out = outBuf.data();
-    strm.avail_out = static_cast<uInt>(outBuf.size());
-
-    int ret = inflate(&strm, Z_FINISH);
-    if (ret != Z_STREAM_END && ret != Z_OK) {
+    // Detect format by magic: zstd frame starts with 0xFD2FB528 (little-endian)
+    uint32_t magic;
+    std::memcpy(&magic, data.data(), 4);
+    if (magic == ZSTD_MAGIC) {
+        // zstd
+        unsigned long long decompSize = ZSTD_getFrameContentSize(data.data(), data.size());
+        if (decompSize == ZSTD_CONTENTSIZE_ERROR || decompSize == ZSTD_CONTENTSIZE_UNKNOWN) {
+            decompSize = 256 * 1024; // fallback 256KB
+        }
+        outBuf.resize(static_cast<size_t>(decompSize));
+        size_t result = ZSTD_decompress(outBuf.data(), outBuf.size(),
+                                        data.data(), data.size());
+        if (ZSTD_isError(result)) {
+            Logger::severe("zstd decompress failed: {}", ZSTD_getErrorName(result));
+            return;
+        }
+        outBuf.resize(result);
+    } else {
+        // Legacy gzip
+        z_stream strm{};
+        if (inflateInit2(&strm, 15 + 16) != Z_OK) return;
+        strm.next_in  = const_cast<uint8_t*>(data.data());
+        strm.avail_in = static_cast<uInt>(data.size());
+        outBuf.resize(128 * 1024);
+        strm.next_out  = outBuf.data();
+        strm.avail_out = static_cast<uInt>(outBuf.size());
+        int ret = inflate(&strm, Z_FINISH);
+        if (ret != Z_STREAM_END && ret != Z_OK) { inflateEnd(&strm); return; }
+        outBuf.resize(strm.total_out);
         inflateEnd(&strm);
-        return;
     }
-    outBuf.resize(strm.total_out);
-    inflateEnd(&strm);
 
-    ByteBuffer buf(outBuf);
+    ByteBuffer buf(std::move(outBuf));
     auto root = NBTCompound::readRoot(buf);
     if (!root) return;
 
@@ -686,13 +702,12 @@ void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data) 
     if (!level) return;
 
     chunk->isTerrainPopulated = level->getByte("TerrainPopulated") != 0;
-    chunk->blocks = level->getByteArray("Blocks");
-    chunk->data.data = level->getByteArray("Data");
-    chunk->skylight.data = level->getByteArray("SkyLight");
+    chunk->blocks       = level->getByteArray("Blocks");
+    chunk->data.data    = level->getByteArray("Data");
+    chunk->skylight.data   = level->getByteArray("SkyLight");
     chunk->blocklight.data = level->getByteArray("BlockLight");
-    chunk->heightMap = level->getByteArray("HeightMap");
+    chunk->heightMap    = level->getByteArray("HeightMap");
 
-    // Force regeneration if heightmap is all zeros or suspicious
     if (chunk->heightMap.empty() || chunk->heightMap.size() < 256) {
         chunk->heightMap.assign(256, 0);
         chunk->generateHeightMap();
