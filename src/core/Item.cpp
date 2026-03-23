@@ -291,10 +291,14 @@ bool ItemBlock::onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world
     if (stack->stackSize == 0) return false;
     if (y < 0 || y >= 128) return false;
 
-    // Target position must be air or replaceable
+    // Target position must be empty (air) or a replaceable fluid/fire/snow
+    // Java func_516_a: var7 == null (air) OR water/lava/fire/snow
     int targetId = world->getBlockId(x, y, z);
-    Block* targetBlock = targetId > 0 ? Block::blocksList[targetId] : nullptr;
-    if (targetId != 0 && !(targetBlock && targetBlock->isReplaceable())) return false;
+    if (targetId != 0) {
+        // Allow replacing only water, lava, fire, snow layer
+        if (targetId != 8 && targetId != 9 && targetId != 10 && targetId != 11
+         && targetId != 51 && targetId != 78) return false;
+    }
 
     Block* block = Block::blocksList[blockID];
     if (!block) return false;
@@ -311,7 +315,7 @@ bool ItemBlock::onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world
         if (playerBB.intersectsWith(*bb)) return false;
     }
 
-    if (world->setBlockWithNotify(x, y, z, blockID)) {
+    if (world->setBlockWithNotifyNoClientUpdate(x, y, z, blockID)) {
         block->onBlockPlaced(world, x, y, z, side);
         stack->stackSize--;
         return true;

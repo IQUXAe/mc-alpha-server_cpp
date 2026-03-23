@@ -51,7 +51,7 @@ public:
     int32_t getSpawnZ() const { return spawnZ_; }
     int64_t getWorldSeed() const { return worldSeed_; }
     int8_t getWorldDimension() const { return worldDimension_; }
-    int64_t getWorldTime() const { return worldTime_; }
+    int64_t getWorldTime() const;
 
 private:
     std::atomic<bool> running_{true};
@@ -61,7 +61,7 @@ private:
     int32_t spawnX_ = 0, spawnY_ = 64, spawnZ_ = 0;
     int64_t worldSeed_ = 0;
     int8_t worldDimension_ = 0;
-    int64_t worldTime_ = 0;
+    // worldTime_ removed — time is owned by worldMngr->worldTime
 
     // Commands
     std::mutex commandMutex_;

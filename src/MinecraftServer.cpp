@@ -195,15 +195,16 @@ void MinecraftServer::stop() {
     running_ = false;
 }
 
+int64_t MinecraftServer::getWorldTime() const {
+    return worldMngr ? worldMngr->worldTime : 0;
+}
+
 void MinecraftServer::serverTick() {
     ++tickCounter_;
 
-    // Increment world time
-    worldTime_++;
-
-    // Send time update every 20 ticks (1 second)
+    // Send time update every 20 ticks (1 second) — time is incremented by World::tick()
     if (tickCounter_ % ServerConstants::TICKS_PER_SECOND == 0) {
-        configManager->broadcastPacket(std::make_unique<Packet4UpdateTime>(worldTime_));
+        configManager->broadcastPacket(std::make_unique<Packet4UpdateTime>(getWorldTime()));
     }
 
     if (worldMngr) {

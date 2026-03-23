@@ -12,6 +12,16 @@ endif()
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 find_library(LEVELDB_LIBRARY NAMES leveldb REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(ZSTD REQUIRED libzstd)
+
+# Prefer static zstd to avoid runtime dependency
+find_library(ZSTD_STATIC_LIB NAMES libzstd.a zstd)
+if(ZSTD_STATIC_LIB)
+    set(ZSTD_LINK_LIB ${ZSTD_STATIC_LIB})
+else()
+    set(ZSTD_LINK_LIB ${ZSTD_LIBRARIES})
+endif()
 
 file(GLOB_RECURSE SOURCES "src/*.cpp")
 file(GLOB_RECURSE HEADERS "src/*.h")
@@ -19,8 +29,8 @@ list(FILTER SOURCES EXCLUDE REGEX ".*main\\.cpp$")
 
 add_executable(alpha_server ${SOURCES} src/main.cpp ${HEADERS})
 
-target_include_directories(alpha_server PRIVATE src)
-target_link_libraries(alpha_server PRIVATE ZLIB::ZLIB Threads::Threads ${LEVELDB_LIBRARY})
+target_link_libraries(alpha_server PRIVATE ZLIB::ZLIB Threads::Threads ${LEVELDB_LIBRARY} ${ZSTD_LINK_LIB})
+target_include_directories(alpha_server PRIVATE src ${ZSTD_INCLUDE_DIRS})
 
 if(UNIX)
     target_compile_options(alpha_server PRIVATE
