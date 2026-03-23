@@ -11,6 +11,7 @@ public:
     int deathTime = 0;
     float moveSpeed = 0.7f;
     bool isSneaking = false;
+    float rotationYaw = 0.0f;  // Rotation in degrees
 
     virtual void onDeath() {
         isDead = true;

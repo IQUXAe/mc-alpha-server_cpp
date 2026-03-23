@@ -1,5 +1,6 @@
 #include "Chunk.h"
 #include "World.h"
+#include "TileEntity.h"
 #include <stdexcept>
 #include <algorithm>
 #include <ranges>
@@ -19,7 +20,10 @@ Chunk::Chunk(World* world, int x, int z)
     // Everything is air initially.
 }
 
-Chunk::~Chunk() = default;
+Chunk::~Chunk() {
+    // TileEntities are owned by World, not Chunk
+    tileEntities_.clear();
+}
 
 uint8_t Chunk::getBlockID(int x, int y, int z) const {
     if (y < 0 || y >= CHUNK_SIZE_Y || x < 0 || x >= CHUNK_SIZE_X || z < 0 || z >= CHUNK_SIZE_Z) return 0;
@@ -245,4 +249,20 @@ std::vector<uint8_t> Chunk::getChunkData() const {
     compressed.resize(strm.total_out);
     deflateEnd(&strm);
     return compressed;
+}
+
+void Chunk::addTileEntity(TileEntity* te) {
+    if (!te) return;
+    int localX = te->xCoord - (xPosition * 16);
+    int localZ = te->zCoord - (zPosition * 16);
+    tileEntities_[getTileEntityKey(localX, te->yCoord, localZ)] = te;
+}
+
+void Chunk::removeTileEntity(int x, int y, int z) {
+    tileEntities_.erase(getTileEntityKey(x, y, z));
+}
+
+TileEntity* Chunk::getTileEntity(int x, int y, int z) const {
+    auto it = tileEntities_.find(getTileEntityKey(x, y, z));
+    return it != tileEntities_.end() ? it->second : nullptr;
 }

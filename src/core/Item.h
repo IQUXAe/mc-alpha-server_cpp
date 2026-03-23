@@ -119,6 +119,7 @@ public:
 
     Item* setMaxStackSize(int size);
     Item* setMaxDamage(int damage);
+    int getMaxStackSize() const { return maxStackSize; }
 
     virtual bool onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side);
 

@@ -1028,14 +1028,16 @@ public:
     int32_t z = 0;
     std::vector<uint8_t> nbtData;
 
-    Packet59ComplexEntity() = default;
+    Packet59ComplexEntity() {
+        isChunkDataPacket = true;
+    }
 
     void readPacketData(ByteBuffer& buf) override {
         x = buf.readInt();
         y = buf.readShort();
         z = buf.readInt();
         int16_t len = buf.readShort();
-        nbtData = buf.readBytes(static_cast<size_t>(len));
+        nbtData = buf.readBytes(static_cast<size_t>(len & 0xFFFF));
     }
 
     void writePacketData(ByteBuffer& buf) override {
@@ -1046,7 +1048,9 @@ public:
         buf.writeBytes(nbtData);
     }
 
-    void processPacket(NetHandler& handler) override {}
+    void processPacket(NetHandler& handler) override {
+        handler.handleComplexEntity(*this);
+    }
 
     std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet59ComplexEntity>(*this); }
     int getPacketSize() override {

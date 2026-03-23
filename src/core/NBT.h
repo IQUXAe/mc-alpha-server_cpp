@@ -24,7 +24,10 @@ class NBTTag {
 public:
     virtual ~NBTTag() = default;
     virtual NBTTagType getType() const = 0;
-    virtual void write(ByteBuffer& buf) const = 0;
+    // writeContents: writes only the payload (no type byte, no name) — used inside NBTList
+    virtual void writeContents(ByteBuffer& buf) const = 0;
+    // write: writes full tag payload (used inside NBTCompound entries, called after type+name are written)
+    void write(ByteBuffer& buf) const { writeContents(buf); }
 };
 
 class NBTByte : public NBTTag {
@@ -32,7 +35,7 @@ public:
     int8_t value;
     explicit NBTByte(int8_t v) : value(v) {}
     NBTTagType getType() const override { return NBTTagType::TAG_Byte; }
-    void write(ByteBuffer& buf) const override { buf.writeByte(value); }
+    void writeContents(ByteBuffer& buf) const override { buf.writeByte(value); }
 };
 
 class NBTShort : public NBTTag {
@@ -40,7 +43,7 @@ public:
     int16_t value;
     explicit NBTShort(int16_t v) : value(v) {}
     NBTTagType getType() const override { return NBTTagType::TAG_Short; }
-    void write(ByteBuffer& buf) const override { buf.writeShort(value); }
+    void writeContents(ByteBuffer& buf) const override { buf.writeShort(value); }
 };
 
 class NBTInt : public NBTTag {
@@ -48,7 +51,7 @@ public:
     int32_t value;
     explicit NBTInt(int32_t v) : value(v) {}
     NBTTagType getType() const override { return NBTTagType::TAG_Int; }
-    void write(ByteBuffer& buf) const override { buf.writeInt(value); }
+    void writeContents(ByteBuffer& buf) const override { buf.writeInt(value); }
 };
 
 class NBTLong : public NBTTag {
@@ -56,7 +59,7 @@ public:
     int64_t value;
     explicit NBTLong(int64_t v) : value(v) {}
     NBTTagType getType() const override { return NBTTagType::TAG_Long; }
-    void write(ByteBuffer& buf) const override { buf.writeLong(value); }
+    void writeContents(ByteBuffer& buf) const override { buf.writeLong(value); }
 };
 
 class NBTFloat : public NBTTag {
@@ -64,9 +67,7 @@ public:
     float value;
     explicit NBTFloat(float v) : value(v) {}
     NBTTagType getType() const override { return NBTTagType::TAG_Float; }
-    void write(ByteBuffer& buf) const override {
-        buf.writeFloat(value);
-    }
+    void writeContents(ByteBuffer& buf) const override { buf.writeFloat(value); }
 };
 
 class NBTDouble : public NBTTag {
@@ -74,9 +75,7 @@ public:
     double value;
     explicit NBTDouble(double v) : value(v) {}
     NBTTagType getType() const override { return NBTTagType::TAG_Double; }
-    void write(ByteBuffer& buf) const override {
-        buf.writeDouble(value);
-    }
+    void writeContents(ByteBuffer& buf) const override { buf.writeDouble(value); }
 };
 
 class NBTString : public NBTTag {
@@ -84,7 +83,7 @@ public:
     std::string value;
     explicit NBTString(std::string v) : value(std::move(v)) {}
     NBTTagType getType() const override { return NBTTagType::TAG_String; }
-    void write(ByteBuffer& buf) const override {
+    void writeContents(ByteBuffer& buf) const override {
         buf.writeShort(static_cast<int16_t>(value.size()));
         for (char c : value) buf.writeUByte(static_cast<uint8_t>(c));
     }
@@ -95,9 +94,27 @@ public:
     std::vector<uint8_t> value;
     explicit NBTByteArray(std::vector<uint8_t> v) : value(std::move(v)) {}
     NBTTagType getType() const override { return NBTTagType::TAG_ByteArray; }
-    void write(ByteBuffer& buf) const override {
+    void writeContents(ByteBuffer& buf) const override {
         buf.writeInt(static_cast<int32_t>(value.size()));
         buf.writeBytes(value);
+    }
+};
+
+class NBTList : public NBTTag {
+public:
+    std::vector<std::shared_ptr<NBTTag>> tags;
+    NBTTagType tagType = NBTTagType::TAG_End;
+    
+    NBTTagType getType() const override { return NBTTagType::TAG_List; }
+    
+    // Java NBTTagList.writeTagContents: tagType + count + each element's contents only (no type/name)
+    void writeContents(ByteBuffer& buf) const override {
+        NBTTagType actualType = tags.empty() ? NBTTagType::TAG_Byte : tagType;
+        buf.writeUByte(static_cast<uint8_t>(actualType));
+        buf.writeInt(static_cast<int32_t>(tags.size()));
+        for (const auto& tag : tags) {
+            tag->writeContents(buf);
+        }
     }
 };
 
@@ -115,6 +132,7 @@ public:
     void setString(const std::string& name, std::string v) { tags[name] = std::make_shared<NBTString>(std::move(v)); }
     void setByteArray(const std::string& name, std::vector<uint8_t> v) { tags[name] = std::make_shared<NBTByteArray>(std::move(v)); }
     void setCompound(const std::string& name, std::shared_ptr<NBTCompound> v) { tags[name] = v; }
+    void setBoolean(const std::string& name, bool v) { tags[name] = std::make_shared<NBTByte>(v ? 1 : 0); }
 
     int8_t getByte(const std::string& name) const {
         auto it = tags.find(name);
@@ -187,21 +205,25 @@ public:
         return nullptr;
     }
 
-    void write(ByteBuffer& buf) const override {
+    // Java NBTTagCompound.writeTagContents: for each entry writes type + name (writeUTF) + contents, then TAG_End
+    void writeContents(ByteBuffer& buf) const override {
         for (auto const& [name, tag] : tags) {
             buf.writeUByte(static_cast<uint8_t>(tag->getType()));
+            // Java writeUTF: 2-byte length + UTF-8 bytes
             buf.writeShort(static_cast<int16_t>(name.size()));
             for (char c : name) buf.writeUByte(static_cast<uint8_t>(c));
-            tag->write(buf);
+            tag->writeContents(buf);
         }
         buf.writeUByte(static_cast<uint8_t>(NBTTagType::TAG_End));
     }
+
+    void write(ByteBuffer& buf) const { writeContents(buf); }
 
     void writeRoot(ByteBuffer& buf, const std::string& rootName) const {
         buf.writeUByte(static_cast<uint8_t>(NBTTagType::TAG_Compound));
         buf.writeShort(static_cast<int16_t>(rootName.size()));
         for (char c : rootName) buf.writeUByte(static_cast<uint8_t>(c));
-        write(buf);
+        writeContents(buf);
     }
 
     static std::shared_ptr<NBTTag> readTag(ByteBuffer& buf, NBTTagType type);
@@ -255,6 +277,14 @@ inline std::shared_ptr<NBTTag> NBTCompound::readTag(ByteBuffer& buf, NBTTagType 
         std::string s(len, '\0');
         for (int i = 0; i < len; ++i) s[i] = (char)buf.readUByte();
         return std::make_shared<NBTString>(std::move(s));
+    } else if (type == NBTTagType::TAG_List) {
+        auto list = std::make_shared<NBTList>();
+        list->tagType = static_cast<NBTTagType>(buf.readUByte());
+        int32_t count = buf.readInt();
+        for (int32_t i = 0; i < count; ++i) {
+            list->tags.push_back(readTag(buf, list->tagType));
+        }
+        return list;
     } else if (type == NBTTagType::TAG_Compound) {
         auto comp = std::make_shared<NBTCompound>();
         comp->read(buf);

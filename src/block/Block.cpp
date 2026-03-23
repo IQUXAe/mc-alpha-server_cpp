@@ -1,7 +1,13 @@
 #include "Block.h"
+#include "BlockContainer.h"
+#include "BlockChest.h"
+#include "BlockFurnace.h"
 #include "../core/Material.h"
 #include "../core/AxisAlignedBB.h"
 #include "../world/World.h"
+#include "../world/TileEntity.h"
+#include "../world/TileEntityChest.h"
+#include "../world/TileEntityFurnace.h"
 #include "../entity/EntityItem.h"
 #include "../entity/EntityFallingSand.h"
 #include "../entity/EntityPlayerMP.h"
@@ -385,17 +391,20 @@ void Block::initBlocks() {
     (new Block(49, &Material::rock))->setHardness(2000.0f);  // obsidian
     (new BlockTorch(50, &Material::circuits))->setHardness(0.0f)->setLightOpacity(0); // torch
     (new Block(51, &Material::fire))->setHardness(0.0f);     // fire
-    mobSpawner = (new Block(52, &Material::rock))->setHardness(5.0f);
+    (new Block(52, &Material::rock))->setHardness(5.0f);
     (new Block(53, &Material::wood))->setHardness(2.0f);     // wood stairs
-    (new Block(54, &Material::wood))->setHardness(2.5f);     // chest
+    blocksList[54] = new BlockChest(54);                     // chest
+    blocksList[54]->setHardness(2.5f);
     (new Block(55, &Material::circuits))->setHardness(0.0f)->setLightOpacity(0); // redstone wire
     oreDiamond = (new BlockOre(56, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
     (new Block(57, &Material::iron))->setHardness(5.0f);     // diamond block
     (new Block(58, &Material::wood))->setHardness(2.5f);     // crafting table
     (new Block(59, &Material::plants))->setHardness(0.0f);   // crops
     (new Block(60, &Material::ground))->setHardness(0.6f);   // farmland
-    (new Block(61, &Material::rock))->setHardness(3.5f);     // furnace
-    (new Block(62, &Material::rock))->setHardness(3.5f);     // burning furnace
+    blocksList[61] = new BlockFurnace(61, false);            // furnace idle
+    blocksList[61]->setHardness(3.5f);
+    blocksList[62] = new BlockFurnace(62, true);             // furnace active
+    blocksList[62]->setHardness(3.5f);
     (new Block(63, &Material::wood))->setHardness(1.0f);     // sign post
     (new Block(64, &Material::wood))->setHardness(3.0f);     // wood door
     (new Block(65, &Material::wood))->setHardness(0.4f);     // ladder
@@ -424,6 +433,10 @@ void Block::initBlocks() {
     (new Block(88, &Material::sand))->setHardness(0.5f);     // soul sand
     (new Block(89, &Material::rock))->setHardness(0.3f);     // glowstone
     (new Block(91, &Material::pumpkin))->setHardness(1.0f);  // jack-o-lantern
+
+    // Register tile entities
+    static TileEntityRegistrar<TileEntityChest> chestRegistrar("Chest");
+    static TileEntityRegistrar<TileEntityFurnace> furnaceRegistrar("Furnace");
 
     std::cout << "[INFO] Registered all standard blocks." << std::endl;
 }

@@ -4,12 +4,18 @@
 #include "../entity/EntityPlayerMP.h"
 #include "../entity/EntityTracker.h"
 #include "../world/Chunk.h"
+#include "../world/TileEntity.h"
 #include "../block/Block.h"
 #include "../entity/EntityItem.h"
+#include "../core/NBT.h"
 
 #include <iostream>
+#include <iomanip>
 #include <algorithm>
 #include <cmath>
+#include <ranges>
+#include <functional>
+#include <zlib.h>
 
 NetServerHandler::NetServerHandler(MinecraftServer* server, std::unique_ptr<NetworkManager> netMgr, EntityPlayerMP* player)
     : mcServer_(server), netManager_(std::move(netMgr)), player_(player) {
@@ -67,16 +73,14 @@ void NetServerHandler::tick() {
                     continue;
                 }
                 // Only queue visible chunks that haven't been sent yet
-                if (sentChunks_.find(chunkKey(i, j)) == sentChunks_.end()) {
+                if (!sentChunks_.contains(chunkKey(i, j))) {
                     needed.push_back({i, j});
                 }
             }
         }
 
-        std::sort(needed.begin(), needed.end(), [cx, cz](const std::pair<int,int>& a, const std::pair<int,int>& b) {
-            int dA = (a.first - cx)*(a.first - cx) + (a.second - cz)*(a.second - cz);
-            int dB = (b.first - cx)*(b.first - cx) + (b.second - cz)*(b.second - cz);
-            return dA < dB;
+        std::ranges::sort(needed, std::less{}, [cx, cz](const std::pair<int,int>& p) {
+            return (p.first - cx)*(p.first - cx) + (p.second - cz)*(p.second - cz);
         });
 
         // Prepend to queue (new position = higher priority), avoid duplicates with a quick erase
@@ -90,11 +94,7 @@ void NetServerHandler::tick() {
         }
         // Re-add old queued items that weren't in needed and still within view
         for (auto& c : chunksToLoad_) {
-            bool alreadyInNeeded = false;
-            for (auto& n : needed) {
-                if (n.first == c.first && n.second == c.second) { alreadyInNeeded = true; break; }
-            }
-            if (!alreadyInNeeded && sentChunks_.find(chunkKey(c.first, c.second)) == sentChunks_.end()) {
+            if (!std::ranges::contains(needed, c) && !sentChunks_.contains(chunkKey(c.first, c.second))) {
                 merged.push_back(c);
             }
         }
@@ -130,6 +130,19 @@ void NetServerHandler::tick() {
         if (chunk && chunk->isTerrainPopulated) {
             sendPacket(std::make_unique<Packet50PreChunk>(px, pz, true));
             sendPacket(std::make_unique<Packet51MapChunk>(px * 16, 0, pz * 16, 16, 128, 16, chunk->getChunkData()));
+
+            // Debug: verify container blocks exist at TileEntity positions
+            for (const auto& [key, te] : chunk->getTileEntities()) {
+                if (!te) continue;
+                int lx = te->xCoord - px * 16;
+                int lz = te->zCoord - pz * 16;
+                int blockId = chunk->getBlockID(lx, te->yCoord, lz);
+            }
+            for (const auto& [key, te] : chunk->getTileEntities()) {
+                if (!te) continue;
+                sendTileEntityPacket(te);
+            }
+            
             sentChunks_.insert(chunkKey(px, pz));
             it = chunksToLoad_.erase(it);
             ++sent;
@@ -155,6 +168,37 @@ void NetServerHandler::kick(const std::string& reason) {
 
 void NetServerHandler::sendPacket(std::unique_ptr<Packet> pkt) {
     netManager_->addToSendQueue(std::move(pkt));
+}
+
+void NetServerHandler::sendTileEntityPacket(TileEntity* te) {
+    if (!te) return;
+    
+    NBTCompound nbt;
+    te->writeToNBT(nbt);
+    ByteBuffer rawBuf;
+    nbt.writeRoot(rawBuf, "");
+
+    z_stream strm{};
+    strm.zalloc = Z_NULL; strm.zfree = Z_NULL; strm.opaque = Z_NULL;
+    if (deflateInit2(&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK)
+        return;
+
+    std::vector<uint8_t> compressed(rawBuf.data.size() + 256);
+    strm.next_in   = rawBuf.data.data();
+    strm.avail_in  = static_cast<uInt>(rawBuf.data.size());
+    strm.next_out  = compressed.data();
+    strm.avail_out = static_cast<uInt>(compressed.size());
+    deflate(&strm, Z_FINISH);
+    compressed.resize(strm.total_out);
+    deflateEnd(&strm);
+
+    auto pkt59 = std::make_unique<Packet59ComplexEntity>();
+    pkt59->x = te->xCoord;
+    pkt59->y = static_cast<int16_t>(te->yCoord);
+    pkt59->z = te->zCoord;
+    pkt59->nbtData = std::move(compressed);
+
+    sendPacket(std::move(pkt59));
 }
 
 void NetServerHandler::teleport(double x, double y, double z, float yaw, float pitch) {
@@ -228,10 +272,8 @@ void NetServerHandler::sendChunks() {
     }
     
     // Sort chunks by distance to player so they load center-outwards
-    std::sort(chunksToLoad.begin(), chunksToLoad.end(), [chunkX, chunkZ](const std::pair<int, int>& a, const std::pair<int, int>& b) {
-        int distA = (a.first - chunkX) * (a.first - chunkX) + (a.second - chunkZ) * (a.second - chunkZ);
-        int distB = (b.first - chunkX) * (b.first - chunkX) + (b.second - chunkZ) * (b.second - chunkZ);
-        return distA < distB;
+    std::ranges::sort(chunksToLoad, std::less{}, [chunkX, chunkZ](const std::pair<int, int>& p) {
+        return (p.first - chunkX) * (p.first - chunkX) + (p.second - chunkZ) * (p.second - chunkZ);
     });
 
     // Replace the queue entirely
@@ -547,6 +589,60 @@ void NetServerHandler::handlePickupSpawn(Packet21PickupSpawn& pkt) {
     drop->pickupDelay = 10;
     
     mcServer_->worldMngr->spawnEntityInWorld(std::unique_ptr<Entity>(drop));
+}
+
+void NetServerHandler::handleComplexEntity(Packet59ComplexEntity& pkt) {
+    // Client sends Packet59 when closing a chest/furnace GUI.
+    // entityData is always GZip-compressed NBT (Java: CompressedStreamTools.func_773_a)
+    if (pkt.nbtData.empty()) {
+        return;
+    }
+
+    // Decompress GZip
+    z_stream strm{};
+    strm.zalloc = Z_NULL; strm.zfree = Z_NULL; strm.opaque = Z_NULL;
+    strm.next_in  = const_cast<Bytef*>(pkt.nbtData.data());
+    strm.avail_in = static_cast<uInt>(pkt.nbtData.size());
+
+    if (inflateInit2(&strm, 15 + 16) != Z_OK) {
+        return;
+    }
+
+    std::vector<uint8_t> decompressed(65536);
+    strm.next_out  = decompressed.data();
+    strm.avail_out = static_cast<uInt>(decompressed.size());
+    int ret = inflate(&strm, Z_FINISH);
+    size_t decompSize = strm.total_out;
+    inflateEnd(&strm);
+
+    if (ret != Z_STREAM_END) {
+        return;
+    }
+    decompressed.resize(decompSize);
+    // Parse NBT
+    ByteBuffer buf;
+    buf.data = std::move(decompressed);
+    buf.readPos = 0;
+    auto nbt = NBTCompound::readRoot(buf);
+    if (!nbt) {
+        return;
+    }
+
+    // Validate coords (anti-cheat, same as Java)
+    int nx = nbt->getInt("x"), ny = nbt->getInt("y"), nz = nbt->getInt("z");
+    if (nx != pkt.x || ny != static_cast<int>(pkt.y) || nz != pkt.z) {
+        return;
+    }
+
+    TileEntity* te = mcServer_->worldMngr->getTileEntity(pkt.x, pkt.y, pkt.z);
+    if (!te) {
+        return;
+    }
+
+    te->readFromNBT(*nbt);
+
+    // Mark dirty: saves chunk + broadcasts Packet59 to nearby players
+    mcServer_->worldMngr->markTileEntityChanged(pkt.x, pkt.y, pkt.z, te);
 }
 
 void NetServerHandler::handleErrorMessage(const std::string& reason) {

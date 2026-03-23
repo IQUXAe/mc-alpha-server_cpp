@@ -4,6 +4,7 @@
 #include <memory>
 #include <cstdint>
 #include <vector>
+#include <functional>
 #include "Chunk.h"
 #include "gen/ChunkProviderGenerate.h"
 #include "biome/WorldChunkManager.h"
@@ -18,6 +19,8 @@
 #include <set>
 #include <tuple>
 #include <random>
+
+class TileEntity;
 
 struct NextTickListEntry {
     int x, y, z;
@@ -79,6 +82,7 @@ public:
     bool setBlockAndUpdate(int x, int y, int z, uint8_t blockId);
     bool setBlockAndMetadata(int x, int y, int z, uint8_t blockId, uint8_t metadata);
     bool setBlockAndMetadataWithNotify(int x, int y, int z, uint8_t blockId, uint8_t metadata);
+    bool setBlockMetadata(int x, int y, int z, uint8_t metadata);
     void markBlockNeedsUpdate(int x, int y, int z);
     void notifyBlocksOfNeighborChange(int x, int y, int z, uint8_t neighborId);
 
@@ -96,6 +100,17 @@ public:
     void loadEntities();
     void saveEntities();
 
+    // TileEntity management
+    TileEntity* getTileEntity(int x, int y, int z);
+    void setTileEntity(int x, int y, int z, std::unique_ptr<TileEntity> tileEntity);
+    void removeTileEntity(int x, int y, int z);
+    void markTileEntityChanged(int x, int y, int z, TileEntity* te);
+    void saveChunkImmediate(Chunk* chunk);
+
+    // Callback set by MinecraftServer to broadcast Packet59 to nearby players.
+    // Matches Java's IWorldAccess.func_686_a -> WorldManager -> configManager.sentTileEntityToPlayer
+    std::function<void(int x, int y, int z, TileEntity* te)> onTileEntityChanged;
+
 private:
     void findSafeSpawnPoint();
     void saveWorker(std::stop_token st);
@@ -109,6 +124,8 @@ private:
     std::vector<std::unique_ptr<Entity>> entities_;
     std::string worldPath_;
     std::set<NextTickListEntry> scheduledTicks;
+    std::unordered_map<uint64_t, std::unique_ptr<TileEntity>> tileEntities_;
+    mutable std::mutex tileEntitiesMutex_;
 
     // Asynchronous saving queue
     struct SaveTask {
@@ -125,5 +142,11 @@ private:
     inline uint64_t getChunkKey(int chunkX, int chunkZ) const {
         return (static_cast<uint64_t>(static_cast<uint32_t>(chunkX)) << 32) |
                 static_cast<uint32_t>(chunkZ);
+    }
+
+    inline uint64_t getTileEntityKey(int x, int y, int z) const {
+        return (static_cast<uint64_t>(static_cast<uint32_t>(x)) << 32) |
+               (static_cast<uint64_t>(static_cast<uint16_t>(y)) << 16) |
+                static_cast<uint16_t>(z);
     }
 };

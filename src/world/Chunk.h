@@ -3,8 +3,11 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
+#include <unordered_map>
 #include "../core/NibbleArray.h"
 #include "../forward.h"
+
+class TileEntity;
 
 // Alpha 1.2.6 Chunk dimensions
 constexpr int CHUNK_SIZE_X = 16;
@@ -55,6 +58,17 @@ public:
     // Packing into Packet51MapChunk format (81920 bytes)
     std::vector<uint8_t> getChunkData() const;
 
+    // TileEntity management
+    void addTileEntity(TileEntity* te);
+    void removeTileEntity(int x, int y, int z);
+    TileEntity* getTileEntity(int x, int y, int z) const;
+    const std::unordered_map<uint64_t, TileEntity*>& getTileEntities() const { return tileEntities_; }
+
 private:
     void updateSkylightColumn(int x, int z, int startY, int endY);
+    std::unordered_map<uint64_t, TileEntity*> tileEntities_; // Key: (x << 16) | (y << 8) | z
+    
+    inline uint64_t getTileEntityKey(int x, int y, int z) const {
+        return (static_cast<uint64_t>(x) << 16) | (static_cast<uint64_t>(y) << 8) | static_cast<uint64_t>(z);
+    }
 };
