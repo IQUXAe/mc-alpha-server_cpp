@@ -10,8 +10,8 @@
 #include "../block/Block.h"
 #include "../entity/EntityItem.h"
 #include "../core/NBT.h"
+#include "../core/Logger.h"
 
-#include <iostream>
 #include <iomanip>
 #include <sstream>
 #include <algorithm>
@@ -158,7 +158,7 @@ void NetServerHandler::tick() {
 
 void NetServerHandler::kick(const std::string& reason) {
     if (disconnected) return;
-    std::cout << "[INFO] Disconnecting " << player_->username << ": " << reason << std::endl;
+    Logger::info("Disconnecting {}: {}", player_->username, reason);
     player_->savedHeldItemId = heldItemId_;
     sendPacket(std::make_unique<Packet255KickDisconnect>(reason));
     netManager_->serverShutdown();
@@ -292,11 +292,11 @@ void NetServerHandler::handleChat(Packet3Chat& pkt) {
     if (msg.size() > 100) msg = msg.substr(0, 100);
 
     if (msg.starts_with("/")) {
-        std::cout << "[INFO] " << player_->username << " issued command: " << msg << std::endl;
+        Logger::info("{} issued command: {}", player_->username, msg);
         handleCommand(msg);
     } else {
         std::string fullMsg = "<" + player_->username + "> " + msg;
-        std::cout << "[CHAT] " << fullMsg << std::endl;
+        Logger::info("[CHAT] {}", fullMsg);
         mcServer_->configManager->broadcastPacket(std::make_unique<Packet3Chat>(fullMsg));
     }
 }
@@ -701,9 +701,8 @@ void NetServerHandler::handleComplexEntity(Packet59ComplexEntity& pkt) {
     Logger::info("handleComplexEntity: updating {} at ({}, {}, {})", te->getEntityId(), pkt.x, (int)pkt.y, pkt.z);
     te->readFromNBT(*nbt);
 
-    // Log sign text if it's a sign
     if (auto* sign = dynamic_cast<TileEntitySign*>(te)) {
-        Logger::info("Sign text: '{}' '{}' '{}' '{}'", sign->signText[0], sign->signText[1], sign->signText[2], sign->signText[3]);
+        Logger::debug("Sign text: '{}' '{}' '{}' '{}'", sign->signText[0], sign->signText[1], sign->signText[2], sign->signText[3]);
     }
 
     // Mark dirty: saves chunk + broadcasts Packet59 to nearby players
@@ -711,7 +710,7 @@ void NetServerHandler::handleComplexEntity(Packet59ComplexEntity& pkt) {
 }
 
 void NetServerHandler::handleErrorMessage(const std::string& reason) {
-    std::cout << "[INFO] " << player_->username << " lost connection: " << reason << std::endl;
+    Logger::info("{} lost connection: {}", player_->username, reason);
     player_->savedHeldItemId = heldItemId_;
     disconnected = true;
     mcServer_->configManager->broadcastPacket(

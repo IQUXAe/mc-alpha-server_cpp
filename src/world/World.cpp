@@ -769,8 +769,6 @@ std::vector<uint8_t> World::compressChunkData(Chunk* chunk) {
     std::vector<std::shared_ptr<NBTTag>> tileEntityList;
     for (const auto& [key, te] : chunk->getTileEntities()) {
         if (te) {
-            Logger::info("  -> Saving TileEntity '{}' at ({}, {}, {}) from chunk ({}, {})",
-                te->getEntityId(), te->xCoord, te->yCoord, te->zCoord, chunk->xPosition, chunk->zPosition);
             auto teCompound = std::make_shared<NBTCompound>();
             te->writeToNBT(*teCompound);
             tileEntityList.push_back(teCompound);
@@ -778,7 +776,6 @@ std::vector<uint8_t> World::compressChunkData(Chunk* chunk) {
     }
     
     if (!tileEntityList.empty()) {
-        Logger::info("Saving {} TileEntities for chunk ({}, {})", tileEntityList.size(), chunk->xPosition, chunk->zPosition);
         auto listTag = std::make_shared<NBTList>();
         listTag->tags = tileEntityList;
         listTag->tagType = NBTTagType::TAG_Compound;
@@ -861,7 +858,6 @@ void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data) 
     if (tileEntitiesTag != level->tags.end()) {
         auto listTag = std::dynamic_pointer_cast<NBTList>(tileEntitiesTag->second);
         if (listTag) {
-            Logger::info("Loading {} TileEntities for chunk ({}, {})", listTag->tags.size(), chunk->xPosition, chunk->zPosition);
             for (const auto& tag : listTag->tags) {
                 auto teCompound = std::dynamic_pointer_cast<NBTCompound>(tag);
                 if (teCompound) {
@@ -871,14 +867,9 @@ void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data) 
                         int x = te->xCoord;
                         int y = te->yCoord;
                         int z = te->zCoord;
-                        
-                        Logger::info("  -> Loading TileEntity '{}' at ({}, {}, {}) into chunk ({}, {})",
-                            te->getEntityId(), x, y, z, chunk->xPosition, chunk->zPosition);
-                        
                         std::lock_guard lock(tileEntitiesMutex_);
                         auto key = getTileEntityKey(x, y, z);
                         if (!tileEntities_.contains(key)) {
-                            // Add raw pointer to chunk only after ownership is confirmed
                             chunk->addTileEntity(te.get());
                             tileEntities_[key] = std::move(te);
                         }

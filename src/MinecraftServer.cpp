@@ -8,7 +8,6 @@
 #include "block/Block.h"
 #include "core/Item.h"
 
-#include <iostream>
 #include <chrono>
 #include <thread>
 #include <random>
@@ -33,10 +32,10 @@ MinecraftServer::~MinecraftServer() {
 }
 
 bool MinecraftServer::initialize() {
-    std::cout << "[INFO] Starting minecraft server version 0.2.8 (Alpha 1.2.6)" << std::endl;
+    Logger::info("Starting Minecraft server version 0.2.8 (Alpha 1.2.6)");
 
     // Load properties
-    std::cout << "[INFO] Loading properties" << std::endl;
+    Logger::info("Loading properties");
     propertyManager = std::make_unique<PropertyManager>("server.properties");
 
     std::string bindAddress = propertyManager->getStringProperty("server-ip", "");
@@ -51,23 +50,22 @@ bool MinecraftServer::initialize() {
     int port = propertyManager->getIntProperty("server-port", 25565);
 
     std::string displayAddr = bindAddress.empty() ? "*" : bindAddress;
-    std::cout << "[INFO] Starting Minecraft server on " << displayAddr << ":" << port << std::endl;
+    Logger::info("Starting Minecraft server on {}:{}", displayAddr, port);
 
     if (!onlineMode_) {
-        std::cout << "[WARNING] **** SERVER IS RUNNING IN OFFLINE/INSECURE MODE!" << std::endl;
-        std::cout << "[WARNING] The server will make no attempt to authenticate usernames. Beware." << std::endl;
-        std::cout << "[WARNING] While this makes the game possible to play without internet access, "
-                  << "it also opens up the ability for hackers to connect with any username they choose." << std::endl;
-        std::cout << "[WARNING] To change this, set \"online-mode\" to \"true\" in the server.properties file." << std::endl;
+        Logger::warning("**** SERVER IS RUNNING IN OFFLINE/INSECURE MODE!");
+        Logger::warning("The server will make no attempt to authenticate usernames. Beware.");
+        Logger::warning("While this makes the game possible to play without internet access, it also opens up the ability for hackers to connect with any username they choose.");
+        Logger::warning("To change this, set \"online-mode\" to \"true\" in the server.properties file.");
     }
 
     // Create network listener
     try {
         networkListenThread = std::make_unique<NetworkListenThread>(this, bindAddress, port);
     } catch (const std::exception& e) {
-        std::cerr << "[WARNING] **** FAILED TO BIND TO PORT!" << std::endl;
-        std::cerr << "[WARNING] The exception was: " << e.what() << std::endl;
-        std::cerr << "[WARNING] Perhaps a server is already running on that port?" << std::endl;
+        Logger::warning("**** FAILED TO BIND TO PORT!");
+        Logger::warning("The exception was: {}", e.what());
+        Logger::warning("Perhaps a server is already running on that port?");
         return false;
     }
 
@@ -102,7 +100,7 @@ bool MinecraftServer::initialize() {
         Logger::info("No level-seed specified, world will generate random seed");
     }
 
-    std::cout << "[INFO] Preparing start region" << std::endl;
+    Logger::info("Preparing start region");
 
     // Initialize block and item properties
     Block::initBlocks();
@@ -129,7 +127,6 @@ bool MinecraftServer::initialize() {
     // Initialize entity tracker
     entityTracker = std::make_unique<EntityTracker>(this);
 
-    std::cout << "[INFO] Preparing start region" << std::endl;
     // Spawn position is already set by World constructor, but we ensure it here
     spawnX_ = worldMngr->spawnX;
     spawnY_ = worldMngr->spawnY;
@@ -194,7 +191,7 @@ void MinecraftServer::run() {
     // 3. Save world
     if (worldMngr) worldMngr->saveWorld();
 
-    std::cout << "[INFO] Server stopped.\n";
+    Logger::info("Server stopped.");
 }
 
 void MinecraftServer::stop() {
@@ -261,7 +258,7 @@ void MinecraftServer::handleCommand(const std::string& cmd) {
     };
 
     if (lower.starts_with("help") || lower.starts_with("?")) {
-        std::cout <<
+        Logger::info(
             "Console commands:\n"
             "   help  or  ?               shows this message\n"
             "   kick <player>             removes a player from the server\n"
@@ -277,75 +274,75 @@ void MinecraftServer::handleCommand(const std::string& cmd) {
             "   stop                      gracefully stops the server\n"
             "   save-all                  forces a server-wide level save\n"
             "   list                      lists all connected players\n"
-            "   say <message>             broadcasts a message\n";
+            "   say <message>             broadcasts a message");
     } else if (lower.starts_with("list")) {
-        std::cout << "Connected players: " << configManager->getPlayerList() << '\n';
+        Logger::info("Connected players: {}", configManager->getPlayerList());
     } else if (lower.starts_with("stop")) {
-        std::cout << "CONSOLE: Stopping the server..\n";
+        Logger::info("Stopping the server..");
         running_ = false;
     } else if (lower.starts_with("save-all")) {
-        std::cout << "CONSOLE: Forcing save..\n";
+        Logger::info("Forcing save..");
         if (worldMngr) worldMngr->saveWorld();
         if (configManager) configManager->savePlayerStates();
-        std::cout << "CONSOLE: Save complete.\n";
+        Logger::info("Save complete.");
     } else if (lower.starts_with("op ")) {
         auto name = argOf("op ");
         configManager->opPlayer(name);
-        std::cout << "CONSOLE: Opping " << name << '\n';
+        Logger::info("Opping {}", name);
         configManager->sendChatToPlayer(name, "\u00a7eYou are now op!");
     } else if (lower.starts_with("deop ")) {
         auto name = argOf("deop ");
         configManager->deopPlayer(name);
-        std::cout << "CONSOLE: De-opping " << name << '\n';
+        Logger::info("De-opping {}", name);
         configManager->sendChatToPlayer(name, "\u00a7eYou are no longer op!");
     } else if (lower.starts_with("ban-ip ")) {
         auto ip = argOf("ban-ip ");
         configManager->banIP(ip);
-        std::cout << "CONSOLE: Banning ip " << ip << '\n';
+        Logger::info("Banning ip {}", ip);
     } else if (lower.starts_with("pardon-ip ")) {
         auto ip = argOf("pardon-ip ");
         configManager->unbanIP(ip);
-        std::cout << "CONSOLE: Pardoning ip " << ip << '\n';
+        Logger::info("Pardoning ip {}", ip);
     } else if (lower.starts_with("ban ")) {
         auto name = argOf("ban ");
         configManager->banPlayer(name);
-        std::cout << "CONSOLE: Banning " << name << '\n';
+        Logger::info("Banning {}", name);
         if (auto* player = configManager->getPlayerEntity(name); player && player->netHandler)
             player->netHandler->kick("Banned by admin");
     } else if (lower.starts_with("pardon ")) {
         auto name = argOf("pardon ");
         configManager->unbanPlayer(name);
-        std::cout << "CONSOLE: Pardoning " << name << '\n';
+        Logger::info("Pardoning {}", name);
     } else if (lower.starts_with("kick ")) {
         auto name = argOf("kick ");
         if (auto* player = configManager->getPlayerEntity(name); player && player->netHandler) {
             player->netHandler->kick("Kicked by admin");
-            std::cout << "CONSOLE: Kicking " << player->username << '\n';
+            Logger::info("Kicking {}", player->username);
         } else {
-            std::cout << "Can't find user " << name << ". No kick.\n";
+            Logger::info("Can't find user {}. No kick.", name);
         }
     } else if (lower.starts_with("tp ")) {
         auto [p1, p2] = splitTwo(trimLeft(sv.substr(3)));
         auto* player1 = configManager->getPlayerEntity(p1);
         auto* player2 = configManager->getPlayerEntity(p2);
-        if (!player1)       std::cout << "Can't find user " << p1 << ". No tp.\n";
-        else if (!player2)  std::cout << "Can't find user " << p2 << ". No tp.\n";
+        if (!player1)       Logger::info("Can't find user {}. No tp.", p1);
+        else if (!player2)  Logger::info("Can't find user {}. No tp.", p2);
         else {
             player1->netHandler->teleport(player2->posX, player2->posY, player2->posZ,
                                           player2->rotationYaw, player2->rotationPitch);
-            std::cout << "CONSOLE: Teleporting " << p1 << " to " << p2 << ".\n";
+            Logger::info("Teleporting {} to {}.", p1, p2);
         }
     } else if (lower.starts_with("say ")) {
         auto msg = argOf("say ");
-        std::cout << "[Server] " << msg << '\n';
+        Logger::info("[Server] {}", msg);
         configManager->broadcastPacket(std::make_unique<Packet3Chat>("\u00a7d[Server] " + msg));
     } else if (lower.starts_with("tell ")) {
         auto [target, msg] = splitTwo(trimLeft(sv.substr(5)));
-        std::cout << "[CONSOLE->" << target << "] " << msg << '\n';
+        Logger::info("[CONSOLE->{}] {}", target, msg);
         if (!configManager->sendPacketToPlayer(target,
                 std::make_unique<Packet3Chat>("\u00a77CONSOLE whispers " + msg)))
-            std::cout << "There's no player by that name online.\n";
+            Logger::info("There's no player by that name online.");
     } else {
-        std::cout << "Unknown console command. Type \"help\" for help.\n";
+        Logger::info("Unknown console command. Type \"help\" for help.");
     }
 }

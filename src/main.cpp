@@ -1,23 +1,22 @@
 #include "MinecraftServer.h"
+#include "core/Logger.h"
 
-#include <iostream>
 #include <thread>
 #include <string>
 #include <csignal>
 #include <atomic>
-#include <cstdlib> // Added for std::_Exit
+#include <cstdlib>
 
 MinecraftServer* globalServer = nullptr;
 std::atomic<bool> isShuttingDown{false};
 
 void signalHandler(int signum) {
     if (globalServer && !isShuttingDown.exchange(true)) {
-        std::cout << "\n[INFO] Interrupt signal (" << signum << ") received. Stopping server gracefully..." << std::endl;
+        Logger::info("Interrupt signal ({}) received. Stopping server gracefully...", signum);
         globalServer->stop();
     } else {
-        std::cout << "\n[INFO] Force killing server..." << std::endl;
-        // In signal handlers, only _Exit is safe to use!
-        std::_Exit(signum); 
+        Logger::info("Force killing server...");
+        std::_Exit(signum);
     }
 }
 
@@ -54,8 +53,8 @@ int main(int argc, char* argv[]) {
 
         globalServer = nullptr;
         
-        std::cout << "[INFO] Waiting for background threads to finish saving..." << std::endl;
-    } // Here ~MinecraftServer() is called, then ~World(), which calls saveThread_.join()
+        Logger::info("Waiting for background threads to finish saving...");
+    }
 
     // Use _Exit instead of exit to bypass the std::cin mutex deadlock,
     // which is still held by the sleeping detached consoleThread.
