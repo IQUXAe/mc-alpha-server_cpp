@@ -62,3 +62,7 @@ To reach full feature parity with the vanilla server, the following features are
 - Nether dimension generation and transitions
 - Operator commands (`/give`, `/tp`, etc.)
 - Proper lighting propagation on block change (currently relies on heightmap only)
+
+---
+
+> Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.

@@ -24,6 +24,7 @@ struct TrackerEntry {
     // Last sent held item (players only)
     int lastHeldItemId = 0;
     bool lastSneaking = false;
+    double lastMotionX = 0.0, lastMotionY = 0.0, lastMotionZ = 0.0;
 
     int tickCounter = 0;
 

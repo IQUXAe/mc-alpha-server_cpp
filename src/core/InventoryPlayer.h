@@ -6,36 +6,31 @@
 #include "NBT.h"
 #include "Material.h"
 #include <vector>
+#include <memory>
 
 class EntityPlayer;
 class Block;
 
 class InventoryPlayer : public IInventory {
 public:
-    std::vector<ItemStack*> mainInventory; // size 36
-    std::vector<ItemStack*> armorInventory; // size 4
-    std::vector<ItemStack*> craftingInventory; // size 4
+    std::vector<std::unique_ptr<ItemStack>> mainInventory; // size 36
+    std::vector<std::unique_ptr<ItemStack>> armorInventory; // size 4
+    std::vector<std::unique_ptr<ItemStack>> craftingInventory; // size 4
     int currentItem = 0;
     EntityPlayer* player = nullptr;
     bool inventoryChanged = false;
 
     InventoryPlayer(EntityPlayer* p) : player(p) {
-        mainInventory.resize(36, nullptr);
-        armorInventory.resize(4, nullptr);
-        craftingInventory.resize(4, nullptr);
+        mainInventory.resize(36);
+        armorInventory.resize(4);
+        craftingInventory.resize(4);
     }
 
-    ~InventoryPlayer() {
-        // lastSlot (index 35) is a non-owning alias managed by NetServerHandler — null it before delete
-        if (!mainInventory.empty()) mainInventory.back() = nullptr;
-        for (auto* stack : mainInventory) delete stack;
-        for (auto* stack : armorInventory) delete stack;
-        for (auto* stack : craftingInventory) delete stack;
-    }
+    ~InventoryPlayer() = default;
 
     ItemStack* getCurrentItem() {
         if (currentItem >= 0 && currentItem < (int)mainInventory.size()) {
-            return mainInventory[currentItem];
+            return mainInventory[currentItem].get();
         }
         return nullptr;
     }
@@ -71,7 +66,7 @@ public:
         if (slot < 0) return count;
 
         if (!mainInventory[slot]) {
-            mainInventory[slot] = new ItemStack(id, 0);
+            mainInventory[slot] = std::make_unique<ItemStack>(id, 0);
         }
 
         int limit = std::min(mainInventory[slot]->getMaxStackSize(), getInventoryStackLimit());
@@ -87,7 +82,7 @@ public:
     }
 
     void decrementAnimations() {
-        for (auto* stack : mainInventory) {
+        for (auto& stack : mainInventory) {
             if (stack && stack->animationsToGo > 0) stack->animationsToGo--;
         }
     }
@@ -96,8 +91,7 @@ public:
         int slot = getInventorySlotContainItem(id);
         if (slot < 0) return false;
         if (--mainInventory[slot]->stackSize <= 0) {
-            delete mainInventory[slot];
-            mainInventory[slot] = nullptr;
+            mainInventory[slot].reset();
         }
         return true;
     }
@@ -111,7 +105,7 @@ public:
         
         int slot = getFirstEmptyStack();
         if (slot >= 0) {
-            mainInventory[slot] = new ItemStack(stack->itemID, stack->stackSize, stack->itemDamage);
+            mainInventory[slot] = std::make_unique<ItemStack>(stack->itemID, stack->stackSize, stack->itemDamage);
             mainInventory[slot]->animationsToGo = 5;
             stack->stackSize = 0;
             return true;
@@ -125,11 +119,11 @@ public:
     }
 
     ItemStack* getStackInSlot(int slot) override {
-        if (slot < 36) return mainInventory[slot];
+        if (slot < 36) return mainInventory[slot].get();
         slot -= 36;
-        if (slot < 4) return armorInventory[slot];
+        if (slot < 4) return armorInventory[slot].get();
         slot -= 4;
-        if (slot < 4) return craftingInventory[slot];
+        if (slot < 4) return craftingInventory[slot].get();
         return nullptr;
     }
 
@@ -149,15 +143,13 @@ public:
     }
 
     void setInventorySlotContents(int slot, ItemStack* stack) override {
+        auto uptr = stack ? std::make_unique<ItemStack>(*stack) : nullptr;
         if (slot < 36) {
-            if (mainInventory[slot]) delete mainInventory[slot];
-            mainInventory[slot] = stack;
+            mainInventory[slot] = std::move(uptr);
         } else if (slot >= 36 && slot < 40) {
-            if (armorInventory[slot - 36]) delete armorInventory[slot - 36];
-            armorInventory[slot - 36] = stack;
+            armorInventory[slot - 36] = std::move(uptr);
         } else if (slot >= 40 && slot < 44) {
-            if (craftingInventory[slot - 40]) delete craftingInventory[slot - 40];
-            craftingInventory[slot - 40] = stack;
+            craftingInventory[slot - 40] = std::move(uptr);
         }
     }
     
@@ -170,87 +162,64 @@ public:
     bool canInteractWith(EntityPlayer* pl) override { return true; }
 
     void dropAllItems() {
-        for (size_t i = 0; i < mainInventory.size(); i++) {
-            if (mainInventory[i]) {
-                // TODO: Drop logic
-                delete mainInventory[i];
-                mainInventory[i] = nullptr;
-            }
-        }
-        for (size_t i = 0; i < armorInventory.size(); i++) {
-            if (armorInventory[i]) {
-                delete armorInventory[i];
-                armorInventory[i] = nullptr;
-            }
-        }
+        for (auto& s : mainInventory)  s.reset();
+        for (auto& s : armorInventory) s.reset();
     }
 
     int getTotalArmorValue() {
-        // Assume implemented
         return 0;
     }
     
     void damageArmor(int damage) {
-        for (size_t i = 0; i < armorInventory.size(); i++) {
-            if (armorInventory[i]) {
-                armorInventory[i]->damageItem(damage);
-                if (armorInventory[i]->stackSize == 0) {
-                    delete armorInventory[i];
-                    armorInventory[i] = nullptr;
-                }
+        for (auto& stack : armorInventory) {
+            if (stack) {
+                stack->damageItem(damage);
+                if (stack->stackSize == 0) stack.reset();
             }
         }
     }
     
     float getStrVsBlock(Block* block) {
         float f = 1.0f;
-        if (mainInventory[currentItem] != nullptr) {
+        if (mainInventory[currentItem]) {
             f *= mainInventory[currentItem]->getStrVsBlock(block);
         }
         return f;
     }
 
     bool canHarvestBlock(Block* block) {
-        // Java InventoryPlayer.canHarvestBlock:
-        // Materials rock, iron, snow, builtSnow require a tool — bare hand returns false.
-        // Everything else (wood, ground, sand, plants, etc.) can be harvested by hand.
         if (block->blockMaterial != &Material::rock
          && block->blockMaterial != &Material::iron
          && block->blockMaterial != &Material::snow
          && block->blockMaterial != &Material::builtSnow) {
             return true;
         }
-        // Need a tool: check held item
-        ItemStack* held = mainInventory[currentItem];
+        ItemStack* held = mainInventory[currentItem].get();
         if (!held || held->itemID <= 0 || held->itemID >= 32000) return false;
         Item* item = Item::itemsList[held->itemID];
         auto* tool = dynamic_cast<ItemTool*>(item);
         return tool && tool->canHarvestBlock(block->blockID);
     }
 
-    // NBT serialization (mirrors Java's InventoryPlayer.writeToNBT/readFromNBT)
     void writeToNBT(std::shared_ptr<NBTCompound> nbtList) {
-        // Main inventory: slots 0-35
         for (size_t i = 0; i < mainInventory.size(); ++i) {
-            if (mainInventory[i] != nullptr) {
+            if (mainInventory[i]) {
                 auto tag = std::make_shared<NBTCompound>();
                 tag->setByte("Slot", static_cast<int8_t>(i));
                 mainInventory[i]->writeToNBT(tag);
                 nbtList->setCompound("item_" + std::to_string(i), tag);
             }
         }
-        // Armor inventory: slots 100-103
         for (size_t i = 0; i < armorInventory.size(); ++i) {
-            if (armorInventory[i] != nullptr) {
+            if (armorInventory[i]) {
                 auto tag = std::make_shared<NBTCompound>();
                 tag->setByte("Slot", static_cast<int8_t>(i + 100));
                 armorInventory[i]->writeToNBT(tag);
                 nbtList->setCompound("item_" + std::to_string(i + 100), tag);
             }
         }
-        // Crafting inventory: slots 80-83
         for (size_t i = 0; i < craftingInventory.size(); ++i) {
-            if (craftingInventory[i] != nullptr) {
+            if (craftingInventory[i]) {
                 auto tag = std::make_shared<NBTCompound>();
                 tag->setByte("Slot", static_cast<int8_t>(i + 80));
                 craftingInventory[i]->writeToNBT(tag);
@@ -260,31 +229,24 @@ public:
     }
 
     void readFromNBT(std::shared_ptr<NBTCompound> nbtList) {
-        // Clear existing inventory
-        for (auto* stack : mainInventory) delete stack;
-        for (auto* stack : armorInventory) delete stack;
-        for (auto* stack : craftingInventory) delete stack;
-        mainInventory.assign(36, nullptr);
-        armorInventory.assign(4, nullptr);
-        craftingInventory.assign(4, nullptr);
+        mainInventory.clear();  mainInventory.resize(36);
+        armorInventory.clear();  armorInventory.resize(4);
+        craftingInventory.clear(); craftingInventory.resize(4);
 
-        // Read all items from NBT
         for (const auto& [key, tag] : nbtList->tags) {
             if (key.find("item_") == 0) {
                 auto itemTag = std::dynamic_pointer_cast<NBTCompound>(tag);
                 if (!itemTag) continue;
                 
                 int slot = itemTag->getByte("Slot") & 0xFF;
-                auto* stack = new ItemStack(itemTag);
+                auto stack = std::make_unique<ItemStack>(itemTag);
                 
                 if (slot >= 0 && slot < 36) {
-                    mainInventory[slot] = stack;
+                    mainInventory[slot] = std::move(stack);
                 } else if (slot >= 80 && slot < 84) {
-                    craftingInventory[slot - 80] = stack;
+                    craftingInventory[slot - 80] = std::move(stack);
                 } else if (slot >= 100 && slot < 104) {
-                    armorInventory[slot - 100] = stack;
-                } else {
-                    delete stack;
+                    armorInventory[slot - 100] = std::move(stack);
                 }
             }
         }

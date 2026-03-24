@@ -123,27 +123,45 @@ void TrackerEntry::sendUpdates() {
     bool moved  = dx != 0 || dy != 0 || dz != 0;
     bool turned = yaw != lastYawByte || pitch != lastPitchByte;
 
-    if (moved || turned) {
-        std::unique_ptr<Packet> movePkt;
-
-        if (dx >= -128 && dx < 128 && dy >= -128 && dy < 128 && dz >= -128 && dz < 128) {
-            if (moved && turned)
-                movePkt = std::make_unique<Packet33RelEntityMoveLook>(
-                    entity->entityId, (int8_t)dx, (int8_t)dy, (int8_t)dz,
-                    (int8_t)yaw, (int8_t)pitch);
-            else if (moved)
-                movePkt = std::make_unique<Packet31RelEntityMove>(
-                    entity->entityId, (int8_t)dx, (int8_t)dy, (int8_t)dz);
-            else
-                movePkt = std::make_unique<Packet32EntityLook>(
-                    entity->entityId, (int8_t)yaw, (int8_t)pitch);
-        } else {
-            movePkt = std::make_unique<Packet34EntityTeleport>(
-                entity->entityId, fx, fy, fz, (int8_t)yaw, (int8_t)pitch);
+    // Send velocity update if changed (Java: Packet28, threshold 0.02)
+    if (sendVelocity) {
+        double dvx = entity->motionX - lastMotionX;
+        double dvy = entity->motionY - lastMotionY;
+        double dvz = entity->motionZ - lastMotionZ;
+        double dvSq = dvx*dvx + dvy*dvy + dvz*dvz;
+        bool velStopped = (entity->motionX == 0.0 && entity->motionY == 0.0 && entity->motionZ == 0.0
+                           && (lastMotionX != 0.0 || lastMotionY != 0.0 || lastMotionZ != 0.0));
+        if (dvSq > 0.02*0.02 || velStopped) {
+            lastMotionX = entity->motionX;
+            lastMotionY = entity->motionY;
+            lastMotionZ = entity->motionZ;
+            broadcast(std::make_unique<Packet28EntityVelocity>(
+                entity->entityId, entity->motionX, entity->motionY, entity->motionZ));
         }
+    }
 
-        broadcast(std::move(movePkt));
+    std::unique_ptr<Packet> movePkt;
+    if (dx >= -128 && dx < 128 && dy >= -128 && dy < 128 && dz >= -128 && dz < 128) {
+        if (moved && turned)
+            movePkt = std::make_unique<Packet33RelEntityMoveLook>(
+                entity->entityId, (int8_t)dx, (int8_t)dy, (int8_t)dz,
+                (int8_t)yaw, (int8_t)pitch);
+        else if (moved)
+            movePkt = std::make_unique<Packet31RelEntityMove>(
+                entity->entityId, (int8_t)dx, (int8_t)dy, (int8_t)dz);
+        else if (turned)
+            movePkt = std::make_unique<Packet32EntityLook>(
+                entity->entityId, (int8_t)yaw, (int8_t)pitch);
+        else
+            movePkt = std::make_unique<Packet30Entity>(entity->entityId);
+    } else {
+        movePkt = std::make_unique<Packet34EntityTeleport>(
+            entity->entityId, fx, fy, fz, (int8_t)yaw, (int8_t)pitch);
+    }
 
+    broadcast(std::move(movePkt));
+
+    if (moved || turned) {
         lastFixedX = fx; lastFixedY = fy; lastFixedZ = fz;
         lastYawByte = yaw; lastPitchByte = pitch;
     }
