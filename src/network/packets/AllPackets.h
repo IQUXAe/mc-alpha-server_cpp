@@ -2,6 +2,8 @@
 
 #include "../Packet.h"
 #include "../NetHandler.h"
+#include "../../world/TileEntity.h"
+#include "../../core/NBT.h"
 #include <string>
 #include <type_traits>
 
@@ -1030,6 +1032,18 @@ public:
 
     Packet59ComplexEntity() {
         isChunkDataPacket = true;
+    }
+
+    Packet59ComplexEntity(int32_t xPos, int16_t yPos, int32_t zPos, TileEntity* tileEntity)
+        : x(xPos), y(yPos), z(zPos) {
+        isChunkDataPacket = true;
+        if (tileEntity) {
+            NBTCompound nbt;
+            tileEntity->writeToNBT(nbt);
+            ByteBuffer buf;
+            nbt.writeRoot(buf, "");
+            nbtData = buf.data;
+        }
     }
 
     void readPacketData(ByteBuffer& buf) override {

@@ -22,12 +22,13 @@ bool BlockChest::blockActivated(World* world, int x, int y, int z, EntityPlayer*
     if (world->getBlockId(x, y, z - 1) == blockID && world->isBlockSolid(x, y + 1, z - 1)) return true;
     if (world->getBlockId(x, y, z + 1) == blockID && world->isBlockSolid(x, y + 1, z + 1)) return true;
 
-    // Send Packet59 to the player who opened the chest to sync the contents
+    // Send Packet59 to sync chest contents with client before GUI opens.
+    // Client stores items in its local TileEntityChest for rendering the GUI.
     auto* playerMP = dynamic_cast<EntityPlayerMP*>(player);
     if (playerMP && playerMP->netHandler) {
         playerMP->netHandler->sendTileEntityPacket(chest);
     }
-    
+
     // TODO: Handle double chest (InventoryLargeChest) when GUI system is implemented
     
     return true;

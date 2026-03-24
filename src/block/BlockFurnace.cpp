@@ -2,6 +2,8 @@
 #include "../world/World.h"
 #include "../world/TileEntityFurnace.h"
 #include "../entity/EntityItem.h"
+#include "../entity/EntityPlayerMP.h"
+#include "../network/NetServerHandler.h"
 #include <random>
 
 BlockFurnace::BlockFurnace(int id, bool isActive) 
@@ -34,6 +36,7 @@ void BlockFurnace::onBlockRemoval(World* world, int x, int y, int z) {
             }
         }
     }
+    
     BlockContainer::onBlockRemoval(world, x, y, z);
 }
 
@@ -44,24 +47,24 @@ bool BlockFurnace::blockActivated(World* world, int x, int y, int z, EntityPlaye
     auto* furnace = dynamic_cast<TileEntityFurnace*>(te);
     if (!furnace) return true;
 
-    // Player opens furnace - would trigger GUI in full implementation
+    // Send furnace contents to client so GUI is populated correctly
+    auto* playerMP = dynamic_cast<EntityPlayerMP*>(player);
+    if (playerMP && playerMP->netHandler) {
+        playerMP->netHandler->sendTileEntityPacket(furnace);
+    }
+
     return true;
 }
 
 void BlockFurnace::updateFurnaceBlockState(bool active, World* world, int x, int y, int z) {
     int metadata = world->getBlockMetadata(x, y, z);
-    TileEntity* te = world->getTileEntity(x, y, z);
-    
-    int newBlockId = active ? 62 : 61; // 62 = burning, 61 = idle
-    world->setBlockWithNotify(x, y, z, newBlockId);
-    world->setBlockMetadata(x, y, z, metadata);
-    
-    if (te) {
-        te->xCoord = x;
-        te->yCoord = y;
-        te->zCoord = z;
-        world->setTileEntity(x, y, z, std::unique_ptr<TileEntity>(te));
-    }
+    int newBlockId = active ? 62 : 61;
+
+    // Use setBlock (no notify) to avoid triggering onBlockRemoval/onBlockAdded
+    // which would destroy and recreate the TileEntity while it's still running.
+    // Then manually notify the client with a block change packet.
+    world->setBlockAndMetadata(x, y, z, newBlockId, metadata);
+    world->markBlockNeedsUpdate(x, y, z);
 }
 
 std::unique_ptr<TileEntity> BlockFurnace::createTileEntity() {
