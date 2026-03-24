@@ -504,15 +504,14 @@ void NetServerHandler::handlePlace(Packet15Place& pkt) {
                 if (te) sendTileEntityPacket(te);
             }
 
-            // Find the actual inventory slot for this item
             ItemStack* itemstack = nullptr;
             if (pkt.itemId >= 0) {
                 ItemStack* held = player_->inventory.getCurrentItem();
-                if (held && held->itemID == pkt.itemId) {
+                if (held && held->itemID == pkt.itemId && held->stackSize > 0) {
                     itemstack = held;
                 } else {
                     for (auto* s : player_->inventory.mainInventory) {
-                        if (s && s->itemID == pkt.itemId) { itemstack = s; break; }
+                        if (s && s->itemID == pkt.itemId && s->stackSize > 0) { itemstack = s; break; }
                     }
                 }
             }
@@ -521,13 +520,19 @@ void NetServerHandler::handlePlace(Packet15Place& pkt) {
             if (itemstack) {
                 placed = player_->itemInWorldManager->activeBlockOrUseItem(
                     player_, mcServer_->worldMngr.get(), itemstack, x, y, z, direction);
-            } else if (pkt.itemId >= 0) {
-                // Item not in inventory (creative/cheat) — use temporary stack
-                ItemStack tmp(pkt.itemId, 1, 0);
-                placed = player_->itemInWorldManager->activeBlockOrUseItem(
-                    player_, mcServer_->worldMngr.get(), &tmp, x, y, z, direction);
             }
-            (void)placed;
+
+            for (auto& s : player_->inventory.mainInventory) {
+                if (s && s->stackSize <= 0) {
+                    if (s == heldItem_) heldItem_ = nullptr;
+                    delete s;
+                    s = nullptr;
+                }
+            }
+
+            if (!placed) {
+                sendInventory();
+            }
         }
         
         // Always send block update at clicked position (rollback for client if rejected)
@@ -571,10 +576,10 @@ void NetServerHandler::handleBlockItemSwitch(Packet16BlockItemSwitch& pkt) {
         }
     }
 
-    // Not in inventory yet — use placeholder in lastSlot
+    // Not in inventory yet — use placeholder in lastSlot (stackSize=0 prevents placing)
     if (!heldItem_ || heldItem_->itemID != pkt.itemId) {
         delete heldItem_;
-        heldItem_ = new ItemStack(pkt.itemId, 1, 0);
+        heldItem_ = new ItemStack(pkt.itemId, 0, 0);
     }
     player_->inventory.currentItem = lastSlot;
     player_->inventory.mainInventory[lastSlot] = heldItem_;
