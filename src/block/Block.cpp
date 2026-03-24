@@ -438,10 +438,7 @@ void Block::initBlocks() {
     (new Block(89, &Material::rock))->setHardness(0.3f);     // glowstone
     (new Block(91, &Material::pumpkin))->setHardness(1.0f);  // jack-o-lantern
 
-    // Register tile entities
-    static TileEntityRegistrar<TileEntityChest> chestRegistrar("Chest");
-    static TileEntityRegistrar<TileEntityFurnace> furnaceRegistrar("Furnace");
-    static TileEntityRegistrar<TileEntitySign> signRegistrar("Sign");
+    // TileEntities are registered via REGISTER_TILE_ENTITY macros in their headers
 
     std::cout << "[INFO] Registered all standard blocks." << std::endl;
 }
@@ -495,24 +492,25 @@ void Block::dropBlockAsItem(World* world, int x, int y, int z, int metadata) {
 }
 
 void Block::dropBlockAsItemWithChance(World* world, int x, int y, int z, int metadata, float chance) {
-    if (world->mcServer && world->mcServer->configManager) {
-        int dropId = idDropped(metadata);
-        if (dropId > 0) {
-            int count = quantityDropped();
-            int dropDamage = damageDropped(metadata); // mirrors Java Block.damageDropped()
-            for (int i = 0; i < count; ++i) {
-                auto entity = std::make_unique<EntityItem>(dropId, 1, dropDamage);
-                // Spawn slightly above block center so it doesn't get stuck inside
-                entity->setPosition(x + 0.5, y + 0.7, z + 0.5);
-                entity->worldObj = world;
+    // Don't drop items on client side (multiplayerWorld check in Java)
+    if (!world->mcServer || !world->mcServer->configManager) return;
+    
+    int dropId = idDropped(metadata);
+    if (dropId > 0) {
+        int count = quantityDropped();
+        int dropDamage = damageDropped(metadata);
+        for (int i = 0; i < count; ++i) {
+            auto entity = std::make_unique<EntityItem>(dropId, 1, dropDamage);
+            // Spawn slightly above block center so it doesn't get stuck inside
+            entity->setPosition(x + 0.5, y + 0.7, z + 0.5);
+            entity->worldObj = world;
 
-                std::uniform_real_distribution<double> dist(-0.1, 0.1);
-                entity->motionX = dist(world->rand);
-                entity->motionY = 0.2;
-                entity->motionZ = dist(world->rand);
+            std::uniform_real_distribution<double> dist(-0.1, 0.1);
+            entity->motionX = dist(world->rand);
+            entity->motionY = 0.2;
+            entity->motionZ = dist(world->rand);
 
-                world->spawnEntityInWorld(std::move(entity));
-            }
+            world->spawnEntityInWorld(std::move(entity));
         }
     }
 }

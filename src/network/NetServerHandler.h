@@ -52,6 +52,7 @@ public:
     void handleErrorMessage(const std::string& reason) override;
 
 private:
+    void handleCommand(const std::string& msg);
     MinecraftServer* mcServer_;
     std::unique_ptr<NetworkManager> netManager_;
     EntityPlayerMP* player_;

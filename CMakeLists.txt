@@ -33,6 +33,7 @@ target_link_libraries(alpha_server PRIVATE ZLIB::ZLIB Threads::Threads ${LEVELDB
 target_include_directories(alpha_server PRIVATE src ${ZSTD_INCLUDE_DIRS})
 
 if(UNIX)
+    target_link_options(alpha_server PRIVATE -rdynamic)
     target_compile_options(alpha_server PRIVATE
         -Wall -Wextra -Wno-unused-parameter
 

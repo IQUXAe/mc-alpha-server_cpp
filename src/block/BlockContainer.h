@@ -12,7 +12,7 @@ public:
 
     void onBlockAdded(World* world, int x, int y, int z) override;
     void onBlockRemoval(World* world, int x, int y, int z) override;
-
+    
 protected:
     virtual std::unique_ptr<TileEntity> createTileEntity() = 0;
 };

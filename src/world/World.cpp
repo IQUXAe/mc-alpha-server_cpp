@@ -188,12 +188,18 @@ World::~World() {
 void World::tick() {
     worldTime++;
 
-    // Update tile entities
+    // Update tile entities — copy pointers first to avoid deadlock,
+    // since updateEntity() may call setTileEntity/removeTileEntity which lock tileEntitiesMutex_
+    std::vector<TileEntity*> toUpdate;
     {
         std::lock_guard lock(tileEntitiesMutex_);
+        toUpdate.reserve(tileEntities_.size());
         for (auto& [key, te] : tileEntities_) {
-            if (te) te->updateEntity();
+            if (te) toUpdate.push_back(te.get());
         }
+    }
+    for (TileEntity* te : toUpdate) {
+        te->updateEntity();
     }
 
     // Process scheduled block updates
@@ -323,13 +329,20 @@ void World::tick() {
                 }
                 
                 if (shouldSave) {
-                    // Queue for saving before unloading
                     std::vector<uint8_t> data = compressChunkData(it->second.get());
                     {
                         std::lock_guard<std::mutex> lock(saveMutex_);
                         saveQueue_.push({key, data});
                     }
                     saveCondition_.notify_one();
+                }
+
+                // Remove all TileEntities belonging to this chunk so they stop ticking
+                {
+                    std::lock_guard lock(tileEntitiesMutex_);
+                    for (const auto& [teKey, te] : it->second->getTileEntities()) {
+                        if (te) tileEntities_.erase(getTileEntityKey(te->xCoord, te->yCoord, te->zCoord));
+                    }
                 }
 
                 chunks_.erase(it);
@@ -758,6 +771,8 @@ std::vector<uint8_t> World::compressChunkData(Chunk* chunk) {
     std::vector<std::shared_ptr<NBTTag>> tileEntityList;
     for (const auto& [key, te] : chunk->getTileEntities()) {
         if (te) {
+            Logger::info("  -> Saving TileEntity '{}' at ({}, {}, {}) from chunk ({}, {})",
+                te->getEntityId(), te->xCoord, te->yCoord, te->zCoord, chunk->xPosition, chunk->zPosition);
             auto teCompound = std::make_shared<NBTCompound>();
             te->writeToNBT(*teCompound);
             tileEntityList.push_back(teCompound);
@@ -859,10 +874,16 @@ void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data) 
                         int y = te->yCoord;
                         int z = te->zCoord;
                         
-                        chunk->addTileEntity(te.get());
+                        Logger::info("  -> Loading TileEntity '{}' at ({}, {}, {}) into chunk ({}, {})",
+                            te->getEntityId(), x, y, z, chunk->xPosition, chunk->zPosition);
                         
                         std::lock_guard lock(tileEntitiesMutex_);
-                        tileEntities_[getTileEntityKey(x, y, z)] = std::move(te);
+                        auto key = getTileEntityKey(x, y, z);
+                        if (!tileEntities_.contains(key)) {
+                            // Add raw pointer to chunk only after ownership is confirmed
+                            chunk->addTileEntity(te.get());
+                            tileEntities_[key] = std::move(te);
+                        }
                     }
                 }
             }
@@ -977,12 +998,19 @@ void World::removeTileEntity(int x, int y, int z) {
 }
 
 void World::markTileEntityChanged(int x, int y, int z, TileEntity* te) {
-    // Mark chunk as modified so it gets saved
-    Chunk* chunk = getChunkFromBlockCoords(x, z);
+    Chunk* chunk = getChunkFromBlockCoords(x, z, false);
     if (chunk) {
         chunk->isModified = true;
+        // Immediately queue chunk save so TileEntity data (sign text, chest contents)
+        // is persisted even if the server crashes or the chunk is unloaded before autosave
+        uint64_t key = getChunkKey(chunk->xPosition, chunk->zPosition);
+        auto data = compressChunkData(chunk);
+        if (!data.empty()) {
+            std::lock_guard lock(saveMutex_);
+            saveQueue_.push({key, std::move(data)});
+        }
+        saveCondition_.notify_one();
     }
-    // Broadcast Packet59 to all nearby players (Java: IWorldAccess.func_686_a)
     if (onTileEntityChanged) {
         onTileEntityChanged(x, y, z, te);
     }

@@ -5,12 +5,15 @@
 #include "../entity/EntityTracker.h"
 #include "../world/Chunk.h"
 #include "../world/TileEntity.h"
+#include "../world/TileEntityChest.h"
+#include "../world/TileEntitySign.h"
 #include "../block/Block.h"
 #include "../entity/EntityItem.h"
 #include "../core/NBT.h"
 
 #include <iostream>
 #include <iomanip>
+#include <sstream>
 #include <algorithm>
 #include <cmath>
 #include <ranges>
@@ -288,14 +291,53 @@ void NetServerHandler::handleChat(Packet3Chat& pkt) {
     std::string msg = pkt.message;
     if (msg.size() > 100) msg = msg.substr(0, 100);
 
-    // Check for / commands
     if (msg.starts_with("/")) {
-        // TODO: handle commands
         std::cout << "[INFO] " << player_->username << " issued command: " << msg << std::endl;
+        handleCommand(msg);
     } else {
         std::string fullMsg = "<" + player_->username + "> " + msg;
         std::cout << "[CHAT] " << fullMsg << std::endl;
         mcServer_->configManager->broadcastPacket(std::make_unique<Packet3Chat>(fullMsg));
+    }
+}
+
+void NetServerHandler::handleCommand(const std::string& msg) {
+    // Tokenize
+    std::vector<std::string> args;
+    std::istringstream ss(msg.substr(1));
+    for (std::string tok; ss >> tok;) args.push_back(tok);
+    if (args.empty()) return;
+
+    const std::string& cmd = args[0];
+
+    if (cmd == "give") {
+        // /give <itemId> [count] [damage]
+        if (args.size() < 2) {
+            sendPacket(std::make_unique<Packet3Chat>("Usage: /give <itemId> [count] [damage]"));
+            return;
+        }
+        int itemId = std::stoi(args[1]);
+        int count  = args.size() >= 3 ? std::stoi(args[2]) : 1;
+        int damage = args.size() >= 4 ? std::stoi(args[3]) : 0;
+        count = std::clamp(count, 1, 64);
+
+        // Validate: blocks must exist in blocksList, items must be < 32000
+        if (itemId <= 0 || itemId >= 32000) {
+            sendPacket(std::make_unique<Packet3Chat>("Invalid item id"));
+            return;
+        }
+        if (itemId < 256 && Block::blocksList[itemId] == nullptr) {
+            sendPacket(std::make_unique<Packet3Chat>("Unknown block id: " + std::to_string(itemId)));
+            return;
+        }
+
+        auto entity = std::make_unique<EntityItem>(itemId, count, damage);
+        entity->setPosition(player_->posX, player_->posY, player_->posZ);
+        entity->motionX = entity->motionY = entity->motionZ = 0.0;
+        mcServer_->worldMngr->spawnEntityInWorld(std::move(entity));
+        sendPacket(std::make_unique<Packet3Chat>("Gave " + std::to_string(count) + "x " + std::to_string(itemId)));
+    } else {
+        sendPacket(std::make_unique<Packet3Chat>("Unknown command: " + cmd));
     }
 }
 
@@ -398,6 +440,21 @@ void NetServerHandler::handleBlockDig(Packet14BlockDig& pkt) {
     
     if (pkt.status == 0) {
         if (distFromSpawn > 16 || isOp) {
+            // If digging a chest, immediately send empty chest NBT to the client.
+            // Client-side prediction breaks the block locally before the server
+            // responds, so we must clear the client's TileEntityChest NOW —
+            // before PlayerControllerMP calls onBlockRemoval and spawns ghost items.
+            int blockId = mcServer_->worldMngr->getBlockId(x, y, z);
+            if (blockId == 54) { // chest
+                TileEntity* te = mcServer_->worldMngr->getTileEntity(x, y, z);
+                if (te && dynamic_cast<TileEntityChest*>(te)) {
+                    TileEntityChest emptyChest;
+                    emptyChest.xCoord = x;
+                    emptyChest.yCoord = y;
+                    emptyChest.zCoord = z;
+                    sendTileEntityPacket(&emptyChest);
+                }
+            }
             player_->itemInWorldManager->onBlockClicked(x, y, z, face);
         }
     } else if (pkt.status == 2) {
@@ -438,6 +495,15 @@ void NetServerHandler::handlePlace(Packet15Place& pkt) {
         int dist = std::max(distX, distZ);
         
         if (dist > 16 || isOp) {
+            // If right-clicking a chest or furnace, send its contents BEFORE activeBlockOrUseItem.
+            // The client opens the GUI locally before our response arrives, so we must
+            // send Packet59 as early as possible to populate the GUI correctly.
+            int clickedId = mcServer_->worldMngr->getBlockId(x, y, z);
+            if (clickedId == 54 || clickedId == 61 || clickedId == 62) {
+                TileEntity* te = mcServer_->worldMngr->getTileEntity(x, y, z);
+                if (te) sendTileEntityPacket(te);
+            }
+
             // Find the actual inventory slot for this item
             ItemStack* itemstack = nullptr;
             if (pkt.itemId >= 0) {
@@ -628,10 +694,17 @@ void NetServerHandler::handleComplexEntity(Packet59ComplexEntity& pkt) {
 
     TileEntity* te = mcServer_->worldMngr->getTileEntity(pkt.x, pkt.y, pkt.z);
     if (!te) {
+        Logger::warning("handleComplexEntity: no TileEntity at ({}, {}, {})", pkt.x, (int)pkt.y, pkt.z);
         return;
     }
 
+    Logger::info("handleComplexEntity: updating {} at ({}, {}, {})", te->getEntityId(), pkt.x, (int)pkt.y, pkt.z);
     te->readFromNBT(*nbt);
+
+    // Log sign text if it's a sign
+    if (auto* sign = dynamic_cast<TileEntitySign*>(te)) {
+        Logger::info("Sign text: '{}' '{}' '{}' '{}'", sign->signText[0], sign->signText[1], sign->signText[2], sign->signText[3]);
+    }
 
     // Mark dirty: saves chunk + broadcasts Packet59 to nearby players
     mcServer_->worldMngr->markTileEntityChanged(pkt.x, pkt.y, pkt.z, te);

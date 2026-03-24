@@ -73,14 +73,14 @@ public:
     int getCookTime() const { return cookTime_; }
 
     void updateEntity() override {
+        if (!worldObj) return;
+
         bool wasBurning = burnTime_ > 0;
         bool changed = false;
 
         if (burnTime_ > 0) {
             --burnTime_;
         }
-
-        if (!worldObj) return; // Server-side only
 
         // Try to start burning if we can smelt
         if (burnTime_ == 0 && canSmelt()) {
@@ -118,6 +118,12 @@ public:
         if (changed) {
             markDirty();
         }
+
+        // Send state to client every 5 ticks while burning so flame/cook progress bars animate.
+        // The client uses BurnTime/BurnTimeTotal/CookTime to render the GUI progress.
+        if (isBurning() && burnTime_ % 5 == 0) {
+            markDirty();
+        }
     }
 
     void readFromNBT(const NBTCompound& nbt) override {
@@ -152,8 +158,11 @@ public:
         // Read furnace state (Java format)
         burnTime_ = nbt.getShort("BurnTime");
         cookTime_ = nbt.getShort("CookTime");
-        // Recalculate max burn time from fuel slot
-        currentItemBurnTime_ = getItemBurnTime(inventory_[SLOT_FUEL]);
+        currentItemBurnTime_ = nbt.getShort("BurnTimeTotal");
+        // Fallback: if BurnTimeTotal wasn't saved, recalculate from fuel slot
+        if (currentItemBurnTime_ == 0 && burnTime_ > 0) {
+            currentItemBurnTime_ = getItemBurnTime(inventory_[SLOT_FUEL]);
+        }
     }
 
     void writeToNBT(NBTCompound& nbt) const override {
@@ -162,6 +171,7 @@ public:
         // Write furnace state first (Java order)
         nbt.setShort("BurnTime", static_cast<int16_t>(burnTime_));
         nbt.setShort("CookTime", static_cast<int16_t>(cookTime_));
+        nbt.setShort("BurnTimeTotal", static_cast<int16_t>(currentItemBurnTime_));
         
         // Write Items list to NBT (Java format)
         std::vector<std::shared_ptr<NBTTag>> itemsList;
@@ -195,13 +205,17 @@ private:
         
         int resultId = getSmeltingResult(inventory_[SLOT_INPUT]->itemID);
         if (resultId < 0) return false;
+        if (resultId >= 32000) return false;
+        
+        // Validate result item exists
+        Item* resultItem = (resultId < 256) ? nullptr : Item::itemsList[resultId];
+        int maxStack = resultItem ? resultItem->getMaxStackSize() : 64;
         
         if (!inventory_[SLOT_OUTPUT]) return true;
         if (inventory_[SLOT_OUTPUT]->itemID != resultId) return false;
         
         int resultSize = inventory_[SLOT_OUTPUT]->stackSize + 1;
-        return resultSize <= 64 && 
-               resultSize <= Item::itemsList[resultId]->getMaxStackSize();
+        return resultSize <= 64 && resultSize <= maxStack;
     }
 
     void smeltItem() {

@@ -68,7 +68,7 @@ private:
     bool        spawnAnimals_           = true;
     bool        pvpEnabled_             = true;
     int         viewDistance_           = 10;
-    int         autoSaveInterval_       = 6000;
+    int         autoSaveInterval_       = 900;
     bool        saveModifiedChunksOnly_ = false;
     std::string playerSaveDir_;         // world/<levelname>/players
 
