@@ -1,8 +1,8 @@
 #include "BlockFurnace.h"
 #include "../world/World.h"
 #include "../world/TileEntityFurnace.h"
-#include "../entity/EntityPlayerMP.h"
-#include "../core/MathHelper.h"
+#include "../entity/EntityItem.h"
+#include <random>
 
 BlockFurnace::BlockFurnace(int id, bool isActive) 
     : BlockContainer(id, &Material::rock), isActive_(isActive) {}
@@ -11,9 +11,30 @@ int BlockFurnace::idDropped(int metadata) const {
     return 61; // Always drop idle furnace
 }
 
-void BlockFurnace::onBlockAdded(World* world, int x, int y, int z) {
-    BlockContainer::onBlockAdded(world, x, y, z);
-    setDefaultDirection(world, x, y, z);
+void BlockFurnace::onBlockPlaced(World* world, int x, int y, int z, int side) {
+    // Facing is already set from player yaw in ItemBlock::onItemUse — nothing to do here.
+}
+
+void BlockFurnace::onBlockRemoval(World* world, int x, int y, int z) {
+    TileEntity* te = world->getTileEntity(x, y, z);
+    if (te) {
+        auto* furnace = dynamic_cast<TileEntityFurnace*>(te);
+        if (furnace) {
+            // Drop all inventory slots (input, fuel, output)
+            for (int i = 0; i < furnace->getSizeInventory(); ++i) {
+                ItemStack* stack = furnace->getStackInSlot(i);
+                if (!stack || stack->stackSize <= 0) continue;
+                auto entity = std::make_unique<EntityItem>(stack->itemID, stack->stackSize, stack->itemDamage);
+                entity->setPosition(x + 0.5, y + 0.7, z + 0.5);
+                std::uniform_real_distribution<double> dist(-0.1, 0.1);
+                entity->motionX = dist(world->rand);
+                entity->motionY = 0.2;
+                entity->motionZ = dist(world->rand);
+                world->spawnEntityInWorld(std::move(entity));
+            }
+        }
+    }
+    BlockContainer::onBlockRemoval(world, x, y, z);
 }
 
 bool BlockFurnace::blockActivated(World* world, int x, int y, int z, EntityPlayer* player) {
@@ -43,53 +64,8 @@ void BlockFurnace::updateFurnaceBlockState(bool active, World* world, int x, int
     }
 }
 
-void BlockFurnace::onBlockPlacedBy(World* world, int x, int y, int z, EntityLiving* entity) {
-    if (!entity) return;
-    
-    int facing = MathHelper::floor_double(entity->rotationYaw * 4.0f / 360.0f + 0.5) & 3;
-    
-    uint8_t metadata = 3; // Default: facing south
-    if (facing == 0) metadata = 2; // North
-    if (facing == 1) metadata = 5; // East
-    if (facing == 2) metadata = 3; // South
-    if (facing == 3) metadata = 4; // West
-    
-    world->setBlockMetadata(x, y, z, metadata);
-}
-
 std::unique_ptr<TileEntity> BlockFurnace::createTileEntity() {
     return std::make_unique<TileEntityFurnace>();
-}
-
-void BlockFurnace::setDefaultDirection(World* world, int x, int y, int z) {
-    int north = world->getBlockId(x, y, z - 1);
-    int south = world->getBlockId(x, y, z + 1);
-    int west = world->getBlockId(x - 1, y, z);
-    int east = world->getBlockId(x + 1, y, z);
-    
-    uint8_t metadata = 3; // Default: south
-    
-    if (Block::blocksList[north] && Block::blocksList[north]->isCollidable() && 
-        (!Block::blocksList[south] || !Block::blocksList[south]->isCollidable())) {
-        metadata = 3;
-    }
-    
-    if (Block::blocksList[south] && Block::blocksList[south]->isCollidable() && 
-        (!Block::blocksList[north] || !Block::blocksList[north]->isCollidable())) {
-        metadata = 2;
-    }
-    
-    if (Block::blocksList[west] && Block::blocksList[west]->isCollidable() && 
-        (!Block::blocksList[east] || !Block::blocksList[east]->isCollidable())) {
-        metadata = 5;
-    }
-    
-    if (Block::blocksList[east] && Block::blocksList[east]->isCollidable() && 
-        (!Block::blocksList[west] || !Block::blocksList[west]->isCollidable())) {
-        metadata = 4;
-    }
-    
-    world->setBlockMetadata(x, y, z, metadata);
 }
 
 // Helper function implementation

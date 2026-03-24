@@ -146,10 +146,6 @@ void ServerConfigurationManager::sendTileEntityToNearbyPlayers(int x, int y, int
         handler->sendPacket(std::move(pkt));
         ++sentCount;
     }
-
-    std::cout << "[Packet59] Broadcast " << te->getEntityId()
-              << " at (" << x << "," << y << "," << z << ")"
-              << " to " << sentCount << " players" << std::endl;
 }
 
 void ServerConfigurationManager::broadcastChatMessage(const std::string& msg) {

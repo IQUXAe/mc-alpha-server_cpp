@@ -313,6 +313,16 @@ ItemBlock::ItemBlock(int blockId) : blockID(blockId) {
     itemsList[blockId] = this;
 }
 
+// Helper: convert player yaw to furnace facing metadata (2=N,3=S,4=W,5=E)
+// Mirrors Java BlockFurnace.onBlockPlacedBy logic.
+static uint8_t furnaceFacingFromYaw(float yaw) {
+    // Java: int var6 = MathHelper.floor_double((double)(var5.rotationYaw * 4.0F / 360.0F) + 0.5D) & 3;
+    int facing = static_cast<int>(std::floor(yaw * 4.0f / 360.0f + 0.5)) & 3;
+    // Java: 0→2(N), 1→5(E), 2→3(S), 3→4(W)
+    constexpr uint8_t table[4] = {2, 5, 3, 4};
+    return table[facing];
+}
+
 bool ItemBlock::onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side) {
     // Special case: placing on snow replaces it
     int existingId = world->getBlockId(x, y, z);
@@ -356,7 +366,15 @@ bool ItemBlock::onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world
     }
 
     if (world->setBlockWithNotifyNoClientUpdate(x, y, z, blockID)) {
-        block->onBlockPlaced(world, x, y, z, side);
+        Block* placed = Block::blocksList[blockID];
+        if (placed) {
+            // Set facing metadata for furnace (61/62) using player yaw before onBlockPlaced
+            if (blockID == 61 || blockID == 62) {
+                uint8_t meta = furnaceFacingFromYaw(player->rotationYaw);
+                world->setBlockMetadata(x, y, z, meta);
+            }
+            placed->onBlockPlaced(world, x, y, z, side);
+        }
         stack->stackSize--;
         return true;
     }
