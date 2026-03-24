@@ -1,6 +1,7 @@
 #include "NetLoginHandler.h"
 #include "NetServerHandler.h"
 #include "../MinecraftServer.h"
+#include "../core/Logger.h"
 
 #include <sstream>
 #include <iomanip>
@@ -28,12 +29,12 @@ void NetLoginHandler::tryLogin() {
 
 void NetLoginHandler::kickUser(const std::string& reason) {
     try {
-        std::cout << "[INFO] Disconnecting " << getUserAndIPString() << ": " << reason << std::endl;
+        Logger::info("Disconnecting {}: {}", getUserAndIPString(), reason);
         netManager->addToSendQueue(std::make_unique<Packet255KickDisconnect>(reason));
         netManager->serverShutdown();
         finishedProcessing = true;
     } catch (const std::exception& e) {
-        std::cerr << "[ERROR] " << e.what() << std::endl;
+        Logger::severe("{}", e.what());
     }
 }
 
@@ -75,7 +76,7 @@ void NetLoginHandler::handleLogin(Packet1Login& pkt) {
 void NetLoginHandler::doLogin(Packet1Login& pkt) {
     auto player = mcServer_->configManager->login(this, pkt.username, pkt.password);
     if (player) {
-        std::cout << "[INFO] " << getUserAndIPString() << " logged in with entity id " << player->entityId << std::endl;
+        Logger::info("{} logged in with entity id {}", getUserAndIPString(), player->entityId);
 
         auto serverHandler = new NetServerHandler(mcServer_, std::move(netManager), player);
 
@@ -118,7 +119,7 @@ void NetLoginHandler::doLogin(Packet1Login& pkt) {
 }
 
 void NetLoginHandler::handleErrorMessage(const std::string& reason) {
-    std::cout << "[INFO] " << getUserAndIPString() << " lost connection" << std::endl;
+    Logger::info("{} lost connection", getUserAndIPString());
     finishedProcessing = true;
 }
 
