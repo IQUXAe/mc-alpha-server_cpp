@@ -59,10 +59,6 @@ public:
         if (stack && stack->stackSize > getInventoryStackLimit()) {
             stack->stackSize = getInventoryStackLimit();
         }
-        
-        std::cout << "[TileEntityChest] Item placed in slot " << slot 
-                  << " at (" << xCoord << ", " << yCoord << ", " << zCoord << ")" << std::endl;
-        std::cout << "[TileEntityChest] Calling markDirty() to save chunk" << std::endl;
         markDirty();
     }
 

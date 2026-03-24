@@ -576,19 +576,11 @@ void NetServerHandler::handlePlayerInventory(Packet5PlayerInventory& pkt) {
 }
 
 void NetServerHandler::handlePickupSpawn(Packet21PickupSpawn& pkt) {
-    double px = pkt.x / 32.0;
-    double py = pkt.y / 32.0;
-    double pz = pkt.z / 32.0;
-    
-    // In Alpha, we'd spawn EntityItem directly
-    auto* drop = new EntityItem(pkt.itemId, pkt.count, 0); 
-    drop->setPosition(px, py, pz);
-    drop->motionX = pkt.rotation / 128.0;
-    drop->motionY = pkt.pitch / 128.0;
-    drop->motionZ = pkt.roll / 128.0;
-    drop->pickupDelay = 10;
-    
-    mcServer_->worldMngr->spawnEntityInWorld(std::unique_ptr<Entity>(drop));
+    // In Alpha, the server is authoritative over all item entities.
+    // The client sends this packet when the player manually drops an item (Q key).
+    // We ignore it here because the server spawns drops itself via Block::dropBlockAsItem.
+    // Accepting client-spawned entities would create phantom duplicates.
+    (void)pkt;
 }
 
 void NetServerHandler::handleComplexEntity(Packet59ComplexEntity& pkt) {

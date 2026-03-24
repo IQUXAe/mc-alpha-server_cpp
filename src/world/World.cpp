@@ -230,11 +230,11 @@ void World::tick() {
                     double dy = player->posY - item->posY;
                     double dz = player->posZ - item->posZ;
                     
-                    // Java: boundingBox.expands(1.0, 0.0, 1.0) — expand player bbox by 1 on X/Z, 0 on Y
+                    // Java: boundingBox.expand(1.0, 0.0, 1.0) — expand player bbox by 1 on X/Z, 0 on Y
                     double ex = (player->width / 2.0) + 1.0;
                     double ey = player->height;
                     double ez = (player->width / 2.0) + 1.0;
-                    bool inRange = std::abs(dx) < ex && std::abs(dy) >= 0.0 && std::abs(dy) < ey && std::abs(dz) < ez;
+                    bool inRange = std::abs(dx) < ex && dy >= 0.0 && dy < ey && std::abs(dz) < ez;
                     if (inRange) {
                         ItemStack stack(item->itemID, item->count, item->metadata);
                         int initialCount = item->count;
@@ -546,7 +546,12 @@ bool World::setBlock(int x, int y, int z, uint8_t blockId) {
 }
 
 bool World::setBlockWithNotify(int x, int y, int z, uint8_t blockId) {
+    uint8_t oldId = getBlockId(x, y, z);
     if (!setBlock(x, y, z, blockId)) return false;
+
+    // Notify old block it was removed
+    if (oldId > 0 && Block::blocksList[oldId])
+        Block::blocksList[oldId]->onBlockRemoval(this, x, y, z);
 
     // Call onBlockAdded BEFORE notifying client so metadata is set correctly
     if (blockId > 0 && Block::blocksList[blockId])
@@ -559,7 +564,10 @@ bool World::setBlockWithNotify(int x, int y, int z, uint8_t blockId) {
 }
 
 bool World::setBlockWithNotifyNoClientUpdate(int x, int y, int z, uint8_t blockId) {
+    uint8_t oldId = getBlockId(x, y, z);
     if (!setBlock(x, y, z, blockId)) return false;
+    if (oldId > 0 && Block::blocksList[oldId])
+        Block::blocksList[oldId]->onBlockRemoval(this, x, y, z);
     if (blockId > 0 && Block::blocksList[blockId])
         Block::blocksList[blockId]->onBlockAdded(this, x, y, z);
     notifyBlocksOfNeighborChange(x, y, z, blockId);
@@ -599,6 +607,7 @@ bool World::setBlockMetadata(int x, int y, int z, uint8_t metadata) {
     if (!chunk) return false;
 
     chunk->setBlockMetadata(x & 15, y, z & 15, metadata);
+    chunk->isModified = true; // Mark chunk as modified so metadata is saved
     return true;
 }
 
