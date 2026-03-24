@@ -16,6 +16,17 @@ constexpr int CHUNK_SIZE_Z = 16;
 constexpr int CHUNK_VOLUME = CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z; // 32768
 constexpr int CHUNK_AREA = CHUNK_SIZE_X * CHUNK_SIZE_Z; // 256
 
+// Serialized EntityItem data stored inside a chunk.
+// age counts only while the chunk is loaded — frozen on unload, resumed on load.
+struct ChunkEntityData {
+    int itemID;
+    int count;
+    int metadata;
+    int age;         // ticks alive (max 6000 = 5 min)
+    int pickupDelay;
+    double posX, posY, posZ;
+};
+
 class Chunk {
 public:
     const int xPosition;
@@ -24,6 +35,9 @@ public:
 
     bool isTerrainPopulated = false;
     bool isModified = false;
+
+    // EntityItems waiting to be spawned when the chunk is loaded
+    std::vector<ChunkEntityData> pendingItems;
 
     // Direct flat arrays for massive CPU cache-locality (C++ advantage)
     std::vector<uint8_t> blocks;      // 32768 bytes

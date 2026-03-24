@@ -15,12 +15,12 @@
 #include <zlib.h>
 #include <zstd.h>
 #include <cmath>
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <ranges>
 #include <ctime>
-
 // Magic prefix to distinguish zstd chunks from legacy gzip chunks
 static constexpr uint32_t ZSTD_MAGIC = 0xFD2FB528; // native zstd frame magic
 
@@ -61,17 +61,14 @@ World::World(MinecraftServer* server, const std::string& savePath, int64_t seed)
 
     saveThread_ = std::jthread([this](std::stop_token st) { saveWorker(st); });
     
-    // Load spawn and entities
     if (!hasLevelDat) {
         findSafeSpawnPoint();
         saveLevelDat();
     }
-    loadEntities();
 }
 
 void World::saveWorld() {
     saveLevelDat();
-    saveEntities();
 
     int savedCount = 0;
     for (const auto& [key, chunk] : chunks_) {
@@ -224,23 +221,30 @@ void World::tick() {
     }
 
     // Tick entities
-    for (auto itE = entities_.begin(); itE != entities_.end(); ) {
-        (*itE)->tick();
+    // Snapshot size before loop: entities spawned during tick (e.g. via getChunk->push_back)
+    // will have indices >= snapshot and are processed next tick, avoiding iterator invalidation.
+    const size_t entityCount = entities_.size();
+    for (size_t ei = 0; ei < entityCount; ++ei) {
+        if (!entities_[ei] || entities_[ei]->isDead) continue;
+        entities_[ei]->tick();
         
         // Item pickup logic
-        auto* item = dynamic_cast<EntityItem*>(itE->get());
+        auto* item = dynamic_cast<EntityItem*>(entities_[ei].get());
         if (item && !item->isDead && item->pickupDelay <= 0) {
             if (mcServer && mcServer->configManager) {
                 for (auto* player : mcServer->configManager->playerEntities) {
-                    double dx = player->posX - item->posX;
-                    double dy = player->posY - item->posY;
-                    double dz = player->posZ - item->posZ;
-                    
-                    // Java: boundingBox.expand(1.0, 0.0, 1.0) — expand player bbox by 1 on X/Z, 0 on Y
-                    double ex = (player->width / 2.0) + 1.0;
-                    double ey = player->height;
-                    double ez = (player->width / 2.0) + 1.0;
-                    bool inRange = std::abs(dx) < ex && dy >= 0.0 && dy < ey && std::abs(dz) < ez;
+                    // Java: item.boundingBox intersects player.boundingBox.expand(1.0, 0.0, 1.0)
+                    // Player bbox: [posX±w/2, posY..posY+h, posZ±w/2]
+                    // Expanded by (1,0,1): [posX±(w/2+1), posY..posY+h, posZ±(w/2+1)]
+                    // Item bbox: [posX±0.125, posY..posY+0.25, posZ±0.125]
+                    double ex = (player->width / 2.0) + 1.0 + 0.125;
+                    double ez = (player->width / 2.0) + 1.0 + 0.125;
+                    double minY = player->posY - 0.25;          // item height = 0.25
+                    double maxY = player->posY + player->height;
+
+                    bool inRange = std::abs(player->posX - item->posX) < ex
+                                && item->posY < maxY && item->posY + 0.25 > minY
+                                && std::abs(player->posZ - item->posZ) < ez;
                     if (inRange) {
                         ItemStack stack(item->itemID, item->count, item->metadata);
                         int initialCount = item->count;
@@ -271,15 +275,18 @@ void World::tick() {
             }
         }
 
-        if ((*itE)->isDead) {
+        if (entities_[ei]->isDead) {
             if (mcServer && mcServer->entityTracker) {
-                mcServer->entityTracker->removeEntity(itE->get());
+                mcServer->entityTracker->removeEntity(entities_[ei].get());
             }
-            itE = entities_.erase(itE);
-        } else {
-            ++itE;
         }
     }
+
+    // Remove dead entities (erase-remove idiom, safe after loop)
+    entities_.erase(
+        std::remove_if(entities_.begin(), entities_.end(),
+            [](const std::unique_ptr<Entity>& e) { return !e || e->isDead; }),
+        entities_.end());
 
     // Unload chunks far from all players periodically
     if (worldTime % 100 == 0) {
@@ -321,13 +328,30 @@ void World::tick() {
         for (uint64_t key : toUnload) {
             auto it = chunks_.find(key);
             if (it != chunks_.end()) {
+                Chunk* chunk = it->second.get();
+
+                // Move live EntityItems from this chunk into pendingItems before unloading
+                chunk->pendingItems.clear();
+                for (auto& e : entities_) {
+                    auto* item = dynamic_cast<EntityItem*>(e.get());
+                    if (!item || item->isDead) continue;
+                    int cx = static_cast<int>(std::floor(item->posX)) >> 4;
+                    int cz = static_cast<int>(std::floor(item->posZ)) >> 4;
+                    if (cx != chunk->xPosition || cz != chunk->zPosition) continue;
+                    chunk->pendingItems.push_back({item->itemID, item->count, item->metadata,
+                                                   item->age, item->pickupDelay,
+                                                   item->posX, item->posY, item->posZ});
+                    item->isDead = true; // will be removed from entities_ in tick()
+                }
+
                 bool shouldSave = true;
-                if (mcServer && mcServer->isSaveModifiedChunksOnly() && !it->second->isModified) {
+                if (mcServer && mcServer->isSaveModifiedChunksOnly() && !chunk->isModified
+                    && chunk->pendingItems.empty()) {
                     shouldSave = false;
                 }
-                
+
                 if (shouldSave) {
-                    std::vector<uint8_t> data = compressChunkData(it->second.get());
+                    std::vector<uint8_t> data = compressChunkData(chunk);
                     {
                         std::lock_guard<std::mutex> lock(saveMutex_);
                         saveQueue_.push({key, data});
@@ -338,7 +362,7 @@ void World::tick() {
                 // Remove all TileEntities belonging to this chunk so they stop ticking
                 {
                     std::lock_guard lock(tileEntitiesMutex_);
-                    for (const auto& [teKey, te] : it->second->getTileEntities()) {
+                    for (const auto& [teKey, te] : chunk->getTileEntities()) {
                         if (te) tileEntities_.erase(getTileEntityKey(te->xCoord, te->yCoord, te->zCoord));
                     }
                 }
@@ -400,6 +424,16 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
                 std::lock_guard<std::mutex> lock(chunksMutex_);
                 chunks_[key] = std::move(chunk);
             }
+            // Spawn EntityItems that were frozen while chunk was unloaded
+            for (const auto& ed : ptr->pendingItems) {
+                auto item = std::make_unique<EntityItem>(ed.itemID, ed.count, ed.metadata);
+                item->setPosition(ed.posX, ed.posY, ed.posZ);
+                item->age         = ed.age;
+                item->pickupDelay = ed.pickupDelay;
+                item->worldObj    = this;
+                entities_.push_back(std::move(item));
+            }
+            ptr->pendingItems.clear();
             return ptr;
         }
     }
@@ -756,6 +790,7 @@ void World::saveWorker(std::stop_token st) {
 
 std::vector<uint8_t> World::compressChunkData(Chunk* chunk) {
     NBTCompound level;
+    // Collect EntityItems belonging to this chunk before saving
     level.setInt("xPos", chunk->xPosition);
     level.setInt("zPos", chunk->zPosition);
     level.setByte("TerrainPopulated", chunk->isTerrainPopulated ? 1 : 0);
@@ -764,6 +799,48 @@ std::vector<uint8_t> World::compressChunkData(Chunk* chunk) {
     level.setByteArray("SkyLight", chunk->skylight.data);
     level.setByteArray("BlockLight", chunk->blocklight.data);
     level.setByteArray("HeightMap", chunk->heightMap);
+
+    // Save EntityItems that belong to this chunk
+    {
+        auto itemList = std::make_shared<NBTList>();
+        itemList->tagType = NBTTagType::TAG_Compound;
+
+        // Items already serialized on unload
+        for (const auto& ed : chunk->pendingItems) {
+            auto tag = std::make_shared<NBTCompound>();
+            tag->setInt("id",    ed.itemID);
+            tag->setInt("count", ed.count);
+            tag->setInt("meta",  ed.metadata);
+            tag->setInt("age",   ed.age);
+            tag->setInt("delay", ed.pickupDelay);
+            tag->setDouble("x",  ed.posX);
+            tag->setDouble("y",  ed.posY);
+            tag->setDouble("z",  ed.posZ);
+            itemList->tags.push_back(tag);
+        }
+
+        // Live entities currently in world that belong to this chunk
+        for (const auto& e : entities_) {
+            auto* item = dynamic_cast<EntityItem*>(e.get());
+            if (!item || item->isDead) continue;
+            int cx = static_cast<int>(std::floor(item->posX)) >> 4;
+            int cz = static_cast<int>(std::floor(item->posZ)) >> 4;
+            if (cx != chunk->xPosition || cz != chunk->zPosition) continue;
+            auto tag = std::make_shared<NBTCompound>();
+            tag->setInt("id",    item->itemID);
+            tag->setInt("count", item->count);
+            tag->setInt("meta",  item->metadata);
+            tag->setInt("age",   item->age);
+            tag->setInt("delay", item->pickupDelay);
+            tag->setDouble("x",  item->posX);
+            tag->setDouble("y",  item->posY);
+            tag->setDouble("z",  item->posZ);
+            itemList->tags.push_back(tag);
+        }
+
+        if (!itemList->tags.empty())
+            level.tags["Items"] = itemList;
+    }
 
     // Save TileEntities
     std::vector<std::shared_ptr<NBTTag>> tileEntityList;
@@ -879,6 +956,29 @@ void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data) 
         }
     }
 
+    // Load EntityItems
+    auto itemsTag = level->tags.find("Items");
+    if (itemsTag != level->tags.end()) {
+        auto listTag = std::dynamic_pointer_cast<NBTList>(itemsTag->second);
+        if (listTag) {
+            for (const auto& tag : listTag->tags) {
+                auto t = std::dynamic_pointer_cast<NBTCompound>(tag);
+                if (!t) continue;
+                ChunkEntityData ed;
+                ed.itemID      = t->getInt("id");
+                ed.count       = t->getInt("count");
+                ed.metadata    = t->getInt("meta");
+                ed.age         = t->getInt("age");
+                ed.pickupDelay = t->getInt("delay");
+                ed.posX        = t->getDouble("x");
+                ed.posY        = t->getDouble("y");
+                ed.posZ        = t->getDouble("z");
+                if (ed.age < 6000)
+                    chunk->pendingItems.push_back(ed);
+            }
+        }
+    }
+
     if (chunk->heightMap.empty() || chunk->heightMap.size() < 256) {
         chunk->heightMap.assign(256, 0);
         chunk->generateHeightMap();
@@ -902,54 +1002,6 @@ void World::removeEntity(Entity* entity) {
     entity->isDead = true;
 }
 
-void World::saveEntities() {
-    std::ofstream file(worldPath_ + "/entities.dat", std::ios::binary);
-    if (!file) return;
-
-    uint32_t count = 0;
-    for (const auto& e : entities_) {
-        if (dynamic_cast<EntityItem*>(e.get()) && !e->isDead) count++;
-    }
-
-    file.write(reinterpret_cast<const char*>(&count), sizeof(count));
-    for (const auto& e : entities_) {
-        auto* item = dynamic_cast<EntityItem*>(e.get());
-        if (item && !item->isDead) {
-            file.write(reinterpret_cast<const char*>(&item->itemID), sizeof(item->itemID));
-            file.write(reinterpret_cast<const char*>(&item->count), sizeof(item->count));
-            file.write(reinterpret_cast<const char*>(&item->metadata), sizeof(item->metadata));
-            file.write(reinterpret_cast<const char*>(&item->posX), sizeof(item->posX));
-            file.write(reinterpret_cast<const char*>(&item->posY), sizeof(item->posY));
-            file.write(reinterpret_cast<const char*>(&item->posZ), sizeof(item->posZ));
-        }
-    }
-    file.flush();
-    file.close();
-}
-
-void World::loadEntities() {
-    std::ifstream file(worldPath_ + "/entities.dat", std::ios::binary);
-    if (!file) return;
-
-    uint32_t count = 0;
-    file.read(reinterpret_cast<char*>(&count), sizeof(count));
-    for (uint32_t i = 0; i < count; ++i) {
-        int id, cnt, meta;
-        double x, y, z;
-        file.read(reinterpret_cast<char*>(&id), sizeof(id));
-        file.read(reinterpret_cast<char*>(&cnt), sizeof(cnt));
-        file.read(reinterpret_cast<char*>(&meta), sizeof(meta));
-        file.read(reinterpret_cast<char*>(&x), sizeof(x));
-        file.read(reinterpret_cast<char*>(&y), sizeof(y));
-        file.read(reinterpret_cast<char*>(&z), sizeof(z));
-
-        auto item = std::make_unique<EntityItem>(id, cnt, meta);
-        item->setPosition(x, y, z);
-        item->worldObj = this;
-        entities_.push_back(std::move(item));
-    }
-    if (count > 0) Logger::info("Loaded {} entities.", count);
-}
 
 TileEntity* World::getTileEntity(int x, int y, int z) {
     std::lock_guard lock(tileEntitiesMutex_);

@@ -98,8 +98,6 @@ public:
     void removeEntity(Entity* entity);
 
     void saveWorld();
-    void loadEntities();
-    void saveEntities();
 
     // TileEntity management
     TileEntity* getTileEntity(int x, int y, int z);

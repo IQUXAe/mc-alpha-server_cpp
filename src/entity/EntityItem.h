@@ -15,7 +15,7 @@ public:
     EntityItem(int id, int cnt, int meta) : itemID(id), count(cnt), metadata(meta) {
         width = 0.25f;
         height = 0.25f;
-        yOffset = 0.0f;
+        yOffset = height / 2.0f; // 0.125 — matches Java: this.yOffset = this.height / 2.0F
     }
 
     void tick() override {
@@ -23,19 +23,23 @@ public:
         if (pickupDelay > 0) pickupDelay--;
         age++;
 
-        // Basic gravity and friction for drops
         motionY -= 0.04;
         moveEntity(motionX, motionY, motionZ);
-        motionX *= 0.98;
-        motionY *= 0.98;
-        motionZ *= 0.98;
 
+        // Java: var1 = 0.98, if onGround: var1 = slipperiness * 0.98 (default slipperiness = 0.6)
+        float var1 = 0.98f;
         if (onGround) {
-            motionY *= -0.5;
-            motionX *= 0.7;
-            motionZ *= 0.7;
+            var1 = 0.6f * 0.98f; // default block slipperiness
+            // TODO: read actual block slipperiness from block below
         }
 
-        if (age > 6000) isDead = true; // 5 minutes
+        motionX *= var1;
+        motionY *= 0.98;
+        motionZ *= var1;
+        if (onGround) {
+            motionY *= -0.5;
+        }
+
+        if (age >= 6000) isDead = true;
     }
 };
