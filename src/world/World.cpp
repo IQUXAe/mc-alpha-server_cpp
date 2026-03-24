@@ -251,13 +251,11 @@ void World::tick() {
                             mcServer->configManager->broadcastPacket(std::make_unique<Packet22Collect>(item->entityId, player->entityId));
 
                             if (player->netHandler) {
-                                // Packet17: shows pickup animation
+                                // Packet17: shows pickup animation and tells client to add item
                                 player->netHandler->sendPacket(std::make_unique<Packet17AddToInventory>(
                                     static_cast<int16_t>(item->itemID),
                                     static_cast<int8_t>(addedCount),
                                     static_cast<int16_t>(item->metadata)));
-                                // Packet5: syncs actual inventory state to client
-                                player->netHandler->sendInventory();
                             }
 
                             if (stack.stackSize <= 0) {
