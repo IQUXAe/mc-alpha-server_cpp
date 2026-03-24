@@ -12,8 +12,8 @@ std::unique_ptr<Packet> TrackerEntry::makeSpawnPacket() const {
     int fx = (int)(entity->posX * 32.0);
     int fy = (int)(entity->posY * 32.0);
     int fz = (int)(entity->posZ * 32.0);
-    int yaw   = (int)(entity->rotationYaw   * 256.0f / 360.0f);
-    int pitch = (int)(entity->rotationPitch * 256.0f / 360.0f);
+    int yaw   = static_cast<int>(std::floor(entity->rotationYaw   * 256.0f / 360.0f)) & 0xFF;
+    int pitch = static_cast<int>(std::floor(entity->rotationPitch * 256.0f / 360.0f)) & 0xFF;
 
     if (auto* p = dynamic_cast<EntityPlayerMP*>(entity)) {
         auto pkt = std::make_unique<Packet20NamedEntitySpawn>();
@@ -54,7 +54,7 @@ std::unique_ptr<Packet> TrackerEntry::makeSpawnPacket() const {
     return pkt;
 }
 
-void TrackerEntry::sendSpawnTo(EntityPlayerMP* player) const {
+void TrackerEntry::sendSpawnTo(EntityPlayerMP* player) {
     if (!player || !player->netHandler) return;
     auto spawnPkt = makeSpawnPacket();
     if (spawnPkt) player->netHandler->sendPacket(std::move(spawnPkt));
@@ -71,6 +71,14 @@ void TrackerEntry::sendSpawnTo(EntityPlayerMP* player) const {
             player->netHandler->sendPacket(
                 std::make_unique<Packet18ArmAnimation>(entity->entityId, 104));
     }
+
+    // Sync lastFixed* to what we just sent so sendUpdates doesn't
+    // immediately send a stale relative-move or look correction
+    lastFixedX   = (int)(entity->posX * 32.0);
+    lastFixedY   = (int)(entity->posY * 32.0);
+    lastFixedZ   = (int)(entity->posZ * 32.0);
+    lastYawByte  = static_cast<int8_t>(static_cast<int>(std::floor(entity->rotationYaw   * 256.0f / 360.0f)) & 0xFF);
+    lastPitchByte = static_cast<int8_t>(static_cast<int>(std::floor(entity->rotationPitch * 256.0f / 360.0f)) & 0xFF);
 }
 
 void TrackerEntry::broadcast(std::unique_ptr<Packet> pkt) const {
@@ -114,8 +122,8 @@ void TrackerEntry::sendUpdates() {
     int fx = (int)(entity->posX * 32.0);
     int fy = (int)(entity->posY * 32.0);
     int fz = (int)(entity->posZ * 32.0);
-    int yaw   = (int)(entity->rotationYaw   * 256.0f / 360.0f);
-    int pitch = (int)(entity->rotationPitch * 256.0f / 360.0f);
+    int8_t yaw   = static_cast<int8_t>(static_cast<int>(std::floor(entity->rotationYaw   * 256.0f / 360.0f)) & 0xFF);
+    int8_t pitch = static_cast<int8_t>(static_cast<int>(std::floor(entity->rotationPitch * 256.0f / 360.0f)) & 0xFF);
 
     int dx = fx - lastFixedX;
     int dy = fy - lastFixedY;
