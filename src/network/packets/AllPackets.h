@@ -778,6 +778,7 @@ public:
         buf.writeByte(yaw); buf.writeByte(pitch);
     }
 
+    void processPacket(NetHandler& handler) override {}
     std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet32EntityLook>(*this); }
     int getPacketSize() override { return 6; }
 };
@@ -804,6 +805,7 @@ public:
         buf.writeByte(yaw); buf.writeByte(pitch);
     }
 
+    void processPacket(NetHandler& handler) override {}
     std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet33RelEntityMoveLook>(*this); }
     int getPacketSize() override { return 9; }
 };

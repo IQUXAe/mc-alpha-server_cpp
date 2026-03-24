@@ -641,8 +641,9 @@ void NetServerHandler::handlePlayerInventory(Packet5PlayerInventory& pkt) {
 void NetServerHandler::handlePickupSpawn(Packet21PickupSpawn& pkt) {
     if (pkt.itemId <= 0 || pkt.count <= 0) return;
 
-    // Consume from inventory
-    bool consumed = false;
+    // Try to consume from server inventory (Q-key drop while holding item).
+    // For inventory GUI drops the client already sent Packet5 removing the item,
+    // so we spawn regardless — the inventory is already authoritative via Packet5.
     for (auto& s : player_->inventory.mainInventory) {
         if (s && s->itemID == pkt.itemId && s->stackSize > 0) {
             s->stackSize -= pkt.count;
@@ -650,11 +651,9 @@ void NetServerHandler::handlePickupSpawn(Packet21PickupSpawn& pkt) {
                 if (s.get() == heldItem_) heldItem_ = nullptr;
                 s.reset();
             }
-            consumed = true;
             break;
         }
     }
-    if (!consumed) return;
 
     double wx = pkt.x / 32.0;
     double wy = pkt.y / 32.0;
@@ -662,7 +661,6 @@ void NetServerHandler::handlePickupSpawn(Packet21PickupSpawn& pkt) {
 
     auto item = std::make_unique<EntityItem>(pkt.itemId, pkt.count, 0);
     item->setPosition(wx, wy, wz);
-    // rotation/pitch/roll carry the throw velocity encoded as value/128.0
     item->motionX    = pkt.rotation / 128.0;
     item->motionY    = pkt.pitch    / 128.0;
     item->motionZ    = pkt.roll     / 128.0;

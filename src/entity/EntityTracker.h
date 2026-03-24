@@ -19,7 +19,7 @@ struct TrackerEntry {
 
     // Last sent fixed-point position (posX * 32)
     int lastFixedX, lastFixedY, lastFixedZ;
-    int lastYawByte, lastPitchByte;
+    int8_t lastYawByte, lastPitchByte;
 
     // Last sent held item (players only)
     int lastHeldItemId = 0;
@@ -36,15 +36,15 @@ struct TrackerEntry {
         lastFixedX = (int)(e->posX * 32.0);
         lastFixedY = (int)(e->posY * 32.0);
         lastFixedZ = (int)(e->posZ * 32.0);
-        lastYawByte = (int)(e->rotationYaw * 256.0f / 360.0f);
-        lastPitchByte = (int)(e->rotationPitch * 256.0f / 360.0f);
+        lastYawByte   = static_cast<int8_t>(static_cast<int>(std::floor(e->rotationYaw   * 256.0f / 360.0f)) & 0xFF);
+        lastPitchByte = static_cast<int8_t>(static_cast<int>(std::floor(e->rotationPitch * 256.0f / 360.0f)) & 0xFF);
     }
 
     // Build the initial spawn packet for this entity
     std::unique_ptr<Packet> makeSpawnPacket() const;
 
     // Send this entry's spawn packet + initial state to one player
-    void sendSpawnTo(EntityPlayerMP* player) const;
+    void sendSpawnTo(EntityPlayerMP* player);
 
     // Broadcast a packet to all tracking players
     void broadcast(std::unique_ptr<Packet> pkt) const;
