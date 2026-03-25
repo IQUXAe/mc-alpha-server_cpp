@@ -432,12 +432,13 @@ void NetServerHandler::handleBlockDig(Packet14BlockDig& pkt) {
         }
     }
     
+    int spawnProtectionRadius = mcServer_->getSpawnProtectionRadius();
     int distFromSpawnX = std::abs(x - mcServer_->getSpawnX());
     int distFromSpawnZ = std::abs(z - mcServer_->getSpawnZ());
     int distFromSpawn = std::max(distFromSpawnX, distFromSpawnZ);
     
     if (pkt.status == 0) {
-        if (distFromSpawn > 16 || isOp) {
+        if (distFromSpawn > spawnProtectionRadius || isOp) {
             // If digging a chest, immediately send empty chest NBT to the client.
             // Client-side prediction breaks the block locally before the server
             // responds, so we must clear the client's TileEntityChest NOW —
@@ -458,7 +459,7 @@ void NetServerHandler::handleBlockDig(Packet14BlockDig& pkt) {
     } else if (pkt.status == 2) {
         player_->itemInWorldManager->cancelRemoving();
     } else if (pkt.status == 1) {
-        if (distFromSpawn > 16 || isOp) {
+        if (distFromSpawn > spawnProtectionRadius || isOp) {
             player_->itemInWorldManager->blockRemoving(x, y, z, face);
         }
     } else if (pkt.status == 3) {
@@ -488,11 +489,12 @@ void NetServerHandler::handlePlace(Packet15Place& pkt) {
         int z = pkt.z;
         int direction = pkt.direction & 0xFF;
         
+        int spawnProtectionRadius = mcServer_->getSpawnProtectionRadius();
         int distX = std::abs(x - mcServer_->worldMngr->spawnX);
         int distZ = std::abs(z - mcServer_->worldMngr->spawnZ);
         int dist = std::max(distX, distZ);
         
-        if (dist > 16 || isOp) {
+        if (dist > spawnProtectionRadius || isOp) {
             // If right-clicking a chest or furnace, send its contents BEFORE activeBlockOrUseItem.
             // The client opens the GUI locally before our response arrives, so we must
             // send Packet59 as early as possible to populate the GUI correctly.
@@ -527,9 +529,9 @@ void NetServerHandler::handlePlace(Packet15Place& pkt) {
                 }
             }
 
-            if (!placed) {
-                sendInventory();
-            }
+            // Always sync inventory after placement to ensure client has correct state
+            // This prevents desync issues and dupe bugs
+            sendInventory();
         }
         
         // Always send block update at clicked position (rollback for client if rejected)

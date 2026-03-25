@@ -293,7 +293,10 @@ bool ItemSign::onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world,
     if (te && player->netHandler)
         player->netHandler->sendTileEntityPacket(te);
 
-    stack->stackSize--;
+    // Double-check stack is still valid before consuming (race condition protection)
+    if (stack->stackSize > 0) {
+        stack->stackSize--;
+    }
     return true;
 }
 
@@ -375,7 +378,10 @@ bool ItemBlock::onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world
             }
             placed->onBlockPlaced(world, x, y, z, side);
         }
-        stack->stackSize--;
+        // Double-check stack is still valid before consuming (race condition protection)
+        if (stack->stackSize > 0) {
+            stack->stackSize--;
+        }
         return true;
     }
     return false;

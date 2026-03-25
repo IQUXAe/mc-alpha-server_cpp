@@ -52,6 +52,7 @@ public:
     int  getViewDistance() const { return viewDistance_; }
     int  getAutoSaveInterval() const { return autoSaveInterval_; }
     bool isSaveModifiedChunksOnly() const { return saveModifiedChunksOnly_; }
+    int  getSpawnProtectionRadius() const { return spawnProtectionRadius_; }
     const std::string& getPlayerSaveDir() const { return playerSaveDir_; }
 
 private:
@@ -70,6 +71,7 @@ private:
     int         viewDistance_           = 10;
     int         autoSaveInterval_       = 900;
     bool        saveModifiedChunksOnly_ = false;
+    int         spawnProtectionRadius_  = 16;  // default vanilla spawn protection radius
     std::string playerSaveDir_;         // world/<levelname>/players
 
     // Commands
