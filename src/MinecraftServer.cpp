@@ -47,6 +47,8 @@ bool MinecraftServer::initialize() {
     if (viewDistance_ > 15) viewDistance_ = 15;
     autoSaveInterval_       = propertyManager->getIntProperty("auto-save-interval", 6000);
     saveModifiedChunksOnly_ = propertyManager->getBooleanProperty("save-modified-chunks-only", false);
+    spawnProtectionRadius_  = propertyManager->getIntProperty("spawn-protection-radius", 16);
+    if (spawnProtectionRadius_ < 0) spawnProtectionRadius_ = 0;
     int port = propertyManager->getIntProperty("server-port", 25565);
 
     std::string displayAddr = bindAddress.empty() ? "*" : bindAddress;

@@ -53,6 +53,9 @@ void NetLoginHandler::handleHandshake(Packet2Handshake& pkt) {
 }
 
 void NetLoginHandler::handleLogin(Packet1Login& pkt) {
+    while (!pkt.username.empty() && (pkt.username.back() == '\0' || pkt.username.back() == '\r' || pkt.username.back() == '\n' || pkt.username.back() == ' ')) {
+        pkt.username.pop_back();
+    }
     username_ = pkt.username;
     if (pkt.protocolVersion != 6) {
         if (pkt.protocolVersion > 6) {
