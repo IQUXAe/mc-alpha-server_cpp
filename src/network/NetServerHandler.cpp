@@ -67,26 +67,33 @@ void NetServerHandler::tick() {
 
         // Build sorted list of chunks to load (nearest first), skip already sent
         std::vector<std::pair<int,int>> needed;
+        std::vector<std::pair<int,int>> padding;
         for (int i = cx - genR; i <= cx + genR; ++i) {
             for (int j = cz - genR; j <= cz + genR; ++j) {
                 bool isPadding = (std::abs(i - cx) > r || std::abs(j - cz) > r);
                 if (isPadding) {
-                    // Pre-build padding chunks in the background so population neighbors
-                    // are ready before the player reaches the visible edge.
-                    mcServer_->worldMngr->requestChunkAsync(i, j);
+                    padding.push_back({i, j});
                     continue;
                 }
                 // Only queue visible chunks that haven't been sent yet
                 if (!sentChunks_.contains(chunkKey(i, j))) {
-                    mcServer_->worldMngr->requestChunkAsync(i, j);
                     needed.push_back({i, j});
                 }
             }
         }
 
-        std::ranges::sort(needed, std::less{}, [cx, cz](const std::pair<int,int>& p) {
+        auto distanceSq = [cx, cz](const std::pair<int,int>& p) {
             return (p.first - cx)*(p.first - cx) + (p.second - cz)*(p.second - cz);
-        });
+        };
+        std::ranges::sort(needed, std::less{}, distanceSq);
+        std::ranges::sort(padding, std::less{}, distanceSq);
+
+        for (const auto& c : needed) {
+            mcServer_->worldMngr->requestChunkAsync(c.first, c.second, 0);
+        }
+        for (const auto& c : padding) {
+            mcServer_->worldMngr->requestChunkAsync(c.first, c.second, 2);
+        }
 
         // Prepend to queue (new position = higher priority), avoid duplicates with a quick erase
         // Simple approach: replace queue with newly sorted list merged with existing
@@ -123,7 +130,7 @@ void NetServerHandler::tick() {
         // Requesting them asynchronously keeps the main network tick responsive.
         for (int dx = -1; dx <= 1; ++dx) {
             for (int dz = -1; dz <= 1; ++dz) {
-                mcServer_->worldMngr->requestChunkAsync(px + dx, pz + dz);
+                mcServer_->worldMngr->requestChunkAsync(px + dx, pz + dz, 0);
             }
         }
         
@@ -286,6 +293,11 @@ void NetServerHandler::sendChunks() {
     std::ranges::sort(chunksToLoad, std::less{}, [chunkX, chunkZ](const std::pair<int, int>& p) {
         return (p.first - chunkX) * (p.first - chunkX) + (p.second - chunkZ) * (p.second - chunkZ);
     });
+
+    for (const auto& [cx, cz] : chunksToLoad) {
+        const bool isVisible = std::abs(cx - chunkX) <= r && std::abs(cz - chunkZ) <= r;
+        mcServer_->worldMngr->requestChunkAsync(cx, cz, isVisible ? 0 : 2);
+    }
 
     // Replace the queue entirely
     chunksToLoad_ = chunksToLoad;

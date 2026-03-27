@@ -16,6 +16,7 @@
 #include <condition_variable>
 #include <queue>
 #include <atomic>
+#include <compare>
 #include <leveldb/db.h>
 
 #include <set>
@@ -72,7 +73,7 @@ public:
     Chunk* getChunkFromBlockCoords(int x, int z, bool generate = false);
     bool chunkExists(int chunkX, int chunkZ) const;
     void ensureChunkPopulated(int chunkX, int chunkZ);  // Force population if not already done
-    void requestChunkAsync(int chunkX, int chunkZ);
+    void requestChunkAsync(int chunkX, int chunkZ, int priority = 1);
 
     // Block access and modification
     uint8_t getBlockId(int x, int y, int z);
@@ -150,12 +151,26 @@ private:
         std::unique_ptr<Chunk> chunk;
         std::vector<std::unique_ptr<TileEntity>> tileEntities;
     };
-    std::queue<uint64_t> chunkBuildQueue_;
+    struct ChunkBuildRequest {
+        uint64_t key = 0;
+        int priority = 0;
+        uint64_t sequence = 0;
+    };
+    struct ChunkBuildRequestCompare {
+        bool operator()(const ChunkBuildRequest& lhs, const ChunkBuildRequest& rhs) const {
+            if (lhs.priority != rhs.priority) {
+                return lhs.priority > rhs.priority;
+            }
+            return lhs.sequence > rhs.sequence;
+        }
+    };
+    std::priority_queue<ChunkBuildRequest, std::vector<ChunkBuildRequest>, ChunkBuildRequestCompare> chunkBuildQueue_;
     std::unordered_set<uint64_t> chunkBuildInFlight_;
     std::unordered_map<uint64_t, PreparedChunk> preparedChunks_;
     std::queue<uint64_t> preparedChunkOrder_;
     std::mutex chunkBuildMutex_;
     std::condition_variable chunkBuildCondition_;
+    uint64_t chunkBuildSequence_ = 0;
     std::unique_ptr<WorldChunkManager> asyncChunkManager_;
     std::unique_ptr<ChunkProviderGenerate> asyncChunkProvider_;
     std::jthread chunkBuildThread_;
