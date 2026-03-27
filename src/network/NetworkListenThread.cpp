@@ -1,6 +1,7 @@
 #include "NetworkListenThread.h"
 #include "NetLoginHandler.h"
 #include "NetServerHandler.h"
+#include "../core/Logger.h"
 
 #include <cstring>
 #include <stdexcept>
@@ -22,7 +23,10 @@ NetworkListenThread::NetworkListenThread(MinecraftServer* server, const std::str
     if (bindAddress.empty()) {
         addr.sin_addr.s_addr = INADDR_ANY;
     } else {
-        ::inet_pton(AF_INET, bindAddress.c_str(), &addr.sin_addr);
+        if (::inet_pton(AF_INET, bindAddress.c_str(), &addr.sin_addr) != 1) {
+            ::close(serverSocketFd_);
+            throw std::runtime_error("Invalid bind address: " + bindAddress);
+        }
     }
 
     if (::bind(serverSocketFd_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
@@ -36,7 +40,7 @@ NetworkListenThread::NetworkListenThread(MinecraftServer* server, const std::str
     }
 
     isRunning = true;
-    acceptThread_ = std::thread([this]() { acceptLoop(); });
+    acceptThread_ = std::jthread([this](std::stop_token stopToken) { acceptLoop(stopToken); });
 }
 
 NetworkListenThread::~NetworkListenThread() {
@@ -44,8 +48,9 @@ NetworkListenThread::~NetworkListenThread() {
     if (serverSocketFd_ >= 0) {
         ::shutdown(serverSocketFd_, SHUT_RDWR);
         ::close(serverSocketFd_);
+        serverSocketFd_ = -1;
     }
-    if (acceptThread_.joinable()) acceptThread_.join();
+    acceptThread_.request_stop();
 }
 
 void NetworkListenThread::addConnection(NetServerHandler* handler) {
@@ -100,15 +105,15 @@ void NetworkListenThread::networkTick() {
     }
 }
 
-void NetworkListenThread::acceptLoop() {
-    while (isRunning) {
+void NetworkListenThread::acceptLoop(std::stop_token stopToken) {
+    while (isRunning && !stopToken.stop_requested()) {
         struct sockaddr_in clientAddr{};
         socklen_t addrLen = sizeof(clientAddr);
         int clientFd = ::accept(serverSocketFd_, reinterpret_cast<struct sockaddr*>(&clientAddr), &addrLen);
 
         if (clientFd < 0) {
-            if (!isRunning) break;
-            std::cerr << "[WARNING] Accept failed: " << strerror(errno) << std::endl;
+            if (!isRunning || stopToken.stop_requested()) break;
+            Logger::warning("Accept failed: {}", std::strerror(errno));
             continue;
         }
 
@@ -124,7 +129,7 @@ void NetworkListenThread::acceptLoop() {
             auto loginHandler = std::make_shared<NetLoginHandler>(mcServer, clientFd, remoteAddr, connDesc);
             addPendingConnection(loginHandler);
         } catch (const std::exception& e) {
-            std::cerr << "[WARNING] Failed to create login handler: " << e.what() << std::endl;
+            Logger::warning("Failed to create login handler: {}", e.what());
             ::close(clientFd);
         }
     }

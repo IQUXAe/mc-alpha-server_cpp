@@ -1,8 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
 project(alpha_server LANGUAGES CXX)
 
+include(CheckIPOSupported)
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Default to Release if not specified
 if(NOT CMAKE_BUILD_TYPE)
@@ -32,19 +35,19 @@ add_executable(alpha_server ${SOURCES} src/main.cpp ${HEADERS})
 target_link_libraries(alpha_server PRIVATE ZLIB::ZLIB Threads::Threads ${LEVELDB_LIBRARY} ${ZSTD_LINK_LIB})
 target_include_directories(alpha_server PRIVATE src ${ZSTD_INCLUDE_DIRS})
 
+check_ipo_supported(RESULT IPO_SUPPORTED OUTPUT IPO_ERROR)
+if(IPO_SUPPORTED)
+    set_property(TARGET alpha_server PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+endif()
+
 if(UNIX)
     target_link_options(alpha_server PRIVATE -rdynamic)
     target_compile_options(alpha_server PRIVATE
-        -Wall -Wextra -Wno-unused-parameter
+        -Wall -Wextra -Wpedantic -Wno-unused-parameter
 
         $<$<CONFIG:Release>:
-            -O3                  # full optimization
-            -march=native        # use all CPU instructions available on this machine
-            -mtune=native        # tune scheduling for this CPU
-            -ffast-math          # aggressive float opts (safe for game logic, no NaN/Inf reliance)
-            -funroll-loops       # unroll small loops (chunk iteration, nibble arrays)
-            -fomit-frame-pointer # free up one register in hot paths
-            -DNDEBUG             # disable asserts
+            -O3
+            -DNDEBUG
         >
 
         $<$<CONFIG:Debug>:

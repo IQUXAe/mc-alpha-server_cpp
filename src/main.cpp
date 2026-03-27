@@ -6,6 +6,10 @@
 #include <csignal>
 #include <atomic>
 #include <cstdlib>
+#include <cerrno>
+#include <poll.h>
+#include <iostream>
+#include <unistd.h>
 
 MinecraftServer* globalServer = nullptr;
 std::atomic<bool> isShuttingDown{false};
@@ -20,7 +24,53 @@ void signalHandler(int signum) {
     }
 }
 
+void consoleLoop(std::stop_token stopToken, MinecraftServer& server) {
+    pollfd stdinPoll{
+        .fd = STDIN_FILENO,
+        .events = POLLIN,
+        .revents = 0,
+    };
+
+    std::string line;
+    while (!stopToken.stop_requested()) {
+        const int pollResult = ::poll(&stdinPoll, 1, 200);
+        if (pollResult < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+
+            Logger::warning("Console input polling failed, disabling console reader.");
+            return;
+        }
+
+        if (pollResult == 0) {
+            continue;
+        }
+
+        if ((stdinPoll.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+            Logger::info("Console input closed.");
+            return;
+        }
+
+        if ((stdinPoll.revents & POLLIN) == 0) {
+            continue;
+        }
+
+        if (!std::getline(std::cin, line)) {
+            Logger::info("Console input closed.");
+            return;
+        }
+
+        if (!line.empty()) {
+            server.addCommand(line);
+        }
+    }
+}
+
 int main(int argc, char* argv[]) {
+    (void)argc;
+    (void)argv;
+
     std::cout << "  ___  _      _         ___                      " << std::endl;
     std::cout << " / _ \\| |_ __| |_  __ _/ __| ___ _ ___ _____ _ _ " << std::endl;
     std::cout << "| (_) | | '_ \\ ' \\/ _` \\__ \\/ -_) '_\\ V / -_) '_|" << std::endl;
@@ -37,26 +87,16 @@ int main(int argc, char* argv[]) {
         std::signal(SIGINT, signalHandler);
         std::signal(SIGTERM, signalHandler);
 
-        // Start console reader thread
-        std::thread consoleThread([&server]() {
-            std::string line;
-            while (std::getline(std::cin, line)) {
-                if (!line.empty()) {
-                    server.addCommand(line);
-                }
-            }
-        });
-        consoleThread.detach();
+        // Use a polling console thread so shutdown stays graceful and joinable.
+        std::jthread consoleThread(consoleLoop, std::ref(server));
 
         // Run server (blocks until stop)
         server.run();
 
+        consoleThread.request_stop();
         globalServer = nullptr;
-        
+
         Logger::info("Waiting for background threads to finish saving...");
     }
-
-    // Use _Exit instead of exit to bypass the std::cin mutex deadlock,
-    // which is still held by the sleeping detached consoleThread.
-    std::_Exit(0); // its just work
+    return 0;
 }

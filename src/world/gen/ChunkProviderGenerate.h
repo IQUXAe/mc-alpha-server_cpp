@@ -45,7 +45,8 @@ private:
                                std::vector<MobSpawnerBase>& biomes);
 
 public:
-    ChunkProviderGenerate(World* world, int64_t seed);
+    ChunkProviderGenerate(World* world, int64_t seed, WorldChunkManager* managerOverride = nullptr);
+    void generateChunk(Chunk& chunk, bool generateLighting = true);
     void provideChunk(int chunkX, int chunkZ);  // Generate terrain for pre-created chunk
     void populate(int chunkX, int chunkZ);
     bool canPopulateChunk(int chunkX, int chunkZ);  // Check if all neighbors exist for population

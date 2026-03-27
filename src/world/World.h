@@ -1,6 +1,7 @@
 #pragma once
 
 #include <unordered_map>
+#include <unordered_set>
 #include <memory>
 #include <cstdint>
 #include <vector>
@@ -8,6 +9,7 @@
 #include "Chunk.h"
 #include "gen/ChunkProviderGenerate.h"
 #include "biome/WorldChunkManager.h"
+#include "../core/NBT.h"
 #include "../forward.h"
 #include <thread>
 #include <mutex>
@@ -70,6 +72,7 @@ public:
     Chunk* getChunkFromBlockCoords(int x, int z, bool generate = false);
     bool chunkExists(int chunkX, int chunkZ) const;
     void ensureChunkPopulated(int chunkX, int chunkZ);  // Force population if not already done
+    void requestChunkAsync(int chunkX, int chunkZ);
 
     // Block access and modification
     uint8_t getBlockId(int x, int y, int z);
@@ -113,10 +116,16 @@ public:
 private:
     void findSafeSpawnPoint();
     void saveWorker(std::stop_token st);
+    void chunkWorker(std::stop_token st);
     bool loadLevelDat();
     void saveLevelDat();
     std::vector<uint8_t> compressChunkData(Chunk* chunk);
-    void decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data);
+    void decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data,
+                             std::vector<std::unique_ptr<TileEntity>>* detachedTileEntities = nullptr);
+    void populateChunkIfReady(int chunkX, int chunkZ);
+    void tryPopulateChunksAround(int chunkX, int chunkZ);
+    void drainPreparedChunks(size_t maxChunks = 8);
+    bool commitPreparedChunk(uint64_t key);
 
     std::unordered_map<uint64_t, std::unique_ptr<Chunk>> chunks_;
     mutable std::mutex chunksMutex_;  // Protects chunks_ map from concurrent access
@@ -136,6 +145,21 @@ private:
     std::condition_variable saveCondition_;
     std::jthread saveThread_;
     std::atomic<bool> stopSaving_{false};
+
+    struct PreparedChunk {
+        std::unique_ptr<Chunk> chunk;
+        std::vector<std::unique_ptr<TileEntity>> tileEntities;
+    };
+    std::queue<uint64_t> chunkBuildQueue_;
+    std::unordered_set<uint64_t> chunkBuildInFlight_;
+    std::unordered_map<uint64_t, PreparedChunk> preparedChunks_;
+    std::queue<uint64_t> preparedChunkOrder_;
+    std::mutex chunkBuildMutex_;
+    std::condition_variable chunkBuildCondition_;
+    std::unique_ptr<WorldChunkManager> asyncChunkManager_;
+    std::unique_ptr<ChunkProviderGenerate> asyncChunkProvider_;
+    std::jthread chunkBuildThread_;
+
     leveldb::DB* db_ = nullptr;
 
     inline uint64_t getChunkKey(int chunkX, int chunkZ) const {

@@ -79,6 +79,7 @@ public:
     const std::unordered_map<uint64_t, TileEntity*>& getTileEntities() const { return tileEntities_; }
 
 private:
+    void recalculateHeightColumn(int x, int z);
     void updateSkylightColumn(int x, int z, int startY, int endY);
     std::unordered_map<uint64_t, TileEntity*> tileEntities_; // Key: (x << 16) | (y << 8) | z
     
