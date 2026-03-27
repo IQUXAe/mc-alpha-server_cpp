@@ -410,7 +410,7 @@ void World::scheduleBlockUpdate(int x, int y, int z, int blockId, int delay) {
     scheduledTicks.insert(entry);
 }
 
-void World::requestChunkAsync(int chunkX, int chunkZ) {
+void World::requestChunkAsync(int chunkX, int chunkZ, int priority) {
     const auto key = getChunkKey(chunkX, chunkZ);
 
     {
@@ -426,7 +426,11 @@ void World::requestChunkAsync(int chunkX, int chunkZ) {
             return;
         }
         chunkBuildInFlight_.insert(key);
-        chunkBuildQueue_.push(key);
+        chunkBuildQueue_.push(ChunkBuildRequest{
+            .key = key,
+            .priority = priority,
+            .sequence = chunkBuildSequence_++,
+        });
     }
 
     chunkBuildCondition_.notify_one();
@@ -445,7 +449,7 @@ void World::chunkWorker(std::stop_token st) {
                 return;
             }
 
-            key = chunkBuildQueue_.front();
+            key = chunkBuildQueue_.top().key;
             chunkBuildQueue_.pop();
         }
 
