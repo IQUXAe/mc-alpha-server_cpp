@@ -74,6 +74,10 @@ public:
     bool chunkExists(int chunkX, int chunkZ) const;
     void ensureChunkPopulated(int chunkX, int chunkZ);  // Force population if not already done
     void requestChunkAsync(int chunkX, int chunkZ, int priority = 1);
+    void spawnPassiveMobs();
+    int countPassiveAnimals() const;
+    EntityPlayerMP* getClosestPlayer(double x, double y, double z, double maxDistance) const;
+    int getBlockLightValue(int x, int y, int z);
 
     // Block access and modification
     uint8_t getBlockId(int x, int y, int z);

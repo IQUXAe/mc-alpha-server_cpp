@@ -3,6 +3,7 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
+#include <string>
 #include <unordered_map>
 #include "../core/NibbleArray.h"
 #include "../forward.h"
@@ -27,6 +28,12 @@ struct ChunkEntityData {
     double posX, posY, posZ;
 };
 
+struct ChunkAnimalData {
+    std::string entityId;
+    std::vector<uint8_t> nbtData;
+    double posX, posY, posZ;
+};
+
 class Chunk {
 public:
     const int xPosition;
@@ -38,6 +45,7 @@ public:
 
     // EntityItems waiting to be spawned when the chunk is loaded
     std::vector<ChunkEntityData> pendingItems;
+    std::vector<ChunkAnimalData> pendingAnimals;
 
     // Direct flat arrays for massive CPU cache-locality (C++ advantage)
     std::vector<uint8_t> blocks;      // 32768 bytes
