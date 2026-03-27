@@ -46,3 +46,31 @@ void Entity::moveEntity(double dx, double dy, double dz) {
     if (oldY != dy) motionY = 0.0;
     if (oldZ != dz) motionZ = 0.0;
 }
+
+void Entity::applyEntityCollision(Entity* other) {
+    if (!other || other == this || !canBePushed() || !other->canBePushed()) {
+        return;
+    }
+
+    double dx = other->posX - posX;
+    double dz = other->posZ - posZ;
+    double maxAbs = MathHelper::abs_max(dx, dz);
+    if (maxAbs < 0.01) {
+        return;
+    }
+
+    maxAbs = MathHelper::sqrt_double(maxAbs);
+    dx /= maxAbs;
+    dz /= maxAbs;
+
+    double impulseScale = 1.0 / maxAbs;
+    if (impulseScale > 1.0) {
+        impulseScale = 1.0;
+    }
+
+    dx *= impulseScale * 0.05;
+    dz *= impulseScale * 0.05;
+
+    addVelocity(-dx, 0.0, -dz);
+    other->addVelocity(dx, 0.0, dz);
+}

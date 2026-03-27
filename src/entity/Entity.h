@@ -68,6 +68,13 @@ public:
     }
 
     virtual void moveEntity(double dx, double dy, double dz);
+    virtual void addVelocity(double dx, double dy, double dz) {
+        motionX += dx;
+        motionY += dy;
+        motionZ += dz;
+    }
+    virtual bool canBePushed() const { return !isDead; }
+    virtual void applyEntityCollision(Entity* other);
 
     double getDistanceSq(double x, double y, double z) const {
         double dx = posX - x;
