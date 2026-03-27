@@ -57,7 +57,7 @@ private:
     std::unique_ptr<NetworkManager> netManager_;
     EntityPlayerMP* player_;
     int tickCounter_ = 0;
-    ItemStack* heldItem_ = nullptr; // fallback placeholder when item not yet in inventory
+    std::unique_ptr<ItemStack> heldItem_; // fallback placeholder when item not yet in inventory
     int heldItemId_ = 0;             // itemID of what the player is holding
 
     // Anti-cheat: track last known position
@@ -71,4 +71,3 @@ private:
     // Chunks queued (ordered, nearest first)
     std::vector<std::pair<int,int>> chunksToLoad_;
 };
-

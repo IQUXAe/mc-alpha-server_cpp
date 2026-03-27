@@ -12,16 +12,24 @@
 #include <string>
 #include <memory>
 #include <stdexcept>
+#include <condition_variable>
+#include <chrono>
+#include <optional>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netinet/tcp.h>
 #include <unistd.h>
 
 class NetworkManager {
 public:
     NetworkManager(int socketFd, const std::string& desc, NetHandler* handler)
         : socketFd_(socketFd), netHandler_(handler), description_(desc) {
+        const int enabled = 1;
+        ::setsockopt(socketFd_, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled));
+        ::setsockopt(socketFd_, SOL_SOCKET, SO_KEEPALIVE, &enabled, sizeof(enabled));
+
         readThread_  = std::jthread([this](std::stop_token st) { readLoop(st); });
         writeThread_ = std::jthread([this](std::stop_token st) { writeLoop(st); });
     }
@@ -34,16 +42,20 @@ public:
 
     void addToSendQueue(std::unique_ptr<Packet> pkt) {
         if (isServerTerminating_) return;
-        std::lock_guard lock(sendMutex_);
-        sendQueueByteLength_ += pkt->getPacketSize() + 1;
-        if (pkt->isChunkDataPacket)
-            chunkDataPackets_.push(std::move(pkt));
-        else
-            dataPackets_.push(std::move(pkt));
+        {
+            std::lock_guard lock(sendMutex_);
+            sendQueueByteLength_ += pkt->getPacketSize() + 1;
+            if (pkt->isChunkDataPacket) {
+                chunkDataPackets_.push(std::move(pkt));
+            } else {
+                dataPackets_.push(std::move(pkt));
+            }
+        }
+        sendCondition_.notify_one();
     }
 
     void processReadPackets() {
-        if (sendQueueByteLength_ > 1048576) {
+        if (sendQueueByteLength_.load(std::memory_order_relaxed) > 1048576) {
             shutdown("Send buffer overflow");
         }
 
@@ -72,7 +84,7 @@ public:
 
         if (isTerminating_) {
             std::lock_guard lock(readMutex_);
-            if (readPackets_.empty()) netHandler_->handleErrorMessage(terminationReason_);
+            if (readPackets_.empty() && netHandler_) netHandler_->handleErrorMessage(terminationReason_);
         }
     }
 
@@ -80,6 +92,7 @@ public:
         if (!isRunning_.exchange(false)) return;
         isTerminating_ = true;
         terminationReason_ = reason;
+        serverShutdownDeadline_.reset();
         if (socketFd_ >= 0) {
             ::shutdown(socketFd_, SHUT_RDWR);
             ::close(socketFd_);
@@ -87,14 +100,13 @@ public:
         }
         readThread_.request_stop();
         writeThread_.request_stop();
+        sendCondition_.notify_all();
     }
 
     void serverShutdown() {
         isServerTerminating_ = true;
-        std::thread([this] {
-            std::this_thread::sleep_for(std::chrono::seconds(5));
-            shutdown("Server shutdown");
-        }).detach();
+        serverShutdownDeadline_ = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        sendCondition_.notify_all();
     }
 
     [[nodiscard]] std::string getRemoteAddress() const { return remoteAddress_; }
@@ -117,10 +129,12 @@ private:
     std::queue<std::unique_ptr<Packet>> readPackets_;
 
     std::mutex sendMutex_;
+    std::condition_variable sendCondition_;
     std::queue<std::unique_ptr<Packet>> dataPackets_;
     std::queue<std::unique_ptr<Packet>> chunkDataPackets_;
     std::atomic<int> sendQueueByteLength_{0};
     int timeSinceLastRead_ = 0;
+    std::optional<std::chrono::steady_clock::time_point> serverShutdownDeadline_;
 
     std::jthread readThread_;
     std::jthread writeThread_;
@@ -143,38 +157,53 @@ private:
     }
 
     void writeLoop(std::stop_token st) {
-        while (!st.stop_requested() && (isRunning_ || isServerTerminating_)) {
+        while (!st.stop_requested()) {
             try {
-                bool idle = true;
+                std::unique_ptr<Packet> pkt;
+                {
+                    std::unique_lock lock(sendMutex_);
+                    sendCondition_.wait_for(lock, std::chrono::milliseconds(50), [&] {
+                        return st.stop_requested()
+                            || !dataPackets_.empty()
+                            || !chunkDataPackets_.empty()
+                            || !isRunning_.load(std::memory_order_relaxed)
+                            || serverShutdownDeadline_.has_value();
+                    });
 
-                while (true) {
-                    std::unique_ptr<Packet> pkt;
-                    {
-                        std::lock_guard lock(sendMutex_);
-                        if (dataPackets_.empty()) break;
+                    if (st.stop_requested()) {
+                        return;
+                    }
+
+                    if (!dataPackets_.empty()) {
                         pkt = std::move(dataPackets_.front());
                         dataPackets_.pop();
-                        sendQueueByteLength_ -= pkt->getPacketSize() + 1;
+                    } else if (!chunkDataPackets_.empty()) {
+                        pkt = std::move(chunkDataPackets_.front());
+                        chunkDataPackets_.pop();
+                    } else if (!isRunning_.load(std::memory_order_relaxed)) {
+                        return;
                     }
-                    Packet::writePacket(*pkt, socketFd_);
-                    idle = false;
                 }
 
-                {
-                    std::unique_ptr<Packet> pkt;
-                    {
-                        std::lock_guard lock(sendMutex_);
-                        if (!chunkDataPackets_.empty()) {
-                            pkt = std::move(chunkDataPackets_.front());
-                            chunkDataPackets_.pop();
-                            sendQueueByteLength_ -= pkt->getPacketSize() + 1;
-                            idle = false;
+                if (pkt) {
+                    sendQueueByteLength_ -= pkt->getPacketSize() + 1;
+                    Packet::writePacket(*pkt, socketFd_);
+                }
+
+                if (serverShutdownDeadline_) {
+                    const auto deadline = *serverShutdownDeadline_;
+                    if (std::chrono::steady_clock::now() >= deadline) {
+                        bool queueEmpty = false;
+                        {
+                            std::lock_guard lock(sendMutex_);
+                            queueEmpty = dataPackets_.empty() && chunkDataPackets_.empty();
+                        }
+                        if (queueEmpty) {
+                            shutdown("Server shutdown");
+                            return;
                         }
                     }
-                    if (pkt) Packet::writePacket(*pkt, socketFd_);
                 }
-
-                if (idle) std::this_thread::sleep_for(std::chrono::milliseconds(5));
             } catch (const std::exception& e) {
                 if (!isTerminating_) {
                     Logger::warning("Write error on {}: {}", description_, e.what());

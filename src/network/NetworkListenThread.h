@@ -36,7 +36,7 @@ public:
 
 private:
     int serverSocketFd_ = -1;
-    std::thread acceptThread_;
+    std::jthread acceptThread_;
     int connectionCounter_ = 0;
 
     std::mutex pendingMutex_;
@@ -45,5 +45,5 @@ private:
     std::mutex activeMutex_;
     std::vector<NetServerHandler*> activeConnections_;
 
-    void acceptLoop();
+    void acceptLoop(std::stop_token stopToken);
 };

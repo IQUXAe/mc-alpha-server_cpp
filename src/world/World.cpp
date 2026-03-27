@@ -21,6 +21,7 @@
 #include <fstream>
 #include <ranges>
 #include <ctime>
+
 // Magic prefix to distinguish zstd chunks from legacy gzip chunks
 static constexpr uint32_t ZSTD_MAGIC = 0xFD2FB528; // native zstd frame magic
 
@@ -57,9 +58,12 @@ World::World(MinecraftServer* server, const std::string& savePath, int64_t seed)
 
     // Initialize exactly same as alpha
     chunkProvider = std::make_unique<ChunkProviderGenerate>(this, randomSeed);
+    asyncChunkManager_ = std::make_unique<WorldChunkManager>(randomSeed);
+    asyncChunkProvider_ = std::make_unique<ChunkProviderGenerate>(this, randomSeed, asyncChunkManager_.get());
     rand.seed(randomSeed);
 
     saveThread_ = std::jthread([this](std::stop_token st) { saveWorker(st); });
+    chunkBuildThread_ = std::jthread([this](std::stop_token st) { chunkWorker(st); });
     
     if (!hasLevelDat) {
         findSafeSpawnPoint();
@@ -178,11 +182,16 @@ World::~World() {
     saveThread_.request_stop();
     saveThread_.join(); // wait for all pending writes to finish
 
+    chunkBuildCondition_.notify_all();
+    chunkBuildThread_.request_stop();
+    chunkBuildThread_.join();
+
     delete db_;
     db_ = nullptr;
 }
 
 void World::tick() {
+    drainPreparedChunks();
     worldTime++;
 
     // Update tile entities — copy pointers first to avoid deadlock,
@@ -401,8 +410,227 @@ void World::scheduleBlockUpdate(int x, int y, int z, int blockId, int delay) {
     scheduledTicks.insert(entry);
 }
 
+void World::requestChunkAsync(int chunkX, int chunkZ) {
+    const auto key = getChunkKey(chunkX, chunkZ);
+
+    {
+        std::lock_guard lock(chunksMutex_);
+        if (chunks_.contains(key)) {
+            return;
+        }
+    }
+
+    {
+        std::lock_guard lock(chunkBuildMutex_);
+        if (chunkBuildInFlight_.contains(key) || preparedChunks_.contains(key)) {
+            return;
+        }
+        chunkBuildInFlight_.insert(key);
+        chunkBuildQueue_.push(key);
+    }
+
+    chunkBuildCondition_.notify_one();
+}
+
+void World::chunkWorker(std::stop_token st) {
+    while (!st.stop_requested()) {
+        uint64_t key = 0;
+        {
+            std::unique_lock lock(chunkBuildMutex_);
+            chunkBuildCondition_.wait(lock, [&] {
+                return st.stop_requested() || !chunkBuildQueue_.empty();
+            });
+
+            if (st.stop_requested()) {
+                return;
+            }
+
+            key = chunkBuildQueue_.front();
+            chunkBuildQueue_.pop();
+        }
+
+        const int chunkX = static_cast<int32_t>(key >> 32);
+        const int chunkZ = static_cast<int32_t>(key & 0xFFFFFFFFu);
+
+        PreparedChunk prepared;
+
+        bool loadedFromStorage = false;
+        if (db_) {
+            std::string val;
+            leveldb::Slice keySlice(reinterpret_cast<const char*>(&key), sizeof(uint64_t));
+            const auto status = db_->Get(leveldb::ReadOptions(), keySlice, &val);
+            if (status.ok()) {
+                auto chunk = std::make_unique<Chunk>(this, chunkX, chunkZ);
+                std::vector<uint8_t> data(val.begin(), val.end());
+                decompressChunkData(chunk.get(), data, &prepared.tileEntities);
+                prepared.chunk = std::move(chunk);
+                loadedFromStorage = true;
+            }
+        }
+
+        if (!loadedFromStorage) {
+            auto chunk = std::make_unique<Chunk>(this, chunkX, chunkZ);
+            asyncChunkProvider_->generateChunk(*chunk, false);
+            prepared.chunk = std::move(chunk);
+        }
+
+        {
+            std::lock_guard lock(chunkBuildMutex_);
+            if (prepared.chunk) {
+                preparedChunks_[key] = std::move(prepared);
+                preparedChunkOrder_.push(key);
+            }
+        }
+    }
+}
+
+void World::drainPreparedChunks(size_t maxChunks) {
+    for (size_t i = 0; i < maxChunks; ++i) {
+        uint64_t key = 0;
+        bool found = false;
+        {
+            std::lock_guard lock(chunkBuildMutex_);
+            while (!preparedChunkOrder_.empty()) {
+                const uint64_t candidate = preparedChunkOrder_.front();
+                preparedChunkOrder_.pop();
+                if (preparedChunks_.contains(candidate)) {
+                    key = candidate;
+                    found = true;
+                    break;
+                }
+            }
+        }
+
+        if (!found || !commitPreparedChunk(key)) {
+            break;
+        }
+    }
+}
+
+bool World::commitPreparedChunk(uint64_t key) {
+    PreparedChunk prepared;
+    {
+        std::lock_guard lock(chunkBuildMutex_);
+        auto it = preparedChunks_.find(key);
+        if (it == preparedChunks_.end()) {
+            return false;
+        }
+        prepared = std::move(it->second);
+        preparedChunks_.erase(it);
+        chunkBuildInFlight_.erase(key);
+    }
+
+    if (!prepared.chunk) {
+        return true;
+    }
+
+    {
+        std::lock_guard lock(chunksMutex_);
+        if (chunks_.contains(key)) {
+            return true;
+        }
+        chunks_[key] = std::move(prepared.chunk);
+    }
+
+    Chunk* chunk = nullptr;
+    {
+        std::lock_guard lock(chunksMutex_);
+        chunk = chunks_[key].get();
+    }
+    if (!chunk) {
+        return true;
+    }
+
+    if (chunk->heightMap.size() != CHUNK_AREA) {
+        chunk->heightMap.assign(CHUNK_AREA, 0);
+        chunk->generateHeightMap();
+    }
+    if (chunk->skylight.data.size() != CHUNK_VOLUME / 2 || chunk->blocklight.data.size() != CHUNK_VOLUME / 2) {
+        chunk->skylight.data.resize(CHUNK_VOLUME / 2, 0);
+        chunk->blocklight.data.resize(CHUNK_VOLUME / 2, 0);
+        chunk->generateSkylightMap();
+    }
+
+    {
+        std::lock_guard lock(tileEntitiesMutex_);
+        for (auto& te : prepared.tileEntities) {
+            if (!te) continue;
+            te->worldObj = this;
+            chunk->addTileEntity(te.get());
+            tileEntities_[getTileEntityKey(te->xCoord, te->yCoord, te->zCoord)] = std::move(te);
+        }
+    }
+
+    for (const auto& ed : chunk->pendingItems) {
+        auto item = std::make_unique<EntityItem>(ed.itemID, ed.count, ed.metadata);
+        item->setPosition(ed.posX, ed.posY, ed.posZ);
+        item->age = ed.age;
+        item->pickupDelay = ed.pickupDelay;
+        item->worldObj = this;
+        entities_.push_back(std::move(item));
+    }
+    chunk->pendingItems.clear();
+
+    tryPopulateChunksAround(chunk->xPosition, chunk->zPosition);
+    return true;
+}
+
+void World::populateChunkIfReady(int chunkX, int chunkZ) {
+    commitPreparedChunk(getChunkKey(chunkX, chunkZ));
+    commitPreparedChunk(getChunkKey(chunkX + 1, chunkZ));
+    commitPreparedChunk(getChunkKey(chunkX, chunkZ + 1));
+    commitPreparedChunk(getChunkKey(chunkX + 1, chunkZ + 1));
+
+    Chunk* c = nullptr;
+    Chunk* c1 = nullptr;
+    Chunk* c2 = nullptr;
+    Chunk* c3 = nullptr;
+    bool shouldPopulate = false;
+
+    {
+        std::lock_guard lock(chunksMutex_);
+        auto it = chunks_.find(getChunkKey(chunkX, chunkZ));
+        if (it == chunks_.end()) return;
+
+        c = it->second.get();
+        if (!c || c->isTerrainPopulated) return;
+
+        auto it1 = chunks_.find(getChunkKey(chunkX + 1, chunkZ));
+        auto it2 = chunks_.find(getChunkKey(chunkX, chunkZ + 1));
+        auto it3 = chunks_.find(getChunkKey(chunkX + 1, chunkZ + 1));
+
+        if (it1 != chunks_.end() && it2 != chunks_.end() && it3 != chunks_.end()) {
+            shouldPopulate = true;
+            c1 = it1->second.get();
+            c2 = it2->second.get();
+            c3 = it3->second.get();
+        }
+    }
+
+    if (shouldPopulate && c) {
+        c->isTerrainPopulated = true;
+        isPopulating = true;
+        chunkProvider->populate(chunkX, chunkZ);
+
+        c->generateSkylightMap();
+        if (c1) c1->generateSkylightMap();
+        if (c2) c2->generateSkylightMap();
+        if (c3) c3->generateSkylightMap();
+        isPopulating = false;
+    }
+}
+
+void World::tryPopulateChunksAround(int chunkX, int chunkZ) {
+    populateChunkIfReady(chunkX, chunkZ);
+    populateChunkIfReady(chunkX - 1, chunkZ);
+    populateChunkIfReady(chunkX, chunkZ - 1);
+    populateChunkIfReady(chunkX - 1, chunkZ - 1);
+}
+
 Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
     auto key = getChunkKey(chunkX, chunkZ);
+
+    commitPreparedChunk(key);
     
     {
         std::lock_guard<std::mutex> lock(chunksMutex_);
@@ -449,63 +677,8 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
         chunks_[key] = std::move(chunk);
     }
     
-    // Now generate terrain - provideChunk will populate immediately if neighbors exist
-    chunkProvider->provideChunk(chunkX, chunkZ);
-
-    // Exact port of Java's ChunkProviderLoadOrGenerate population logic
-    // When chunk (X, Z) is generated, check if any of 4 possible 2x2 regions can now be populated:
-    // 1. (X, Z) if neighbors (X+1, Z), (X, Z+1), (X+1, Z+1) exist
-    // 2. (X-1, Z) if neighbors (X-1, Z+1), (X, Z+1) exist
-    // 3. (X, Z-1) if neighbors (X+1, Z-1), (X+1, Z) exist
-    // 4. (X-1, Z-1) if neighbors (X, Z-1), (X-1, Z) exist
-    
-    auto checkPopulate = [&](int px, int pz) {
-        Chunk* c = nullptr;
-        bool shouldPopulate = false;
-        Chunk* c1 = nullptr;
-        Chunk* c2 = nullptr;
-        Chunk* c3 = nullptr;
-        
-        {
-            std::lock_guard<std::mutex> lock(chunksMutex_);
-            auto itP = chunks_.find(getChunkKey(px, pz));
-            if (itP == chunks_.end()) return;
-            c = itP->second.get();
-            if (!c || c->isTerrainPopulated) return;
-            
-            // Check if all 3 neighbors for 2x2 region exist (px, pz) + (px+1, pz) + (px, pz+1) + (px+1, pz+1)
-            auto it1 = chunks_.find(getChunkKey(px + 1, pz));
-            auto it2 = chunks_.find(getChunkKey(px, pz + 1));
-            auto it3 = chunks_.find(getChunkKey(px + 1, pz + 1));
-            
-            if (it1 != chunks_.end() && it2 != chunks_.end() && it3 != chunks_.end()) {
-                shouldPopulate = true;
-                c1 = it1->second.get();
-                c2 = it2->second.get();
-                c3 = it3->second.get();
-            }
-        }
-        
-        // Populate outside the mutex lock to avoid deadlock
-        if (shouldPopulate && c) {
-            c->isTerrainPopulated = true;
-            this->isPopulating = true;
-            chunkProvider->populate(px, pz);
-            
-            // Recalculate lighting for the entire 2x2 area AFTER trees/ores are placed
-            c->generateSkylightMap();
-            if (c1) c1->generateSkylightMap();
-            if (c2) c2->generateSkylightMap();
-            if (c3) c3->generateSkylightMap();
-            this->isPopulating = false;
-        }
-    };
-
-    // Check all 4 possible 2x2 regions that might now be ready
-    checkPopulate(chunkX, chunkZ);           // Current chunk
-    checkPopulate(chunkX - 1, chunkZ);       // Left neighbor
-    checkPopulate(chunkX, chunkZ - 1);       // Top neighbor
-    checkPopulate(chunkX - 1, chunkZ - 1);   // Diagonal neighbor
+    chunkProvider->generateChunk(*ptr, true);
+    tryPopulateChunksAround(chunkX, chunkZ);
 
     return ptr;
 }
@@ -520,46 +693,7 @@ bool World::chunkExists(int chunkX, int chunkZ) const {
 }
 
 void World::ensureChunkPopulated(int chunkX, int chunkZ) {
-    Chunk* c = nullptr;
-    Chunk* c1 = nullptr;
-    Chunk* c2 = nullptr;
-    Chunk* c3 = nullptr;
-    bool shouldPopulate = false;
-    
-    {
-        std::lock_guard<std::mutex> lock(chunksMutex_);
-        auto it = chunks_.find(getChunkKey(chunkX, chunkZ));
-        if (it == chunks_.end()) return;  // Chunk doesn't exist
-        
-        c = it->second.get();
-        if (!c || c->isTerrainPopulated) return;  // Already populated
-        
-        // Check if all 3 neighbors exist for 2x2 region
-        auto it1 = chunks_.find(getChunkKey(chunkX + 1, chunkZ));
-        auto it2 = chunks_.find(getChunkKey(chunkX, chunkZ + 1));
-        auto it3 = chunks_.find(getChunkKey(chunkX + 1, chunkZ + 1));
-        
-        if (it1 != chunks_.end() && it2 != chunks_.end() && it3 != chunks_.end()) {
-            shouldPopulate = true;
-            c1 = it1->second.get();
-            c2 = it2->second.get();
-            c3 = it3->second.get();
-        }
-    }
-    
-    // Populate outside the mutex lock
-    if (shouldPopulate && c) {
-        c->isTerrainPopulated = true;
-        isPopulating = true;
-        chunkProvider->populate(chunkX, chunkZ);
-        
-        // Recalculate lighting for the entire 2x2 area
-        c->generateSkylightMap();
-        if (c1) c1->generateSkylightMap();
-        if (c2) c2->generateSkylightMap();
-        if (c3) c3->generateSkylightMap();
-        isPopulating = false;
-    }
+    populateChunkIfReady(chunkX, chunkZ);
 }
 
 uint8_t World::getBlockId(int x, int y, int z) {
@@ -879,7 +1013,8 @@ std::vector<uint8_t> World::compressChunkData(Chunk* chunk) {
     return out;
 }
 
-void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data) {
+void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data,
+                                std::vector<std::unique_ptr<TileEntity>>* detachedTileEntities) {
     if (data.size() < 4) return;
 
     std::vector<uint8_t> outBuf;
@@ -940,15 +1075,20 @@ void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data) 
                 if (teCompound) {
                     auto te = TileEntity::createFromNBT(*teCompound);
                     if (te) {
-                        te->worldObj = this;
-                        int x = te->xCoord;
-                        int y = te->yCoord;
-                        int z = te->zCoord;
-                        std::lock_guard lock(tileEntitiesMutex_);
-                        auto key = getTileEntityKey(x, y, z);
-                        if (!tileEntities_.contains(key)) {
+                        if (detachedTileEntities) {
                             chunk->addTileEntity(te.get());
-                            tileEntities_[key] = std::move(te);
+                            detachedTileEntities->push_back(std::move(te));
+                        } else {
+                            te->worldObj = this;
+                            int x = te->xCoord;
+                            int y = te->yCoord;
+                            int z = te->zCoord;
+                            std::lock_guard lock(tileEntitiesMutex_);
+                            auto key = getTileEntityKey(x, y, z);
+                            if (!tileEntities_.contains(key)) {
+                                chunk->addTileEntity(te.get());
+                                tileEntities_[key] = std::move(te);
+                            }
                         }
                     }
                 }

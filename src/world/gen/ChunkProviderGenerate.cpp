@@ -4,7 +4,7 @@
 #include "core/Logger.h"
 #include <cmath>
 
-ChunkProviderGenerate::ChunkProviderGenerate(World* world, int64_t seed)
+ChunkProviderGenerate::ChunkProviderGenerate(World* world, int64_t seed, WorldChunkManager* managerOverride)
     : worldObj(world), rand(seed),
       field_705_k(rand, 16),
       field_704_l(rand, 16),
@@ -14,7 +14,7 @@ ChunkProviderGenerate::ChunkProviderGenerate(World* world, int64_t seed)
       field_715_a(rand, 10),
       field_714_b(rand, 16),
       field_713_c(rand, 8),
-      chunkManager(world->func_4077_a()) {
+      chunkManager(managerOverride ? managerOverride : world->func_4077_a()) {
     // Initialize noise arrays
     field_4224_q.reserve(17 * 17 * 17);
 }
@@ -247,15 +247,12 @@ bool ChunkProviderGenerate::canPopulateChunk(int chunkX, int chunkZ) {
            worldObj->chunkExists(chunkX + 1, chunkZ + 1);
 }
 
-// Generate terrain for existing chunk (modified to work with pre-created chunk)
-void ChunkProviderGenerate::provideChunk(int chunkX, int chunkZ) {
-    rand.setSeed((int64_t)chunkX * 341873128712LL + (int64_t)chunkZ * 132897987541LL);
+void ChunkProviderGenerate::generateChunk(Chunk& chunk, bool generateLighting) {
+    const int chunkX = chunk.xPosition;
+    const int chunkZ = chunk.zPosition;
 
-    // Get the chunk that was already created and added to World::chunks_
-    Chunk* chunk = worldObj->getChunk(chunkX, chunkZ, false);
-    if (!chunk) return;  // Should never happen
-    
-    std::vector<uint8_t>& blocks = chunk->blocks;
+    rand.setSeed((int64_t)chunkX * 341873128712LL + (int64_t)chunkZ * 132897987541LL);
+    std::vector<uint8_t>& blocks = chunk.blocks;
 
     // Get biome data from WorldChunkManager
     biomesForGeneration = chunkManager->loadBlockGeneratorData(chunkX * 16, chunkZ * 16, 16, 16);
@@ -269,22 +266,17 @@ void ChunkProviderGenerate::provideChunk(int chunkX, int chunkZ) {
     caveGen.func_667_a(this, worldObj, chunkX, chunkZ, blocks);
 
     // IMPORTANT: Update heightmap AFTER terrain generation and cave carving
-    chunk->generateHeightMap();
-    chunk->generateSkylightMap();
-    
-    // IMMEDIATE POPULATION: If all neighbors exist, populate right now
-    if (canPopulateChunk(chunkX, chunkZ)) {
-        chunk->isTerrainPopulated = true;
-        worldObj->isPopulating = true;
-        populate(chunkX, chunkZ);
-        
-        // Recalculate lighting after population (trees/ores added)
-        chunk->generateSkylightMap();
-        if (auto* c1 = worldObj->getChunk(chunkX + 1, chunkZ, false)) c1->generateSkylightMap();
-        if (auto* c2 = worldObj->getChunk(chunkX, chunkZ + 1, false)) c2->generateSkylightMap();
-        if (auto* c3 = worldObj->getChunk(chunkX + 1, chunkZ + 1, false)) c3->generateSkylightMap();
-        worldObj->isPopulating = false;
+    chunk.generateHeightMap();
+    if (generateLighting) {
+        chunk.generateSkylightMap();
     }
+}
+
+// Generate terrain for existing chunk (modified to work with pre-created chunk)
+void ChunkProviderGenerate::provideChunk(int chunkX, int chunkZ) {
+    Chunk* chunk = worldObj->getChunk(chunkX, chunkZ, false);
+    if (!chunk) return;
+    generateChunk(*chunk, true);
 }
 
 // Exact port of Java's populate

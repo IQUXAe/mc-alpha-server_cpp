@@ -71,12 +71,14 @@ void NetServerHandler::tick() {
             for (int j = cz - genR; j <= cz + genR; ++j) {
                 bool isPadding = (std::abs(i - cx) > r || std::abs(j - cz) > r);
                 if (isPadding) {
-                    // Queue for generation silently (don't add to toLoad), just force generate now
-                    mcServer_->worldMngr->getChunk(i, j);
+                    // Pre-build padding chunks in the background so population neighbors
+                    // are ready before the player reaches the visible edge.
+                    mcServer_->worldMngr->requestChunkAsync(i, j);
                     continue;
                 }
                 // Only queue visible chunks that haven't been sent yet
                 if (!sentChunks_.contains(chunkKey(i, j))) {
+                    mcServer_->worldMngr->requestChunkAsync(i, j);
                     needed.push_back({i, j});
                 }
             }
@@ -91,13 +93,19 @@ void NetServerHandler::tick() {
         // Keep existing items that are still in view radius
         std::vector<std::pair<int,int>> merged;
         merged.reserve(needed.size() + chunksToLoad_.size());
+        std::unordered_set<int64_t> queuedKeys;
+        queuedKeys.reserve(needed.size() + chunksToLoad_.size());
+
         // Add new ones first (higher priority - closet to player)
         for (auto& c : needed) {
+            queuedKeys.insert(chunkKey(c.first, c.second));
             merged.push_back(c);
         }
         // Re-add old queued items that weren't in needed and still within view
         for (auto& c : chunksToLoad_) {
-            if (!std::ranges::contains(needed, c) && !sentChunks_.contains(chunkKey(c.first, c.second))) {
+            const auto key = chunkKey(c.first, c.second);
+            if (!queuedKeys.contains(key) && !sentChunks_.contains(key)) {
+                queuedKeys.insert(key);
                 merged.push_back(c);
             }
         }
@@ -111,11 +119,11 @@ void NetServerHandler::tick() {
         int pz = it->second;
 
         // Generate 3x3 grid around this chunk to ensure all cross-chunk decorations are complete
-        // Population places objects with +8 offset which can affect neighboring chunks
-        // getChunk() is fast if chunk already exists (just a map lookup)
+        // Population places objects with +8 offset which can affect neighboring chunks.
+        // Requesting them asynchronously keeps the main network tick responsive.
         for (int dx = -1; dx <= 1; ++dx) {
             for (int dz = -1; dz <= 1; ++dz) {
-                mcServer_->worldMngr->getChunk(px + dx, pz + dz);
+                mcServer_->worldMngr->requestChunkAsync(px + dx, pz + dz);
             }
         }
         
@@ -255,8 +263,7 @@ void NetServerHandler::restoreHeldItem(int itemId) {
         if (s && s->itemID == itemId) { player_->inventory.currentItem = i; return; }
     }
     // Not in inventory yet
-    delete heldItem_;
-    heldItem_ = new ItemStack(itemId, 1, 0);
+    heldItem_ = std::make_unique<ItemStack>(itemId, 1, 0);
     player_->inventory.currentItem = lastSlot;
     player_->inventory.mainInventory[lastSlot].reset(); // non-owning slot, managed separately
 }
@@ -270,6 +277,7 @@ void NetServerHandler::sendChunks() {
     int genR = r + 3; // Generate 3 extra rings for full population guarantee
     for (int cx = chunkX - genR; cx <= chunkX + genR; ++cx) {
         for (int cz = chunkZ - genR; cz <= chunkZ + genR; ++cz) {
+            mcServer_->worldMngr->requestChunkAsync(cx, cz);
             chunksToLoad.push_back({cx, cz});
         }
     }
@@ -403,8 +411,7 @@ void NetServerHandler::handleBlockDig(Packet14BlockDig& pkt) {
         }
         if (!found) {
             if (!heldItem_ || heldItem_->itemID != heldItemId_) {
-                delete heldItem_;
-                heldItem_ = new ItemStack(heldItemId_, 1, 0);
+                heldItem_ = std::make_unique<ItemStack>(heldItemId_, 1, 0);
             }
             player_->inventory.mainInventory[lastSlot].reset(); // non-owning slot
             player_->inventory.currentItem = lastSlot;
@@ -516,15 +523,13 @@ void NetServerHandler::handlePlace(Packet15Place& pkt) {
                 }
             }
 
-            bool placed = false;
             if (itemstack) {
-                placed = player_->itemInWorldManager->activeBlockOrUseItem(
+                player_->itemInWorldManager->activeBlockOrUseItem(
                     player_, mcServer_->worldMngr.get(), itemstack, x, y, z, direction);
             }
 
             for (auto& s : player_->inventory.mainInventory) {
                 if (s && s->stackSize <= 0) {
-                    if (s.get() == heldItem_) heldItem_ = nullptr;
                     s.reset();
                 }
             }
@@ -561,6 +566,7 @@ void NetServerHandler::handleBlockItemSwitch(Packet16BlockItemSwitch& pkt) {
     heldItemId_ = pkt.itemId;
 
     if (pkt.itemId == 0) {
+        heldItem_.reset();
         player_->inventory.currentItem = 0;
         return;
     }
@@ -576,8 +582,7 @@ void NetServerHandler::handleBlockItemSwitch(Packet16BlockItemSwitch& pkt) {
 
     // Not in inventory yet — use placeholder in lastSlot (stackSize=0 prevents placing)
     if (!heldItem_ || heldItem_->itemID != pkt.itemId) {
-        delete heldItem_;
-        heldItem_ = new ItemStack(pkt.itemId, 0, 0);
+        heldItem_ = std::make_unique<ItemStack>(pkt.itemId, 0, 0);
     }
     player_->inventory.currentItem = lastSlot;
     player_->inventory.mainInventory[lastSlot].reset(); // non-owning, managed by heldItem_
@@ -631,6 +636,7 @@ void NetServerHandler::handlePlayerInventory(Packet5PlayerInventory& pkt) {
             }
             if (!found) {
                 heldItemId_ = 0;
+                heldItem_.reset();
                 player_->inventory.mainInventory[lastSlot].reset();
             }
         }
@@ -650,7 +656,6 @@ void NetServerHandler::handlePickupSpawn(Packet21PickupSpawn& pkt) {
         if (s && s->itemID == pkt.itemId && s->stackSize > 0) {
             s->stackSize -= pkt.count;
             if (s->stackSize <= 0) {
-                if (s.get() == heldItem_) heldItem_ = nullptr;
                 s.reset();
             }
             break;
