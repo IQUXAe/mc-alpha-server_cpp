@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Entity.h"
+#include "../core/NBT.h"
 #include <string>
 
 class EntityLiving : public Entity {
@@ -15,6 +16,14 @@ public:
     virtual void onDeath() {
         isDead = true;
     }
+
+    virtual int getMobTypeId() const { return 0; }
+    virtual std::string getEntityStringId() const { return {}; }
+    virtual int getTrackingRange() const { return 160; }
+    virtual int getTrackingRate() const { return 3; }
+    virtual bool shouldSendVelocity() const { return false; }
+    virtual void writeToNBT(NBTCompound&) const {}
+    virtual void readFromNBT(const NBTCompound&) {}
 
     virtual void damageEntity(int amount) {
         health -= amount;

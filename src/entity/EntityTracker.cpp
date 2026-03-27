@@ -1,5 +1,6 @@
 #include "EntityTracker.h"
 #include "EntityItem.h"
+#include "EntityAnimals.h"
 #include "EntityFallingSand.h"
 #include "EntityLiving.h"
 #include "../MinecraftServer.h"
@@ -42,7 +43,19 @@ std::unique_ptr<Packet> TrackerEntry::makeSpawnPacket() const {
         return pkt;
     }
 
-    // Fallback: generic mob spawn (type 0 = pig, just so client doesn't crash)
+    if (auto* living = dynamic_cast<EntityLiving*>(entity)) {
+        auto pkt = std::make_unique<Packet24MobSpawn>();
+        pkt->entityId = entity->entityId;
+        pkt->type     = static_cast<int8_t>(living->getMobTypeId());
+        pkt->x        = fx;
+        pkt->y        = fy;
+        pkt->z        = fz;
+        pkt->yaw      = static_cast<int8_t>(yaw & 0xFF);
+        pkt->pitch    = static_cast<int8_t>(pitch & 0xFF);
+        return pkt;
+    }
+
+    // Fallback: generic pig spawn so the client stays stable for unknown entities.
     auto pkt = std::make_unique<Packet24MobSpawn>();
     pkt->entityId = entity->entityId;
     pkt->type     = 90; // pig
@@ -210,6 +223,10 @@ void EntityTracker::addEntity(Entity* entity) {
         range = 512; rate = 1;
     } else if (dynamic_cast<EntityItem*>(entity)) {
         range = 64; rate = 20; vel = true;
+    } else if (auto* living = dynamic_cast<EntityLiving*>(entity); living && living->getMobTypeId() != 0) {
+        range = living->getTrackingRange();
+        rate = living->getTrackingRate();
+        vel = living->shouldSendVelocity();
     } else {
         // EntityFallingSand and other non-player, non-item entities:
         // don't track them (Alpha client doesn't render them server-side)
