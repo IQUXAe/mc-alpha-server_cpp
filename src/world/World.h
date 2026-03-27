@@ -116,6 +116,7 @@ public:
 
 private:
     void findSafeSpawnPoint();
+    void prewarmSpawnArea();
     void saveWorker(std::stop_token st);
     void chunkWorker(std::stop_token st);
     bool loadLevelDat();
