@@ -69,6 +69,8 @@ World::World(MinecraftServer* server, const std::string& savePath, int64_t seed)
         findSafeSpawnPoint();
         saveLevelDat();
     }
+
+    prewarmSpawnArea();
 }
 
 void World::saveWorld() {
@@ -87,6 +89,39 @@ void World::saveWorld() {
     }
     if (savedCount > 0) saveCondition_.notify_one();
     Logger::info("Saved level.dat and queued {} chunks.", savedCount);
+}
+
+void World::prewarmSpawnArea() {
+    const int spawnChunkX = spawnX >> 4;
+    const int spawnChunkZ = spawnZ >> 4;
+    constexpr int syncRadius = 1;
+    const int asyncRadius = std::clamp(mcServer ? mcServer->getViewDistance() + 1 : 4, 3, 6);
+
+    Logger::info("Prewarming spawn area around chunk ({}, {})", spawnChunkX, spawnChunkZ);
+
+    // Build the inner 3x3 synchronously so the first player does not wait for a cold start.
+    for (int dx = -syncRadius; dx <= syncRadius; ++dx) {
+        for (int dz = -syncRadius; dz <= syncRadius; ++dz) {
+            getChunk(spawnChunkX + dx, spawnChunkZ + dz, true);
+        }
+    }
+
+    for (int dx = -syncRadius; dx <= syncRadius; ++dx) {
+        for (int dz = -syncRadius; dz <= syncRadius; ++dz) {
+            ensureChunkPopulated(spawnChunkX + dx, spawnChunkZ + dz);
+        }
+    }
+
+    // Queue the outer ring asynchronously so the area around spawn keeps warming up
+    // while the main server loop starts accepting players.
+    for (int dx = -asyncRadius; dx <= asyncRadius; ++dx) {
+        for (int dz = -asyncRadius; dz <= asyncRadius; ++dz) {
+            if (std::max(std::abs(dx), std::abs(dz)) <= syncRadius) {
+                continue;
+            }
+            requestChunkAsync(spawnChunkX + dx, spawnChunkZ + dz, 0);
+        }
+    }
 }
 
 bool World::loadLevelDat() {
