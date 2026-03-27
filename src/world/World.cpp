@@ -381,10 +381,24 @@ void World::tick() {
         }
     }
 
-    // Remove dead entities (erase-remove idiom, safe after loop)
+    // Remove dead entities only after unregistering them from EntityTracker.
+    // Some entities can already be dead before they reach the main tick loop,
+    // so relying on the per-entity path above is not sufficient.
+    auto* entityTracker = (mcServer && mcServer->entityTracker) ? mcServer->entityTracker.get() : nullptr;
     entities_.erase(
         std::remove_if(entities_.begin(), entities_.end(),
-            [](const std::unique_ptr<Entity>& e) { return !e || e->isDead; }),
+            [entityTracker](const std::unique_ptr<Entity>& e) {
+                if (!e) {
+                    return true;
+                }
+                if (!e->isDead) {
+                    return false;
+                }
+                if (entityTracker) {
+                    entityTracker->removeEntity(e.get());
+                }
+                return true;
+            }),
         entities_.end());
 
     // Unload chunks far from all players periodically
@@ -824,6 +838,15 @@ uint8_t World::getBlockId(int x, int y, int z) {
     return chunk->getBlockID(x & 15, y, z & 15);
 }
 
+uint8_t World::getBlockIdNoChunkLoad(int x, int y, int z) {
+    if (y < 0 || y >= CHUNK_SIZE_Y) return 0;
+
+    Chunk* chunk = getChunkFromBlockCoords(x, z, false);
+    if (!chunk) return 0;
+
+    return chunk->getBlockID(x & 15, y, z & 15);
+}
+
 uint8_t World::getBlockMetadata(int x, int y, int z) {
     if (y < 0 || y >= CHUNK_SIZE_Y) return 0;
 
@@ -1112,6 +1135,12 @@ Material* World::getBlockMaterial(int x, int y, int z) {
     return Block::blocksList[id]->blockMaterial;
 }
 
+Material* World::getBlockMaterialNoChunkLoad(int x, int y, int z) {
+    uint8_t id = getBlockIdNoChunkLoad(x, y, z);
+    if (id == 0 || !Block::blocksList[id]) return &Material::air;
+    return Block::blocksList[id]->blockMaterial;
+}
+
 // Check if block at position is solid (for snow placement etc.)
 bool World::isBlockSolid(int x, int y, int z) {
     if (y < 0 || y >= CHUNK_SIZE_Y) return false;
@@ -1119,6 +1148,16 @@ bool World::isBlockSolid(int x, int y, int z) {
     if (id == 0) return false;
     // Non-solid blocks: air(0), water(8,9), lava(10,11), snow layers(78), flowers(37,38),
     // mushrooms(39,40), reeds(83), fire(51), etc.
+    if (id == 8 || id == 9 || id == 10 || id == 11) return false;
+    if (id == 78 || id == 37 || id == 38 || id == 39 || id == 40) return false;
+    if (id == 83 || id == 51 || id == 6) return false;
+    return true;
+}
+
+bool World::isBlockSolidNoChunkLoad(int x, int y, int z) {
+    if (y < 0 || y >= CHUNK_SIZE_Y) return false;
+    uint8_t id = getBlockIdNoChunkLoad(x, y, z);
+    if (id == 0) return false;
     if (id == 8 || id == 9 || id == 10 || id == 11) return false;
     if (id == 78 || id == 37 || id == 38 || id == 39 || id == 40) return false;
     if (id == 83 || id == 51 || id == 6) return false;
@@ -1141,6 +1180,18 @@ void World::getCollidingBoundingBoxes(Entity* entity, const AxisAlignedBB& mask,
                     Block::blocksList[bId]->getCollidingBoundingBoxes(this, x, y, z, mask, result);
                 }
             }
+        }
+    }
+}
+
+void World::getEntitiesWithinAABBExcludingEntity(Entity* entity, const AxisAlignedBB& mask, std::vector<Entity*>& result) {
+    result.clear();
+    for (auto& candidate : entities_) {
+        if (!candidate || candidate.get() == entity || candidate->isDead) {
+            continue;
+        }
+        if (candidate->boundingBox.intersectsWith(mask)) {
+            result.push_back(candidate.get());
         }
     }
 }

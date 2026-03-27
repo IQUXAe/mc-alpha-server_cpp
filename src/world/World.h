@@ -81,6 +81,7 @@ public:
 
     // Block access and modification
     uint8_t getBlockId(int x, int y, int z);
+    uint8_t getBlockIdNoChunkLoad(int x, int y, int z);
     uint8_t getBlockMetadata(int x, int y, int z);
     bool setBlock(int x, int y, int z, uint8_t blockId);
     bool setBlockWithNotify(int x, int y, int z, uint8_t blockId);
@@ -98,10 +99,13 @@ public:
     int getHeightValue(int x, int z);
     int func_4075_e(int x, int z) { return getHeightValue(x, z); }
     bool isBlockSolid(int x, int y, int z);
+    bool isBlockSolidNoChunkLoad(int x, int y, int z);
     Material* getBlockMaterial(int x, int y, int z);
+    Material* getBlockMaterialNoChunkLoad(int x, int y, int z);
 
     // Entity integration
     void getCollidingBoundingBoxes(Entity* entity, const AxisAlignedBB& mask, std::vector<AxisAlignedBB>& result);
+    void getEntitiesWithinAABBExcludingEntity(Entity* entity, const AxisAlignedBB& mask, std::vector<Entity*>& result);
     void spawnEntityInWorld(std::unique_ptr<Entity> entity);
     void removeEntity(Entity* entity);
 
