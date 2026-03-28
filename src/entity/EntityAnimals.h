@@ -8,11 +8,11 @@
 #include "../core/Material.h"
 #include "../block/Block.h"
 #include "../world/World.h"
-#include "../world/path/Pathfinder.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <numbers>
 #include <vector>
 
@@ -24,7 +24,7 @@ public:
     }
 
     int getTrackingRange() const override { return 160; }
-    int getTrackingRate() const override { return 3; }
+    int getTrackingRate() const override { return 2; }
     bool shouldSendVelocity() const override { return false; }
     virtual int getMaxSpawnedInChunk() const { return 4; }
 
@@ -91,15 +91,21 @@ private:
     bool isTouchingLiquid() const;
     void moveFlying(float strafe, float forward, float acceleration);
     float updateRotation(float current, float target, float maxTurn) const;
-    bool isMovementBlocked() const;
+    void beginIdle(int durationTicks);
+    bool chooseWanderDirection();
+    bool findWalkableSurface(int x, int baseY, int z, int& outY) const;
+    bool canStandAt(int x, int y, int z) const;
+    bool canWalkToward(float yawDegrees) const;
+    bool shouldJumpToward(float yawDegrees) const;
 
-    std::unique_ptr<PathEntity> pathToEntity_{};
     float moveStrafing_ = 0.0f;
     float moveForward_ = 0.0f;
     float randomYawVelocity_ = 0.0f;
+    float wanderYaw_ = 0.0f;
     bool isJumping_ = false;
-    int pathStuckTicks_ = 0;
-    double lastNodeDistanceSq_ = -1.0;
+    int idleTime_ = 35;
+    int walkTime_ = 0;
+    int reselectDirectionTime_ = 0;
 };
 
 inline bool EntityAnimals::getCanSpawnHere() const {
@@ -142,25 +148,6 @@ inline float EntityAnimals::updateRotation(float current, float target, float ma
     return current + delta;
 }
 
-inline bool EntityAnimals::isMovementBlocked() const {
-    if (!worldObj) {
-        return false;
-    }
-
-    const double radians = rotationYaw * static_cast<double>(std::numbers::pi_v<double> / 180.0);
-    const double forwardX = -std::sin(radians);
-    const double forwardZ = std::cos(radians);
-    const double probeDistance = std::max(0.8, static_cast<double>(width) + 0.35);
-
-    const int x = MathHelper::floor_double(posX + forwardX * probeDistance);
-    const int y = MathHelper::floor_double(boundingBox.minY + 0.05);
-    const int z = MathHelper::floor_double(posZ + forwardZ * probeDistance);
-
-    return worldObj->isBlockSolidNoChunkLoad(x, y, z)
-        && !worldObj->isBlockSolidNoChunkLoad(x, y + 1, z)
-        && !worldObj->isBlockSolidNoChunkLoad(x, y + 2, z);
-}
-
 inline void EntityAnimals::updateEntityActionState() {
     tickExtra();
     moveStrafing_ = 0.0f;
@@ -171,111 +158,41 @@ inline void EntityAnimals::updateEntityActionState() {
         return;
     }
 
-    if (!pathToEntity_ || pathToEntity_->isFinished()) {
-        const int currentX = MathHelper::floor_double(posX);
-        const int currentY = MathHelper::floor_double(boundingBox.minY);
-        const int currentZ = MathHelper::floor_double(posZ);
-        struct Candidate {
-            int x;
-            int y;
-            int z;
-            float weight;
-        };
-        std::vector<Candidate> candidates;
-        candidates.reserve(20);
-
-        for (int i = 0; i < 20; ++i) {
-            const int x = MathHelper::floor_double(posX + static_cast<double>(std::rand() % 17) - 8.0);
-            const int y = MathHelper::floor_double(posY + static_cast<double>(std::rand() % 9) - 4.0);
-            const int z = MathHelper::floor_double(posZ + static_cast<double>(std::rand() % 17) - 8.0);
-            const int dx = x - currentX;
-            const int dy = y - currentY;
-            const int dz = z - currentZ;
-            if (dx * dx + dy * dy + dz * dz < 4) {
-                continue;
-            }
-            candidates.push_back(Candidate{x, y, z, getBlockPathWeight(x, y, z)});
-        }
-
-        std::sort(candidates.begin(), candidates.end(), [](const Candidate& lhs, const Candidate& rhs) {
-            return lhs.weight > rhs.weight;
-        });
-
-        Pathfinder pathfinder(*worldObj);
-        pathToEntity_.reset();
-        for (const auto& candidate : candidates) {
-            auto path = pathfinder.createEntityPathTo(*this, candidate.x, candidate.y, candidate.z, 12.0f);
-            if (path && !path->isFinished()) {
-                pathToEntity_ = std::move(path);
-                pathStuckTicks_ = 0;
-                lastNodeDistanceSq_ = -1.0;
-                break;
-            }
-        }
-    }
-
     const bool touchingLiquid = isTouchingLiquid();
     rotationPitch = 0.0f;
 
-    if (pathToEntity_ && (std::rand() % 100) != 0) {
-        auto pathPosition = pathToEntity_->getPosition(*this);
-        const double radius = std::max(1.25, static_cast<double>(width) * 3.0);
-
-        while (pathPosition && pathPosition->squareDistanceTo(posX, pathPosition->yCoord, posZ) < radius * radius) {
-            pathToEntity_->incrementPathIndex();
-            if (pathToEntity_->isFinished()) {
-                pathPosition.reset();
-                pathToEntity_.reset();
-            } else {
-                pathPosition = pathToEntity_->getPosition(*this);
-            }
-            lastNodeDistanceSq_ = -1.0;
-        }
-
-        if (pathPosition) {
-            const double dx = pathPosition->xCoord - posX;
-            const double dz = pathPosition->zCoord - posZ;
-            const double dy = pathPosition->yCoord - static_cast<double>(MathHelper::floor_double(boundingBox.minY));
-            const double nodeDistanceSq = dx * dx + dz * dz;
-            if (lastNodeDistanceSq_ >= 0.0 && nodeDistanceSq > lastNodeDistanceSq_ + 1.5) {
-                pathToEntity_.reset();
-                pathStuckTicks_ = 0;
-                lastNodeDistanceSq_ = -1.0;
-            } else {
-                lastNodeDistanceSq_ = nodeDistanceSq;
-            }
-
-            if (!pathToEntity_) {
-                moveForward_ = 0.0f;
-            } else {
-            const float targetYaw = static_cast<float>(
-                std::atan2(dz, dx) * 180.0 / std::numbers::pi_v<double>) - 90.0f;
-            rotationYaw = updateRotation(rotationYaw, targetYaw, 30.0f);
-            moveForward_ = 0.35f;
-            if (dy > 0.0) {
-                isJumping_ = true;
-            }
-            if (isMovementBlocked()) {
-                isJumping_ = true;
-            }
-            }
-        } else {
-            pathToEntity_.reset();
-            lastNodeDistanceSq_ = -1.0;
-        }
-    } else if (pathToEntity_ && pathToEntity_->isFinished()) {
-        pathToEntity_.reset();
-        lastNodeDistanceSq_ = -1.0;
-    }
-
-    if (!pathToEntity_) {
+    if (idleTime_ > 0) {
+        --idleTime_;
         if ((std::rand() % 20) == 0) {
             randomYawVelocity_ = (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX) - 0.5f) * 10.0f;
         }
         rotationYaw += randomYawVelocity_;
-        moveForward_ = ((std::rand() % 12) == 0) ? 0.15f : 0.0f;
-        if (isMovementBlocked()) {
-            isJumping_ = true;
+
+        if (idleTime_ == 0) {
+            chooseWanderDirection();
+            walkTime_ = 40 + (std::rand() % 80);
+            reselectDirectionTime_ = 8 + (std::rand() % 16);
+        }
+    } else {
+        if (walkTime_ <= 0) {
+            beginIdle(35 + (std::rand() % 55));
+        } else {
+            --walkTime_;
+            if (--reselectDirectionTime_ <= 0 || !canWalkToward(wanderYaw_) || collidedHorizontally) {
+                chooseWanderDirection();
+                reselectDirectionTime_ = 8 + (std::rand() % 16);
+            }
+
+            rotationYaw = updateRotation(rotationYaw, wanderYaw_, 20.0f);
+            moveForward_ = getBaseMoveSpeed();
+
+            if (shouldJumpToward(wanderYaw_) || collidedHorizontally) {
+                isJumping_ = true;
+            }
+
+            if ((std::rand() % 120) == 0) {
+                beginIdle(20 + (std::rand() % 35));
+            }
         }
     }
 
@@ -308,8 +225,6 @@ inline void EntityAnimals::moveFlying(float strafe, float forward, float acceler
 
 inline void EntityAnimals::moveEntityWithHeading(float strafe, float forward) {
     const bool touchingLiquid = isTouchingLiquid();
-    const double previousX = posX;
-    const double previousZ = posZ;
 
     if (isJumping_) {
         if (touchingLiquid) {
@@ -346,25 +261,123 @@ inline void EntityAnimals::moveEntityWithHeading(float strafe, float forward) {
     motionY *= 0.98;
     motionX *= friction;
     motionZ *= friction;
-
-    if (pathToEntity_ && forward > 0.0f) {
-        const double movedX = posX - previousX;
-        const double movedZ = posZ - previousZ;
-        if (movedX * movedX + movedZ * movedZ < 1.0e-4) {
-            ++pathStuckTicks_;
-            if (pathStuckTicks_ > 10) {
-                pathToEntity_.reset();
-                isJumping_ = true;
-                pathStuckTicks_ = 0;
-                lastNodeDistanceSq_ = -1.0;
-                motionY = std::max(motionY, 0.42);
-            }
-        } else {
-            pathStuckTicks_ = 0;
-        }
-    } else {
-        pathStuckTicks_ = 0;
+    if (walkTime_ <= 0 && idleTime_ <= 0) {
+        beginIdle(35 + (std::rand() % 55));
     }
+}
+
+inline void EntityAnimals::beginIdle(int durationTicks) {
+    idleTime_ = durationTicks;
+    walkTime_ = 0;
+    reselectDirectionTime_ = 0;
+    moveForward_ = 0.0f;
+}
+
+inline bool EntityAnimals::canStandAt(int x, int y, int z) const {
+    if (!worldObj || y <= 0 || y >= CHUNK_SIZE_Y - 1) {
+        return false;
+    }
+
+    Material* below = worldObj->getBlockMaterialNoChunkLoad(x, y - 1, z);
+    Material* feet = worldObj->getBlockMaterialNoChunkLoad(x, y, z);
+    Material* head = worldObj->getBlockMaterialNoChunkLoad(x, y + 1, z);
+    if (!below || !feet || !head) {
+        return false;
+    }
+
+    if (!worldObj->isBlockSolidNoChunkLoad(x, y - 1, z) || below->getIsLiquid()) {
+        return false;
+    }
+    if (feet->blocksMovement() || feet->getIsLiquid()) {
+        return false;
+    }
+    if (head->blocksMovement() || head->getIsLiquid()) {
+        return false;
+    }
+
+    return true;
+}
+
+inline bool EntityAnimals::findWalkableSurface(int x, int baseY, int z, int& outY) const {
+    const int columnTop = worldObj ? worldObj->getHeightValue(x, z) : baseY;
+    const int startY = std::min(CHUNK_SIZE_Y - 2, std::max(baseY + 2, columnTop + 1));
+    const int minY = std::max(1, std::min(baseY - 6, columnTop - 4));
+    for (int y = startY; y >= minY; --y) {
+        if (canStandAt(x, y, z)) {
+            outY = y;
+            return true;
+        }
+    }
+    return false;
+}
+
+inline bool EntityAnimals::chooseWanderDirection() {
+    if (!worldObj) {
+        beginIdle(20);
+        return false;
+    }
+
+    float bestWeight = -99999.0f;
+    float bestYaw = rotationYaw;
+    bool foundCandidate = false;
+    const int currentY = MathHelper::floor_double(boundingBox.minY);
+
+    for (int i = 0; i < 8; ++i) {
+        const float candidateYaw = rotationYaw + static_cast<float>((std::rand() % 241) - 120);
+        const double radians = candidateYaw * static_cast<double>(std::numbers::pi_v<float> / 180.0f);
+        const double distance = 3.0 + static_cast<double>(std::rand() % 5);
+        const int candidateX = MathHelper::floor_double(posX - std::sin(radians) * distance);
+        const int candidateZ = MathHelper::floor_double(posZ + std::cos(radians) * distance);
+        int candidateY = currentY;
+        if (!findWalkableSurface(candidateX, currentY, candidateZ, candidateY)) {
+            continue;
+        }
+
+        float candidateWeight = getBlockPathWeight(candidateX, candidateY, candidateZ);
+        candidateWeight += static_cast<float>(distance) * 0.15f;
+        if (candidateWeight > bestWeight) {
+            bestWeight = candidateWeight;
+            bestYaw = candidateYaw;
+            foundCandidate = true;
+        }
+    }
+
+    if (!foundCandidate) {
+        wanderYaw_ = rotationYaw + static_cast<float>((std::rand() % 181) - 90);
+        return false;
+    }
+
+    wanderYaw_ = bestYaw;
+    return true;
+}
+
+inline bool EntityAnimals::canWalkToward(float yawDegrees) const {
+    if (!worldObj) {
+        return false;
+    }
+
+    const double radians = yawDegrees * static_cast<double>(std::numbers::pi_v<float> / 180.0f);
+    const double probeDistance = std::max(0.9, static_cast<double>(width) + 0.6);
+    const int probeX = MathHelper::floor_double(posX - std::sin(radians) * probeDistance);
+    const int probeY = MathHelper::floor_double(boundingBox.minY);
+    const int probeZ = MathHelper::floor_double(posZ + std::cos(radians) * probeDistance);
+
+    return canStandAt(probeX, probeY, probeZ) || canStandAt(probeX, probeY + 1, probeZ);
+}
+
+inline bool EntityAnimals::shouldJumpToward(float yawDegrees) const {
+    if (!worldObj) {
+        return false;
+    }
+
+    const double radians = yawDegrees * static_cast<double>(std::numbers::pi_v<float> / 180.0f);
+    const double probeDistance = std::max(0.8, static_cast<double>(width) + 0.4);
+    const int probeX = MathHelper::floor_double(posX - std::sin(radians) * probeDistance);
+    const int probeY = MathHelper::floor_double(boundingBox.minY);
+    const int probeZ = MathHelper::floor_double(posZ + std::cos(radians) * probeDistance);
+
+    return worldObj->isBlockSolidNoChunkLoad(probeX, probeY, probeZ)
+        && canStandAt(probeX, probeY + 1, probeZ);
 }
 
 inline void EntityAnimals::onDeath() {
