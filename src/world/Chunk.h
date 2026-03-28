@@ -46,6 +46,7 @@ public:
     // EntityItems waiting to be spawned when the chunk is loaded
     std::vector<ChunkEntityData> pendingItems;
     std::vector<ChunkAnimalData> pendingAnimals;
+    std::vector<ChunkAnimalData> pendingMonsters;
 
     // Direct flat arrays for massive CPU cache-locality (C++ advantage)
     std::vector<uint8_t> blocks;      // 32768 bytes
