@@ -219,6 +219,18 @@ void MinecraftServer::serverTick() {
     if (worldMngr) {
         worldMngr->tick();
     }
+
+    if (configManager) {
+        for (auto* player : configManager->playerEntities) {
+            if (player && !player->isDead) {
+                player->tick();
+            }
+        }
+    }
+
+    if (configManager && autoSaveInterval_ > 0 && tickCounter_ % autoSaveInterval_ == 0) {
+        configManager->savePlayerStates();
+    }
     
     // Update entity tracking
     if (entityTracker) {

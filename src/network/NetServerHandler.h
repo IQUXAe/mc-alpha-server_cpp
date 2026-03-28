@@ -37,6 +37,8 @@ public:
 
     // NetHandler overrides
     void handleChat(Packet3Chat& pkt) override;
+    void handleRespawn(Packet9Respawn& pkt) override;
+    void handleUseEntity(Packet7UseEntity& pkt) override;
     void handleFlying(Packet10Flying& pkt) override;
     void handlePlayerPosition(Packet11PlayerPosition& pkt) override;
     void handlePlayerLook(Packet12PlayerLook& pkt) override;

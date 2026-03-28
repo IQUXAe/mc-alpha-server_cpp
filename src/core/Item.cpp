@@ -236,6 +236,18 @@ bool Item::onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int
     return false;
 }
 
+void ItemTool::hitEntity(ItemStack* stack, EntityLiving* entity) {
+    if (stack) {
+        stack->damageItem(2);
+    }
+}
+
+void ItemSword::hitEntity(ItemStack* stack, EntityLiving* entity) {
+    if (stack) {
+        stack->damageItem(1);
+    }
+}
+
 bool ItemPickaxe::canHarvestBlock(int blockId) const {
     if (blockId == 49) return toolLevel == 3;
     if (blockId == 56 || blockId == 57 || blockId == 14 || blockId == 41) return toolLevel >= 2;

@@ -6,6 +6,8 @@
 
 class Block;
 class World;
+class Entity;
+class EntityLiving;
 class EntityPlayerMP;
 class ItemStack;
 
@@ -122,6 +124,8 @@ public:
     int getMaxStackSize() const { return maxStackSize; }
 
     virtual bool onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side);
+    virtual int getDamageVsEntity(Entity* entity) const { return 1; }
+    virtual void hitEntity(ItemStack* stack, EntityLiving* entity) {}
 
     static void initItems();
 
@@ -162,17 +166,21 @@ public:
         maxStackSize = 1;
         maxDamage = 32 << level;
         if (level == 3) maxDamage *= 4;
+        damageVsEntity_ = 1 + level;
         itemsList[id] = this;
     }
 
     // Returns dig speed multiplier for a block.
     // Checks explicit list first, then material-based fallback.
     float getStrVsBlock(int blockId) const;
+    int getDamageVsEntity(Entity* entity) const override { return damageVsEntity_; }
+    void hitEntity(ItemStack* stack, EntityLiving* entity) override;
 
     virtual bool canHarvestBlock(int blockId) const { return false; }
 
 protected:
     virtual bool isEffectiveAgainst(Block* block) const { return false; }
+    int damageVsEntity_ = 0;
 };
 
 class ItemPickaxe : public ItemTool {
@@ -214,5 +222,10 @@ public:
         maxDamage = 32 << level;
         if (level == 3) maxDamage *= 4;
         itemsList[id] = this;
+        damageVsEntity_ = 4 + level * 2;
     }
+    int getDamageVsEntity(Entity* entity) const override { return damageVsEntity_; }
+    void hitEntity(ItemStack* stack, EntityLiving* entity) override;
+private:
+    int damageVsEntity_ = 4;
 };

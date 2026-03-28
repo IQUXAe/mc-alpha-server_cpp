@@ -376,6 +376,10 @@ void World::tick() {
     const size_t entityCount = entities_.size();
     for (size_t ei = 0; ei < entityCount; ++ei) {
         if (!entities_[ei] || entities_[ei]->isDead) continue;
+        if (Chunk* chunk = getChunkFromBlockCoords(static_cast<int>(std::floor(entities_[ei]->posX)),
+                                                   static_cast<int>(std::floor(entities_[ei]->posZ)), false)) {
+            chunk->isModified = true;
+        }
         entities_[ei]->tick();
         
         // Item pickup logic
@@ -1783,6 +1787,10 @@ void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data,
 void World::spawnEntityInWorld(std::unique_ptr<Entity> entity) {
     if (!entity) return;
     entity->worldObj = this;
+    if (Chunk* chunk = getChunkFromBlockCoords(static_cast<int>(std::floor(entity->posX)),
+                                               static_cast<int>(std::floor(entity->posZ)), false)) {
+        chunk->isModified = true;
+    }
     Entity* ptr = entity.get();
     entities_.push_back(std::move(entity));
     // EntityTracker handles sending spawn packets to players
@@ -1793,7 +1801,20 @@ void World::spawnEntityInWorld(std::unique_ptr<Entity> entity) {
 
 void World::removeEntity(Entity* entity) {
     if (!entity) return;
+    if (Chunk* chunk = getChunkFromBlockCoords(static_cast<int>(std::floor(entity->posX)),
+                                               static_cast<int>(std::floor(entity->posZ)), false)) {
+        chunk->isModified = true;
+    }
     entity->isDead = true;
+}
+
+void World::sendEntityStatus(Entity* entity, int8_t status) {
+    if (!entity || !mcServer || !mcServer->configManager) {
+        return;
+    }
+
+    mcServer->configManager->broadcastPacket(
+        std::make_unique<Packet38EntityStatus>(entity->entityId, status));
 }
 
 

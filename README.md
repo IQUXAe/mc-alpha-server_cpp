@@ -44,8 +44,8 @@ Instead of a bulky list of pros and cons, here is how `alpha_server` fundamental
 | Entity Tracking | Every 2 ticks | Every tick |
 | **World & Gameplay** | | |
 | **Terrain & Biomes** | Original algorithm | **Identical to original (1:1 generation)** |
-| Mobs & AI | Fully implemented | 🚧 Work in progress |
-| Redstone Logic | Fully implemented | 🚧 Work in progress |
+| Mobs & AI | Fully implemented | Working on it now |
+| Redstone Logic | Fully implemented | Soon |
 | Tile Entities | Chest, Furnace, Sign logic | Fully work! |
 | Dimensions | Overworld & Nether | Overworld only |
 | Authentication | Online mode (HTTP session check) | Server ID sent, HTTP session check not implemented |

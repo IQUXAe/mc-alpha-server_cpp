@@ -1,4 +1,7 @@
 #include "Entity.h"
+#include "../block/Block.h"
+#include "../core/Material.h"
+#include "../core/MathHelper.h"
 #include "../world/World.h"
 #include <vector>
 #include <algorithm>
@@ -11,40 +14,76 @@ void Entity::moveEntity(double dx, double dy, double dz) {
         return;
     }
 
-    double oldX = dx;
-    double oldY = dy;
-    double oldZ = dz;
+    const double oldX = dx;
+    const double oldY = dy;
+    const double oldZ = dz;
+    const AxisAlignedBB originalBoundingBox = boundingBox;
 
     if (worldObj) {
-        std::vector<AxisAlignedBB> boxes;
-        AxisAlignedBB expanded = boundingBox.addCoord(dx, dy, dz);
-        worldObj->getCollidingBoundingBoxes(this, expanded, boxes);
+        auto resolveMovement = [&](AxisAlignedBB box, double moveX, double moveY, double moveZ) {
+            std::vector<AxisAlignedBB> boxes;
+            worldObj->getCollidingBoundingBoxes(this, box.addCoord(moveX, moveY, moveZ), boxes);
 
-        for (const auto& box : boxes) {
-            dy = box.calculateYOffset(boundingBox, dy);
-        }
-        boundingBox.offset(0, dy, 0);
+            for (const auto& collisionBox : boxes) {
+                moveY = collisionBox.calculateYOffset(box, moveY);
+            }
+            box.offset(0.0, moveY, 0.0);
 
-        for (const auto& box : boxes) {
-            dx = box.calculateXOffset(boundingBox, dx);
-        }
-        boundingBox.offset(dx, 0, 0);
+            for (const auto& collisionBox : boxes) {
+                moveX = collisionBox.calculateXOffset(box, moveX);
+            }
+            box.offset(moveX, 0.0, 0.0);
 
-        for (const auto& box : boxes) {
-            dz = box.calculateZOffset(boundingBox, dz);
+            for (const auto& collisionBox : boxes) {
+                moveZ = collisionBox.calculateZOffset(box, moveZ);
+            }
+            box.offset(0.0, 0.0, moveZ);
+
+            return std::tuple{box, moveX, moveY, moveZ};
+        };
+
+        auto [resolvedBox, resolvedX, resolvedY, resolvedZ] = resolveMovement(boundingBox, dx, dy, dz);
+        boundingBox = resolvedBox;
+        dx = resolvedX;
+        dy = resolvedY;
+        dz = resolvedZ;
+
+        const bool canStepUp = stepHeight > 0.0f
+            && (onGround || (oldY != dy && oldY < 0.0))
+            && (oldX != dx || oldZ != dz);
+        if (canStepUp) {
+            auto [stepBox, stepX, stepY, stepZ] = resolveMovement(
+                originalBoundingBox,
+                oldX,
+                static_cast<double>(stepHeight),
+                oldZ);
+
+            const double flatDistance = dx * dx + dz * dz;
+            const double steppedDistance = stepX * stepX + stepZ * stepZ;
+            if (steppedDistance > flatDistance) {
+                boundingBox = stepBox;
+                dx = stepX;
+                dy = stepY;
+                dz = stepZ;
+            }
         }
-        boundingBox.offset(0, 0, dz);
     }
 
     posX = (boundingBox.minX + boundingBox.maxX) / 2.0;
     posY = boundingBox.minY + yOffset;
     posZ = (boundingBox.minZ + boundingBox.maxZ) / 2.0;
 
+    collidedHorizontally = (oldX != dx || oldZ != dz);
+    collidedVertically = (oldY != dy);
     onGround = (oldY != dy && oldY < 0.0);
+    isCollided = collidedHorizontally || collidedVertically;
 
     if (oldX != dx) motionX = 0.0;
     if (oldY != dy) motionY = 0.0;
     if (oldZ != dz) motionZ = 0.0;
+
+    updateFallState(dy);
+    updateEnvironmentalState();
 }
 
 void Entity::applyEntityCollision(Entity* other) {
@@ -73,4 +112,159 @@ void Entity::applyEntityCollision(Entity* other) {
 
     addVelocity(-dx, 0.0, -dz);
     other->addVelocity(dx, 0.0, dz);
+}
+
+void Entity::setOnFire(int ticks) {
+    if (isImmuneToFire()) {
+        return;
+    }
+    if (ticks > fire) {
+        fire = ticks;
+    }
+}
+
+bool Entity::isInsideMaterial(Material* material) const {
+    if (!worldObj || !material) {
+        return false;
+    }
+
+    const double sampleY = posY + static_cast<double>(getEyeHeight());
+    const int x = MathHelper::floor_double(posX);
+    const int y = MathHelper::floor_double(sampleY);
+    const int z = MathHelper::floor_double(posZ);
+
+    Material* blockMaterial = worldObj->getBlockMaterialNoChunkLoad(x, y, z);
+    if (!blockMaterial || blockMaterial != material) {
+        return false;
+    }
+
+    return true;
+}
+
+bool Entity::isInsideOpaqueBlock() const {
+    if (!worldObj) {
+        return false;
+    }
+
+    const int x = MathHelper::floor_double(posX);
+    const int y = MathHelper::floor_double(posY + static_cast<double>(getEyeHeight()));
+    const int z = MathHelper::floor_double(posZ);
+    return worldObj->isBlockSolidNoChunkLoad(x, y, z);
+}
+
+bool Entity::isInLava() const {
+    if (!worldObj) {
+        return false;
+    }
+
+    const AxisAlignedBB probe = boundingBox.expand(0.0, -0.4, 0.0);
+    const int minX = MathHelper::floor_double(probe.minX);
+    const int minY = MathHelper::floor_double(probe.minY);
+    const int minZ = MathHelper::floor_double(probe.minZ);
+    const int maxX = MathHelper::floor_double(probe.maxX);
+    const int maxY = MathHelper::floor_double(probe.maxY);
+    const int maxZ = MathHelper::floor_double(probe.maxZ);
+
+    for (int x = minX; x <= maxX; ++x) {
+        for (int y = minY; y <= maxY; ++y) {
+            for (int z = minZ; z <= maxZ; ++z) {
+                Material* material = worldObj->getBlockMaterialNoChunkLoad(x, y, z);
+                if (material == &Material::lava) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+void Entity::updateFallState(double dy) {
+    if (onGround) {
+        if (fallDistance > 0.0f) {
+            onFall(fallDistance);
+            fallDistance = 0.0f;
+        }
+    } else if (dy < 0.0) {
+        fallDistance = static_cast<float>(fallDistance - dy);
+    }
+}
+
+void Entity::updateEnvironmentalState() {
+    if (!worldObj || isDead) {
+        return;
+    }
+
+    isInWater = false;
+    const AxisAlignedBB waterProbe = boundingBox.expand(0.0, -0.4, 0.0);
+    const int minX = MathHelper::floor_double(waterProbe.minX);
+    const int minY = MathHelper::floor_double(waterProbe.minY);
+    const int minZ = MathHelper::floor_double(waterProbe.minZ);
+    const int maxX = MathHelper::floor_double(waterProbe.maxX);
+    const int maxY = MathHelper::floor_double(waterProbe.maxY);
+    const int maxZ = MathHelper::floor_double(waterProbe.maxZ);
+
+    for (int x = minX; x <= maxX; ++x) {
+        for (int y = minY; y <= maxY; ++y) {
+            for (int z = minZ; z <= maxZ; ++z) {
+                Material* material = worldObj->getBlockMaterialNoChunkLoad(x, y, z);
+                if (material == &Material::water) {
+                    isInWater = true;
+                    break;
+                }
+            }
+            if (isInWater) break;
+        }
+        if (isInWater) break;
+    }
+
+    const int bbMinX = MathHelper::floor_double(boundingBox.minX);
+    const int bbMinY = MathHelper::floor_double(boundingBox.minY);
+    const int bbMinZ = MathHelper::floor_double(boundingBox.minZ);
+    const int bbMaxX = MathHelper::floor_double(boundingBox.maxX);
+    const int bbMaxY = MathHelper::floor_double(boundingBox.maxY);
+    const int bbMaxZ = MathHelper::floor_double(boundingBox.maxZ);
+
+    bool touchedFire = false;
+    bool touchedCactus = false;
+    for (int x = bbMinX; x <= bbMaxX; ++x) {
+        for (int y = bbMinY; y <= bbMaxY; ++y) {
+            for (int z = bbMinZ; z <= bbMaxZ; ++z) {
+                const int blockId = worldObj->getBlockIdNoChunkLoad(x, y, z);
+                if (blockId == 51) {
+                    touchedFire = true;
+                } else if (blockId == 81) {
+                    touchedCactus = true;
+                }
+            }
+        }
+    }
+
+    if (touchedCactus) {
+        attackEntityFrom(nullptr, 1);
+    }
+
+    if (touchedFire) {
+        onStruckByFire();
+        setOnFire(300);
+    } else if (fire > 0 && isInWater) {
+        fire = 0;
+    }
+
+    if (isInLava()) {
+        onStruckByFire();
+        setOnFire(600);
+        fallDistance = 0.0f;
+    }
+
+    if (fire > 0) {
+        if (isInWater) {
+            fire = 0;
+        } else {
+            if ((fire % 20) == 0) {
+                onStruckByFire();
+            }
+            --fire;
+        }
+    }
 }

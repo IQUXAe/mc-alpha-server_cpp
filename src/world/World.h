@@ -111,6 +111,7 @@ public:
     // Entity integration
     void getCollidingBoundingBoxes(Entity* entity, const AxisAlignedBB& mask, std::vector<AxisAlignedBB>& result);
     void getEntitiesWithinAABBExcludingEntity(Entity* entity, const AxisAlignedBB& mask, std::vector<Entity*>& result);
+    void sendEntityStatus(Entity* entity, int8_t status);
     void spawnEntityInWorld(std::unique_ptr<Entity> entity);
     void removeEntity(Entity* entity);
 

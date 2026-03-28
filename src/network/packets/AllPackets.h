@@ -222,7 +222,7 @@ public:
         buf.writeBool(isLeftClick);
     }
 
-    void processPacket(NetHandler& handler) override {}
+    void processPacket(NetHandler& handler) override { handler.handleUseEntity(*this); }
     std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet7UseEntity>(*this); }
     int getPacketSize() override { return 9; }
 };
@@ -230,16 +230,16 @@ public:
 // ============= Packet 8: Update Health =============
 class Packet8UpdateHealth : public Packet {
 public:
-    int16_t health = 0;
+    int8_t health = 0;
 
     Packet8UpdateHealth() = default;
-    explicit Packet8UpdateHealth(int16_t h) : health(h) {}
+    explicit Packet8UpdateHealth(int16_t h) : health(static_cast<int8_t>(h)) {}
 
-    void readPacketData(ByteBuffer& buf) override { health = buf.readShort(); }
-    void writePacketData(ByteBuffer& buf) override { buf.writeShort(health); }
+    void readPacketData(ByteBuffer& buf) override { health = buf.readByte(); }
+    void writePacketData(ByteBuffer& buf) override { buf.writeByte(health); }
     void processPacket(NetHandler& handler) override {}
     std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet8UpdateHealth>(*this); }
-    int getPacketSize() override { return 2; }
+    int getPacketSize() override { return 1; }
 };
 
 // ============= Packet 9: Respawn =============
@@ -247,7 +247,7 @@ class Packet9Respawn : public Packet {
 public:
     void readPacketData(ByteBuffer& buf) override {}
     void writePacketData(ByteBuffer& buf) override {}
-    void processPacket(NetHandler& handler) override {}
+    void processPacket(NetHandler& handler) override { handler.handleRespawn(*this); }
     std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet9Respawn>(*this); }
     int getPacketSize() override { return 0; }
 };

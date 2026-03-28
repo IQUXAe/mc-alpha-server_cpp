@@ -167,7 +167,36 @@ public:
     }
 
     int getTotalArmorValue() {
-        return 0;
+        int totalReduction = 0;
+        int remainingDurability = 0;
+        int totalDurability = 0;
+
+        auto armorPointsForItem = [](int itemId) -> int {
+            switch (itemId) {
+                case 298: case 302: case 306: case 314: return 3;
+                case 299: case 303: case 307: case 315: return 8;
+                case 300: case 304: case 308: case 316: return 6;
+                case 301: case 305: case 309: case 317: return 3;
+                default: return 0;
+            }
+        };
+
+        for (const auto& stack : armorInventory) {
+            if (!stack) continue;
+
+            const int armorPoints = armorPointsForItem(stack->itemID);
+            if (armorPoints <= 0) continue;
+
+            totalReduction += armorPoints;
+            totalDurability += stack->getMaxDamage();
+            remainingDurability += stack->getMaxDamage() - stack->itemDamage;
+        }
+
+        if (totalDurability == 0) {
+            return 0;
+        }
+
+        return (totalReduction - 1) * remainingDurability / totalDurability + 1;
     }
     
     void damageArmor(int damage) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../entity/Entity.h"
+#include "../entity/EntityArrow.h"
 #include "../entity/EntityPlayerMP.h"
 #include "../network/packets/AllPackets.h"
 
@@ -24,6 +25,7 @@ struct TrackerEntry {
     // Last sent held item (players only)
     int lastHeldItemId = 0;
     bool lastSneaking = false;
+    bool lastBurning = false;
     double lastMotionX = 0.0, lastMotionY = 0.0, lastMotionZ = 0.0;
 
     int tickCounter = 0;
@@ -68,6 +70,7 @@ public:
 
     // Called each server tick
     void tick();
+    Entity* getEntityById(int entityId) const;
 
     // Broadcast a packet from an entity to all players tracking it
     void broadcastPacket(Entity* entity, std::unique_ptr<Packet> pkt);
