@@ -55,6 +55,8 @@ public:
 
 private:
     void handleCommand(const std::string& msg);
+    void syncHeldItemSelection();
+    ItemStack* getSelectedItemStack();
     MinecraftServer* mcServer_;
     std::unique_ptr<NetworkManager> netManager_;
     EntityPlayerMP* player_;

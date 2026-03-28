@@ -202,8 +202,14 @@ void NetServerHandler::handleUseEntity(Packet7UseEntity& pkt) {
         return;
     }
 
+    syncHeldItemSelection();
+
     Entity* target = mcServer_->entityTracker->getEntityById(pkt.targetEntityId);
     if (!target || target == player_ || target->isDead || !target->canBeCollidedWith()) {
+        return;
+    }
+
+    if (dynamic_cast<EntityPlayerMP*>(target) && !mcServer_->isPvpEnabled()) {
         return;
     }
 
@@ -213,9 +219,13 @@ void NetServerHandler::handleUseEntity(Packet7UseEntity& pkt) {
     }
 
     int damage = 1;
-    ItemStack* held = player_->getCurrentEquippedItem();
+    ItemStack* held = getSelectedItemStack();
     if (held) {
         damage = held->getDamageVsEntity(target);
+    }
+
+    if (damage <= 0) {
+        return;
     }
 
     target->attackEntityFrom(player_, damage);
@@ -224,7 +234,13 @@ void NetServerHandler::handleUseEntity(Packet7UseEntity& pkt) {
         if (auto* living = dynamic_cast<EntityLiving*>(target)) {
             held->hitEntity(living);
             if (held->stackSize <= 0) {
-                player_->destroyCurrentEquippedItem();
+                if (held == heldItem_.get()) {
+                    heldItem_.reset();
+                    heldItemId_ = 0;
+                    player_->inventory.currentItem = 0;
+                } else {
+                    player_->destroyCurrentEquippedItem();
+                }
                 sendInventory();
             }
         }
@@ -321,6 +337,42 @@ int NetServerHandler::getHeldItemId() const {
     return heldItemId_;
 }
 
+void NetServerHandler::syncHeldItemSelection() {
+    if (heldItemId_ <= 0) {
+        heldItem_.reset();
+        return;
+    }
+
+    int lastSlot = static_cast<int>(player_->inventory.mainInventory.size()) - 1;
+    for (int i = 0; i < lastSlot; ++i) {
+        auto* stack = player_->inventory.mainInventory[i].get();
+        if (stack && stack->itemID == heldItemId_) {
+            player_->inventory.currentItem = i;
+            heldItem_.reset();
+            return;
+        }
+    }
+
+    if (!heldItem_ || heldItem_->itemID != heldItemId_) {
+        heldItem_ = std::make_unique<ItemStack>(heldItemId_, 1, 0);
+    }
+    player_->inventory.mainInventory[lastSlot].reset();
+    player_->inventory.currentItem = lastSlot;
+}
+
+ItemStack* NetServerHandler::getSelectedItemStack() {
+    ItemStack* selected = player_->getCurrentEquippedItem();
+    if (selected) {
+        return selected;
+    }
+
+    if (heldItem_ && heldItemId_ > 0 && heldItem_->itemID == heldItemId_) {
+        return heldItem_.get();
+    }
+
+    return nullptr;
+}
+
 void NetServerHandler::restoreHeldItem(int itemId) {
     heldItemId_ = itemId;
     int lastSlot = static_cast<int>(player_->inventory.mainInventory.size()) - 1;
@@ -328,7 +380,11 @@ void NetServerHandler::restoreHeldItem(int itemId) {
     if (itemId <= 0) { player_->inventory.currentItem = 0; return; }
     for (int i = 0; i < lastSlot; ++i) {
         auto* s = player_->inventory.mainInventory[i].get();
-        if (s && s->itemID == itemId) { player_->inventory.currentItem = i; return; }
+        if (s && s->itemID == itemId) {
+            heldItem_.reset();
+            player_->inventory.currentItem = i;
+            return;
+        }
     }
     // Not in inventory yet
     heldItem_ = std::make_unique<ItemStack>(itemId, 1, 0);
@@ -478,26 +534,7 @@ void NetServerHandler::handlePlayerLookMove(Packet13PlayerLookMove& pkt) {
 }
 
 void NetServerHandler::handleBlockDig(Packet14BlockDig& pkt) {
-    // Java: restore field_10_k (held item) into inventory slot before every dig packet
-    if (heldItemId_ > 0) {
-        int lastSlot = static_cast<int>(player_->inventory.mainInventory.size()) - 1;
-        bool found = false;
-        for (int i = 0; i < lastSlot; ++i) {
-            auto* s = player_->inventory.mainInventory[i].get();
-            if (s && s->itemID == heldItemId_) {
-                player_->inventory.currentItem = i;
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            if (!heldItem_ || heldItem_->itemID != heldItemId_) {
-                heldItem_ = std::make_unique<ItemStack>(heldItemId_, 1, 0);
-            }
-            player_->inventory.mainInventory[lastSlot].reset(); // non-owning slot
-            player_->inventory.currentItem = lastSlot;
-        }
-    }
+    syncHeldItemSelection();
 
     bool isOp = mcServer_->configManager->isOp(player_->username);
     bool checkDist = false;
@@ -656,14 +693,15 @@ void NetServerHandler::handleBlockItemSwitch(Packet16BlockItemSwitch& pkt) {
     for (int i = 0; i < lastSlot; ++i) {
         auto* s = player_->inventory.mainInventory[i].get();
         if (s && s->itemID == pkt.itemId) {
+            heldItem_.reset();
             player_->inventory.currentItem = i;
             return;
         }
     }
 
-    // Not in inventory yet — use placeholder in lastSlot (stackSize=0 prevents placing)
+    // Not in inventory yet — keep a fallback copy so attacking/mining still uses the selected item.
     if (!heldItem_ || heldItem_->itemID != pkt.itemId) {
-        heldItem_ = std::make_unique<ItemStack>(pkt.itemId, 0, 0);
+        heldItem_ = std::make_unique<ItemStack>(pkt.itemId, 1, 0);
     }
     player_->inventory.currentItem = lastSlot;
     player_->inventory.mainInventory[lastSlot].reset(); // non-owning, managed by heldItem_

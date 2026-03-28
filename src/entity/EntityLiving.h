@@ -3,6 +3,7 @@
 #include "Entity.h"
 #include "../core/Material.h"
 #include "../core/NBT.h"
+#include "../world/World.h"
 #include <cmath>
 #include <cstdlib>
 #include <string>
@@ -21,6 +22,9 @@ public:
     bool isSneaking = false;
 
     virtual void onDeath() {
+        if (worldObj) {
+            worldObj->sendEntityStatus(this, 3);
+        }
         isDead = true;
     }
 
@@ -74,6 +78,10 @@ public:
             if (motionY > 0.4) {
                 motionY = 0.4;
             }
+        }
+
+        if (applyKnockback && worldObj) {
+            worldObj->sendEntityStatus(this, 2);
         }
 
         if (health <= 0) {
