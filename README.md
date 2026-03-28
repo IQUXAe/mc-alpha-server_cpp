@@ -48,7 +48,7 @@ Instead of a bulky list of pros and cons, here is how `alpha_server` fundamental
 | Redstone Logic | Fully implemented | Soon |
 | Tile Entities | Chest, Furnace, Sign logic | Fully work! |
 | Dimensions | Overworld & Nether | Overworld only |
-| Authentication | Online mode (HTTP session check) | Server ID sent, HTTP session check not implemented |
+| Authentication | Online mode (HTTP session check) | Work |
 
 ---
 
@@ -58,7 +58,6 @@ To reach full feature parity with the vanilla server, the following features are
 
 - Mob AI, spawning, and combat mechanics
 - Redstone signal propagation
-- Online mode session verification (HTTP check against session server)
 - Nether dimension generation and transitions
 - Operator commands (`/give`, `/tp`, etc.)
 - Proper lighting propagation on block change (currently relies on heightmap only)

@@ -5,17 +5,21 @@
 #include "packets/AllPackets.h"
 #include "../forward.h"
 
+#include <atomic>
 #include <memory>
 #include <string>
 #include <random>
 #include <iostream>
+#include <mutex>
+#include <optional>
+#include <thread>
 
 class MinecraftServer;
 
 class NetLoginHandler : public NetHandler {
 public:
     std::unique_ptr<NetworkManager> netManager;
-    bool finishedProcessing = false;
+    std::atomic<bool> finishedProcessing = false;
 
     NetLoginHandler(MinecraftServer* server, int socketFd, const std::string& remoteAddr, const std::string& desc);
 
@@ -33,10 +37,14 @@ private:
     MinecraftServer* mcServer_;
     int tickCounter_ = 0;
     std::string username_;
-    std::unique_ptr<Packet1Login> pendingLogin_;
     std::string serverId_;
+    std::mutex stateMutex_;
+    std::optional<Packet1Login> pendingLogin_;
+    std::jthread loginVerifierThread_;
+    bool verificationStarted_ = false;
 
     void doLogin(Packet1Login& pkt);
+    void verifyLoginSession(Packet1Login pkt);
 
     static std::mt19937_64 rng_;
 };

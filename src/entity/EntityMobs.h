@@ -218,13 +218,7 @@ inline void EntityMob::attackTarget(EntityPlayerMP& player, float distance) {
 }
 
 inline void EntityMob::damageEntity(int amount) {
-    const bool wasAlive = !isDead;
     EntityLiving::damageEntity(amount);
-    hurtTime = 10;
-    if (!worldObj || !wasAlive) {
-        return;
-    }
-    worldObj->sendEntityStatus(this, isDead ? 3 : 2);
 }
 
 inline void EntityMob::updateMobActionState() {
