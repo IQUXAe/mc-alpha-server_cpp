@@ -1,7 +1,7 @@
 #pragma once
 
 #include "EntityLiving.h"
-#include "EntityItem.h"
+#include "EntityPlayerMP.h"
 #include "../core/Item.h"
 #include "../core/MathHelper.h"
 #include "../core/NBT.h"
@@ -9,18 +9,17 @@
 #include "../block/Block.h"
 #include "../world/World.h"
 
-#include <algorithm>
 #include <cmath>
 #include <cstdlib>
-#include <limits>
 #include <numbers>
 #include <vector>
 
-class EntityAnimals : public EntityLiving {
+class EntityMob : public EntityLiving {
 public:
-    explicit EntityAnimals(World* world) {
+    explicit EntityMob(World* world) {
         worldObj = world;
         stepHeight = 1.0f;
+        health = maxHealth = 20;
     }
 
     int getTrackingRange() const override { return 160; }
@@ -30,7 +29,17 @@ public:
 
     void tick() override {
         EntityLiving::tick();
-        updateEntityActionState();
+        if (attackCooldown_ > 0) {
+            --attackCooldown_;
+        }
+        if (daylightBurnTicks_ > 0) {
+            if ((daylightBurnTicks_ % 20) == 0) {
+                damageEntity(1);
+            }
+            --daylightBurnTicks_;
+        }
+
+        updateMobActionState();
         moveEntityWithHeading(moveStrafing_, moveForward_);
 
         std::vector<Entity*> nearbyEntities;
@@ -41,9 +50,6 @@ public:
             }
         }
     }
-
-    virtual int getMobTypeId() const override = 0;
-    virtual std::string getEntityStringId() const override = 0;
 
     virtual void writeToNBT(NBTCompound& nbt) const override {
         nbt.setString("id", getEntityStringId());
@@ -78,16 +84,20 @@ public:
 
 protected:
     virtual float getBlockPathWeight(int x, int y, int z) const;
-    virtual float getBaseMoveSpeed() const { return 0.7f; }
+    virtual float getBaseMoveSpeed() const { return moveSpeed; }
+    virtual float getTargetRange() const { return 16.0f; }
+    virtual float getAttackReach() const { return 2.5f; }
+    virtual int getAttackStrength() const { return 2; }
+    virtual bool burnsInDaylight() const { return false; }
+    virtual bool shouldAggroPlayer(const EntityPlayerMP& player) const;
+    virtual void attackTarget(EntityPlayerMP& player, float distance);
+    virtual void tickMobExtra() {}
     virtual int getDropItemId() const { return 0; }
     virtual int getDropCount() const { return 0; }
-    virtual void tickExtra() {}
 
     void onDeath() override;
-    void updateEntityActionState();
+    void updateMobActionState();
     void moveEntityWithHeading(float strafe, float forward);
-
-private:
     bool isTouchingLiquid() const;
     void moveFlying(float strafe, float forward, float acceleration);
     float updateRotation(float current, float target, float maxTurn) const;
@@ -97,42 +107,59 @@ private:
     bool canStandAt(int x, int y, int z) const;
     bool canWalkToward(float yawDegrees) const;
     bool shouldJumpToward(float yawDegrees) const;
+    float getBrightness() const;
+    bool hasValidTarget() const;
+    EntityPlayerMP* acquireTarget() const;
 
+protected:
     float moveStrafing_ = 0.0f;
     float moveForward_ = 0.0f;
     float randomYawVelocity_ = 0.0f;
     float wanderYaw_ = 0.0f;
     bool isJumping_ = false;
-    int idleTime_ = 35;
+    int idleTime_ = 20;
     int walkTime_ = 0;
     int reselectDirectionTime_ = 0;
+    int attackCooldown_ = 0;
+    int daylightBurnTicks_ = 0;
+    EntityPlayerMP* targetPlayer_ = nullptr;
 };
 
-inline bool EntityAnimals::getCanSpawnHere() const {
-    if (!worldObj) return false;
+inline float EntityMob::getBlockPathWeight(int x, int y, int z) const {
+    if (!worldObj) return 0.0f;
+    return 0.5f - static_cast<float>(worldObj->getBlockLightValue(x, y, z)) / 15.0f;
+}
+
+inline float EntityMob::getBrightness() const {
+    if (!worldObj) {
+        return 0.0f;
+    }
+
     const int x = MathHelper::floor_double(posX);
     const int y = MathHelper::floor_double(boundingBox.minY);
     const int z = MathHelper::floor_double(posZ);
-    if (worldObj->getBlockId(x, y - 1, z) != 2) { // grass
+    return static_cast<float>(worldObj->getBlockLightValue(x, y, z)) / 15.0f;
+}
+
+inline bool EntityMob::getCanSpawnHere() const {
+    if (!worldObj) return false;
+
+    const int x = MathHelper::floor_double(posX);
+    const int y = MathHelper::floor_double(boundingBox.minY);
+    const int z = MathHelper::floor_double(posZ);
+    if (worldObj->getSavedLightValue(0, x, y, z) > (std::rand() % 32)) {
         return false;
     }
-    if (worldObj->getBlockLightValue(x, y, z) <= 8) {
+    if (worldObj->getBlockLightValue(x, y, z) > (std::rand() % 8)) {
         return false;
     }
 
     std::vector<AxisAlignedBB> collisions;
-    worldObj->getCollidingBoundingBoxes(const_cast<EntityAnimals*>(this), boundingBox, collisions);
+    worldObj->getCollidingBoundingBoxes(const_cast<EntityMob*>(this), boundingBox, collisions);
     return collisions.empty() && !isTouchingLiquid();
 }
 
-inline float EntityAnimals::getBlockPathWeight(int x, int y, int z) const {
-    if (!worldObj) return 0.0f;
-    return worldObj->getBlockId(x, y - 1, z) == 2
-        ? 10.0f
-        : static_cast<float>(worldObj->getBlockLightValue(x, y, z)) - 0.5f;
-}
-
-inline bool EntityAnimals::isTouchingLiquid() const {
+inline bool EntityMob::isTouchingLiquid() const {
     if (!worldObj) {
         return false;
     }
@@ -140,12 +167,11 @@ inline bool EntityAnimals::isTouchingLiquid() const {
     const int x = MathHelper::floor_double(posX);
     const int y = MathHelper::floor_double(boundingBox.minY);
     const int z = MathHelper::floor_double(posZ);
-
     return worldObj->getBlockMaterialNoChunkLoad(x, y, z)->getIsLiquid()
         || worldObj->getBlockMaterialNoChunkLoad(x, y + 1, z)->getIsLiquid();
 }
 
-inline float EntityAnimals::updateRotation(float current, float target, float maxTurn) const {
+inline float EntityMob::updateRotation(float current, float target, float maxTurn) const {
     float delta = target - current;
     while (delta < -180.0f) delta += 360.0f;
     while (delta >= 180.0f) delta -= 360.0f;
@@ -154,8 +180,35 @@ inline float EntityAnimals::updateRotation(float current, float target, float ma
     return current + delta;
 }
 
-inline void EntityAnimals::updateEntityActionState() {
-    tickExtra();
+inline bool EntityMob::hasValidTarget() const {
+    return targetPlayer_ && !targetPlayer_->isDead && targetPlayer_->health > 0;
+}
+
+inline EntityPlayerMP* EntityMob::acquireTarget() const {
+    if (!worldObj) {
+        return nullptr;
+    }
+
+    EntityPlayerMP* player = worldObj->getClosestPlayer(posX, posY, posZ, getTargetRange());
+    if (!player || player->isDead || player->health <= 0) {
+        return nullptr;
+    }
+    return shouldAggroPlayer(*player) ? player : nullptr;
+}
+
+inline bool EntityMob::shouldAggroPlayer(const EntityPlayerMP&) const {
+    return true;
+}
+
+inline void EntityMob::attackTarget(EntityPlayerMP& player, float distance) {
+    if (distance < getAttackReach() && attackCooldown_ == 0) {
+        attackCooldown_ = 20;
+        player.damageEntity(getAttackStrength());
+    }
+}
+
+inline void EntityMob::updateMobActionState() {
+    tickMobExtra();
     moveStrafing_ = 0.0f;
     moveForward_ = 0.0f;
     isJumping_ = false;
@@ -164,10 +217,44 @@ inline void EntityAnimals::updateEntityActionState() {
         return;
     }
 
+    if (burnsInDaylight() && worldObj->isDaytime()) {
+        const int x = MathHelper::floor_double(posX);
+        const int y = MathHelper::floor_double(posY);
+        const int z = MathHelper::floor_double(posZ);
+        const float brightness = getBrightness();
+        if (brightness > 0.5f && worldObj->canBlockSeeSky(x, y, z)
+            && static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX) * 30.0f < (brightness - 0.4f) * 2.0f) {
+            daylightBurnTicks_ = 300;
+        }
+    }
+
     const bool touchingLiquid = isTouchingLiquid();
     rotationPitch = 0.0f;
 
-    if (idleTime_ > 0) {
+    if (!hasValidTarget()) {
+        targetPlayer_ = acquireTarget();
+    } else if (!shouldAggroPlayer(*targetPlayer_)) {
+        targetPlayer_ = nullptr;
+    }
+
+    if (hasValidTarget()) {
+        const double dx = targetPlayer_->posX - posX;
+        const double dz = targetPlayer_->posZ - posZ;
+        const float distance = MathHelper::sqrt_float(static_cast<float>(dx * dx + dz * dz));
+        const float targetYaw = static_cast<float>(
+            std::atan2(dz, dx) * 180.0 / std::numbers::pi_v<double>) - 90.0f;
+
+        rotationYaw = updateRotation(rotationYaw, targetYaw, 20.0f);
+        moveForward_ = getBaseMoveSpeed();
+        attackTarget(*targetPlayer_, distance);
+        if (shouldJumpToward(targetYaw) || collidedHorizontally) {
+            isJumping_ = true;
+        }
+
+        idleTime_ = 0;
+        walkTime_ = 0;
+        reselectDirectionTime_ = 0;
+    } else if (idleTime_ > 0) {
         --idleTime_;
         if ((std::rand() % 20) == 0) {
             randomYawVelocity_ = (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX) - 0.5f) * 10.0f;
@@ -176,12 +263,12 @@ inline void EntityAnimals::updateEntityActionState() {
 
         if (idleTime_ == 0) {
             chooseWanderDirection();
-            walkTime_ = 40 + (std::rand() % 80);
+            walkTime_ = 20 + (std::rand() % 60);
             reselectDirectionTime_ = 8 + (std::rand() % 16);
         }
     } else {
         if (walkTime_ <= 0) {
-            beginIdle(35 + (std::rand() % 55));
+            beginIdle(20 + (std::rand() % 40));
         } else {
             --walkTime_;
             if (--reselectDirectionTime_ <= 0 || !canWalkToward(wanderYaw_) || collidedHorizontally) {
@@ -191,13 +278,8 @@ inline void EntityAnimals::updateEntityActionState() {
 
             rotationYaw = updateRotation(rotationYaw, wanderYaw_, 20.0f);
             moveForward_ = getBaseMoveSpeed();
-
             if (shouldJumpToward(wanderYaw_) || collidedHorizontally) {
                 isJumping_ = true;
-            }
-
-            if ((std::rand() % 120) == 0) {
-                beginIdle(20 + (std::rand() % 35));
             }
         }
     }
@@ -207,7 +289,7 @@ inline void EntityAnimals::updateEntityActionState() {
     }
 }
 
-inline void EntityAnimals::moveFlying(float strafe, float forward, float acceleration) {
+inline void EntityMob::moveFlying(float strafe, float forward, float acceleration) {
     float magnitude = strafe * strafe + forward * forward;
     if (magnitude < 1.0e-4f) {
         return;
@@ -229,7 +311,7 @@ inline void EntityAnimals::moveFlying(float strafe, float forward, float acceler
     motionZ += forward * cosYaw + strafe * sinYaw;
 }
 
-inline void EntityAnimals::moveEntityWithHeading(float strafe, float forward) {
+inline void EntityMob::moveEntityWithHeading(float strafe, float forward) {
     const bool touchingLiquid = isTouchingLiquid();
 
     if (isJumping_) {
@@ -261,25 +343,21 @@ inline void EntityAnimals::moveEntityWithHeading(float strafe, float forward) {
 
     const float accelerationScale = 0.16277136f / (friction * friction * friction);
     moveFlying(strafe, forward, onGround ? 0.1f * accelerationScale : 0.02f);
-
     moveEntity(motionX, motionY, motionZ);
     motionY -= 0.08;
     motionY *= 0.98;
     motionX *= friction;
     motionZ *= friction;
-    if (walkTime_ <= 0 && idleTime_ <= 0) {
-        beginIdle(35 + (std::rand() % 55));
-    }
 }
 
-inline void EntityAnimals::beginIdle(int durationTicks) {
+inline void EntityMob::beginIdle(int durationTicks) {
     idleTime_ = durationTicks;
     walkTime_ = 0;
     reselectDirectionTime_ = 0;
     moveForward_ = 0.0f;
 }
 
-inline bool EntityAnimals::canStandAt(int x, int y, int z) const {
+inline bool EntityMob::canStandAt(int x, int y, int z) const {
     if (!worldObj || y <= 0 || y >= CHUNK_SIZE_Y - 1) {
         return false;
     }
@@ -304,7 +382,7 @@ inline bool EntityAnimals::canStandAt(int x, int y, int z) const {
     return true;
 }
 
-inline bool EntityAnimals::findWalkableSurface(int x, int baseY, int z, int& outY) const {
+inline bool EntityMob::findWalkableSurface(int x, int baseY, int z, int& outY) const {
     const int columnTop = worldObj ? worldObj->getHeightValue(x, z) : baseY;
     const int startY = std::min(CHUNK_SIZE_Y - 2, std::max(baseY + 2, columnTop + 1));
     const int minY = std::max(1, std::min(baseY - 6, columnTop - 4));
@@ -317,7 +395,7 @@ inline bool EntityAnimals::findWalkableSurface(int x, int baseY, int z, int& out
     return false;
 }
 
-inline bool EntityAnimals::chooseWanderDirection() {
+inline bool EntityMob::chooseWanderDirection() {
     if (!worldObj) {
         beginIdle(20);
         return false;
@@ -340,7 +418,7 @@ inline bool EntityAnimals::chooseWanderDirection() {
         }
 
         float candidateWeight = getBlockPathWeight(candidateX, candidateY, candidateZ);
-        candidateWeight += static_cast<float>(distance) * 0.15f;
+        candidateWeight += static_cast<float>(distance) * 0.1f;
         if (candidateWeight > bestWeight) {
             bestWeight = candidateWeight;
             bestYaw = candidateYaw;
@@ -357,7 +435,7 @@ inline bool EntityAnimals::chooseWanderDirection() {
     return true;
 }
 
-inline bool EntityAnimals::canWalkToward(float yawDegrees) const {
+inline bool EntityMob::canWalkToward(float yawDegrees) const {
     if (!worldObj) {
         return false;
     }
@@ -367,11 +445,10 @@ inline bool EntityAnimals::canWalkToward(float yawDegrees) const {
     const int probeX = MathHelper::floor_double(posX - std::sin(radians) * probeDistance);
     const int probeY = MathHelper::floor_double(boundingBox.minY);
     const int probeZ = MathHelper::floor_double(posZ + std::cos(radians) * probeDistance);
-
     return canStandAt(probeX, probeY, probeZ) || canStandAt(probeX, probeY + 1, probeZ);
 }
 
-inline bool EntityAnimals::shouldJumpToward(float yawDegrees) const {
+inline bool EntityMob::shouldJumpToward(float yawDegrees) const {
     if (!worldObj) {
         return false;
     }
@@ -381,12 +458,11 @@ inline bool EntityAnimals::shouldJumpToward(float yawDegrees) const {
     const int probeX = MathHelper::floor_double(posX - std::sin(radians) * probeDistance);
     const int probeY = MathHelper::floor_double(boundingBox.minY);
     const int probeZ = MathHelper::floor_double(posZ + std::cos(radians) * probeDistance);
-
     return worldObj->isBlockSolidNoChunkLoad(probeX, probeY, probeZ)
         && canStandAt(probeX, probeY + 1, probeZ);
 }
 
-inline void EntityAnimals::onDeath() {
+inline void EntityMob::onDeath() {
     const int dropId = getDropItemId();
     const int dropCount = getDropCount();
     if (worldObj && dropId > 0 && dropCount > 0) {
@@ -400,113 +476,156 @@ inline void EntityAnimals::onDeath() {
     EntityLiving::onDeath();
 }
 
-class EntityPig : public EntityAnimals {
+class EntityZombie : public EntityMob {
 public:
-    bool saddled = false;
+    explicit EntityZombie(World* world) : EntityMob(world) {
+        width = 0.6f;
+        height = 1.8f;
+        yOffset = 0.0f;
+        moveSpeed = 0.5f;
+        setPosition(posX, posY, posZ);
+    }
 
-    explicit EntityPig(World* world) : EntityAnimals(world) {
-        width = 0.9f;
+    int getMobTypeId() const override { return 54; }
+    std::string getEntityStringId() const override { return "Zombie"; }
+
+protected:
+    bool burnsInDaylight() const override { return true; }
+    int getAttackStrength() const override { return 5; }
+    int getDropItemId() const override { return Item::feather ? Item::feather->itemID : 0; }
+    int getDropCount() const override { return std::rand() % 3; }
+};
+
+class EntitySkeleton : public EntityMob {
+public:
+    explicit EntitySkeleton(World* world) : EntityMob(world) {
+        width = 0.6f;
+        height = 1.8f;
+        yOffset = 0.0f;
+        moveSpeed = 0.65f;
+        setPosition(posX, posY, posZ);
+    }
+
+    int getMobTypeId() const override { return 51; }
+    std::string getEntityStringId() const override { return "Skeleton"; }
+
+protected:
+    bool burnsInDaylight() const override { return true; }
+    float getAttackReach() const override { return 10.0f; }
+    void attackTarget(EntityPlayerMP& player, float distance) override {
+        if (distance < 10.0f) {
+            if (attackCooldown_ == 0) {
+                attackCooldown_ = 30;
+                player.damageEntity(4);
+            }
+            moveForward_ = distance < 6.0f ? 0.0f : getBaseMoveSpeed() * 0.6f;
+        }
+    }
+    int getDropItemId() const override { return Item::arrow ? Item::arrow->itemID : 0; }
+    int getDropCount() const override { return 1 + (std::rand() % 3); }
+};
+
+class EntitySpider : public EntityMob {
+public:
+    explicit EntitySpider(World* world) : EntityMob(world) {
+        width = 1.4f;
         height = 0.9f;
         yOffset = 0.0f;
+        moveSpeed = 0.8f;
         setPosition(posX, posY, posZ);
     }
 
-    int getMobTypeId() const override { return 90; }
-    std::string getEntityStringId() const override { return "Pig"; }
-    void writeToNBT(NBTCompound& nbt) const override {
-        EntityAnimals::writeToNBT(nbt);
-        nbt.setByte("Saddle", saddled ? 1 : 0);
-    }
-    void readFromNBT(const NBTCompound& nbt) override {
-        EntityAnimals::readFromNBT(nbt);
-        saddled = nbt.getByte("Saddle") != 0;
-    }
+    int getMobTypeId() const override { return 52; }
+    std::string getEntityStringId() const override { return "Spider"; }
+
 protected:
-    int getDropItemId() const override { return Item::porkRaw ? Item::porkRaw->itemID : 0; }
-    int getDropCount() const override { return 1 + (std::rand() % 3); }
-};
-
-class EntitySheep : public EntityAnimals {
-public:
-    bool sheared = false;
-
-    explicit EntitySheep(World* world) : EntityAnimals(world) {
-        width = 0.9f;
-        height = 1.3f;
-        yOffset = 0.0f;
-        setPosition(posX, posY, posZ);
+    bool shouldAggroPlayer(const EntityPlayerMP&) const override {
+        return getBrightness() < 0.5f;
     }
 
-    int getMobTypeId() const override { return 91; }
-    std::string getEntityStringId() const override { return "Sheep"; }
-    void writeToNBT(NBTCompound& nbt) const override {
-        EntityAnimals::writeToNBT(nbt);
-        nbt.setByte("Sheared", sheared ? 1 : 0);
-    }
-    void readFromNBT(const NBTCompound& nbt) override {
-        EntityAnimals::readFromNBT(nbt);
-        sheared = nbt.getByte("Sheared") != 0;
-    }
-protected:
-    int getDropItemId() const override { return sheared ? 0 : 35; }
-    int getDropCount() const override { return sheared ? 0 : (1 + (std::rand() % 3)); }
-};
+    void attackTarget(EntityPlayerMP& player, float distance) override {
+        const float brightness = getBrightness();
+        if (brightness > 0.5f && (std::rand() % 100) == 0) {
+            targetPlayer_ = nullptr;
+            beginIdle(20 + (std::rand() % 20));
+            return;
+        }
 
-class EntityCow : public EntityAnimals {
-public:
-    explicit EntityCow(World* world) : EntityAnimals(world) {
-        width = 0.9f;
-        height = 1.3f;
-        yOffset = 0.0f;
-        setPosition(posX, posY, posZ);
-    }
+        if (distance > 2.0f && distance < 6.0f && (std::rand() % 10) == 0 && onGround) {
+            const double dx = player.posX - posX;
+            const double dz = player.posZ - posZ;
+            const double len = std::max(0.001, std::sqrt(dx * dx + dz * dz));
+            motionX = dx / len * 0.4 + motionX * 0.2;
+            motionZ = dz / len * 0.4 + motionZ * 0.2;
+            motionY = 0.4;
+            return;
+        }
 
-    int getMobTypeId() const override { return 92; }
-    std::string getEntityStringId() const override { return "Cow"; }
-protected:
-    int getDropItemId() const override { return Item::leather ? Item::leather->itemID : 0; }
-    int getDropCount() const override { return 1 + (std::rand() % 3); }
-};
-
-class EntityChicken : public EntityAnimals {
-public:
-    int eggLayTime = 6000 + (std::rand() % 6000);
-
-    explicit EntityChicken(World* world) : EntityAnimals(world) {
-        width = 0.3f;
-        height = 0.4f;
-        yOffset = 0.0f;
-        setPosition(posX, posY, posZ);
-    }
-
-    int getMobTypeId() const override { return 93; }
-    std::string getEntityStringId() const override { return "Chicken"; }
-    void writeToNBT(NBTCompound& nbt) const override {
-        EntityAnimals::writeToNBT(nbt);
-        nbt.setInt("EggLayTime", eggLayTime);
-    }
-    void readFromNBT(const NBTCompound& nbt) override {
-        EntityAnimals::readFromNBT(nbt);
-        eggLayTime = nbt.getInt("EggLayTime");
-        if (eggLayTime <= 0) {
-            eggLayTime = 6000 + (std::rand() % 6000);
+        if (distance < getAttackReach() && attackCooldown_ == 0) {
+            attackCooldown_ = 20;
+            player.damageEntity(2);
         }
     }
+
+    int getDropItemId() const override { return Item::silk ? Item::silk->itemID : 0; }
+    int getDropCount() const override { return std::rand() % 3; }
+};
+
+class EntityCreeper : public EntityMob {
+public:
+    explicit EntityCreeper(World* world) : EntityMob(world) {
+        width = 0.6f;
+        height = 1.7f;
+        yOffset = 0.0f;
+        moveSpeed = 0.7f;
+        setPosition(posX, posY, posZ);
+    }
+
+    int getMobTypeId() const override { return 50; }
+    std::string getEntityStringId() const override { return "Creeper"; }
+
 protected:
-    int getDropItemId() const override { return Item::feather ? Item::feather->itemID : 0; }
-    int getDropCount() const override { return 1 + (std::rand() % 3); }
-    void tickExtra() override {
-        if (motionY < 0.0 && !onGround) {
-            motionY *= 0.6;
-        }
-        if (--eggLayTime <= 0) {
-            if (worldObj && Item::egg) {
-                auto item = std::make_unique<EntityItem>(Item::egg->itemID, 1, 0);
-                item->setPosition(posX, posY, posZ);
-                item->pickupDelay = 10;
-                worldObj->spawnEntityInWorld(std::move(item));
+    void attackTarget(EntityPlayerMP& player, float distance) override {
+        if ((swellDirection_ <= 0 && distance < 3.0f) || (swellDirection_ > 0 && distance < 7.0f)) {
+            swellDirection_ = 1;
+            if (++swellTime_ >= 30) {
+                const double radius = 3.0;
+                if (worldObj) {
+                    std::vector<Entity*> nearbyEntities;
+                    worldObj->getEntitiesWithinAABBExcludingEntity(
+                        this,
+                        boundingBox.expand(radius, radius, radius),
+                        nearbyEntities);
+
+                    for (Entity* nearby : nearbyEntities) {
+                        auto* other = dynamic_cast<EntityPlayerMP*>(nearby);
+                        if (!other || other->isDead) continue;
+
+                        const double dx = other->posX - posX;
+                        const double dy = other->posY - posY;
+                        const double dz = other->posZ - posZ;
+                        const double distSq = dx * dx + dy * dy + dz * dz;
+                        if (distSq <= radius * radius) {
+                            other->damageEntity(12);
+                        }
+                    }
+                }
+                isDead = true;
+                return;
             }
-            eggLayTime = 6000 + (std::rand() % 6000);
+            moveForward_ = distance < 3.5f ? 0.0f : getBaseMoveSpeed() * 0.75f;
+        } else {
+            if (swellTime_ > 0) {
+                --swellTime_;
+            }
+            swellDirection_ = -1;
         }
     }
+
+    int getDropItemId() const override { return Item::gunpowder ? Item::gunpowder->itemID : 0; }
+    int getDropCount() const override { return std::rand() % 3; }
+
+private:
+    int swellTime_ = 0;
+    int swellDirection_ = -1;
 };

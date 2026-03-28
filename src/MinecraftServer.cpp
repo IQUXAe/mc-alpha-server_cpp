@@ -4,6 +4,8 @@
 #include "network/Packet.h"
 #include "network/packets/AllPackets.h"
 #include "entity/EntityPlayerMP.h"
+#include "entity/EntityAnimals.h"
+#include "entity/EntityMobs.h"
 #include "world/World.h"
 #include "block/Block.h"
 #include "core/Item.h"
@@ -13,6 +15,7 @@
 #include <random>
 #include <algorithm>
 #include <ranges>
+#include <cctype>
 #include <filesystem>
 
 static std::string_view trimLeft(std::string_view s) {
@@ -41,6 +44,7 @@ bool MinecraftServer::initialize() {
     std::string bindAddress = propertyManager->getStringProperty("server-ip", "");
     onlineMode_             = propertyManager->getBooleanProperty("online-mode", true);
     spawnAnimals_           = propertyManager->getBooleanProperty("spawn-animals", true);
+    spawnMonsters_          = propertyManager->getBooleanProperty("spawn-monsters", true);
     pvpEnabled_             = propertyManager->getBooleanProperty("pvp", true);
     viewDistance_           = propertyManager->getIntProperty("view-distance", 10);
     if (viewDistance_ < 3)  viewDistance_ = 3;
@@ -258,6 +262,12 @@ void MinecraftServer::handleCommand(const std::string& cmd) {
         if (sp == std::string_view::npos) return {std::string(s), {}};
         return {std::string(s.substr(0, sp)), std::string(trimLeft(s.substr(sp + 1)))};
     };
+    auto toLowerCopy = [](std::string s) {
+        std::ranges::transform(s, s.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return s;
+    };
 
     if (lower.starts_with("help") || lower.starts_with("?")) {
         Logger::info(
@@ -272,6 +282,7 @@ void MinecraftServer::handleCommand(const std::string& cmd) {
             "   deop <player>             removes op status\n"
             "   tp <player1> <player2>    teleports player1 to player2\n"
             "   give <player> <id> [num]  gives a player a resource\n"
+            "   summon <mob> [count] [player] spawns debug mobs near player\n"
             "   tell <player> <message>   sends a private message\n"
             "   stop                      gracefully stops the server\n"
             "   save-all                  forces a server-wide level save\n"
@@ -334,6 +345,90 @@ void MinecraftServer::handleCommand(const std::string& cmd) {
                                           player2->rotationYaw, player2->rotationPitch);
             Logger::info("Teleporting {} to {}.", p1, p2);
         }
+    } else if (lower.starts_with("summon ")) {
+        if (!worldMngr || !configManager) {
+            Logger::info("World is not ready.");
+            return;
+        }
+
+        auto rest = std::string(trimLeft(sv.substr(7)));
+        auto [entityNameRaw, tail] = splitTwo(rest);
+        if (entityNameRaw.empty()) {
+            Logger::info("Usage: summon <mob> [count] [player]");
+            return;
+        }
+
+        int count = 1;
+        std::string targetName;
+        if (!tail.empty()) {
+            auto [arg1, arg2] = splitTwo(tail);
+            if (!arg1.empty()) {
+                bool isNumber = std::ranges::all_of(arg1, [](unsigned char c) { return std::isdigit(c) != 0; });
+                if (isNumber) {
+                    count = std::max(1, std::min(64, std::stoi(arg1)));
+                    targetName = arg2;
+                } else {
+                    targetName = arg1;
+                }
+            }
+        }
+
+        EntityPlayerMP* anchor = nullptr;
+        if (!targetName.empty()) {
+            anchor = configManager->getPlayerEntity(targetName);
+            if (!anchor) {
+                Logger::info("Can't find user {}. No summon.", targetName);
+                return;
+            }
+        } else if (!configManager->playerEntities.empty()) {
+            anchor = configManager->playerEntities.front();
+        }
+
+        if (!anchor) {
+            Logger::info("No online players to anchor summon.");
+            return;
+        }
+
+        const std::string entityName = toLowerCopy(entityNameRaw);
+        auto createEntity = [&]() -> std::unique_ptr<Entity> {
+            if (entityName == "pig") return std::make_unique<EntityPig>(worldMngr.get());
+            if (entityName == "sheep") return std::make_unique<EntitySheep>(worldMngr.get());
+            if (entityName == "cow") return std::make_unique<EntityCow>(worldMngr.get());
+            if (entityName == "chicken") return std::make_unique<EntityChicken>(worldMngr.get());
+            if (entityName == "zombie") return std::make_unique<EntityZombie>(worldMngr.get());
+            if (entityName == "skeleton") return std::make_unique<EntitySkeleton>(worldMngr.get());
+            if (entityName == "spider") return std::make_unique<EntitySpider>(worldMngr.get());
+            if (entityName == "creeper") return std::make_unique<EntityCreeper>(worldMngr.get());
+            return nullptr;
+        };
+
+        int spawned = 0;
+        for (int i = 0; i < count; ++i) {
+            auto entity = createEntity();
+            if (!entity) {
+                Logger::info("Unknown mob {}. Try pig/sheep/cow/chicken/zombie/skeleton/spider/creeper.", entityNameRaw);
+                return;
+            }
+
+            const double angle = (static_cast<double>(i) / std::max(1, count)) * 6.283185307179586;
+            const double radius = 2.0 + (i % 3);
+            const double spawnX = anchor->posX + std::cos(angle) * radius;
+            const double spawnZ = anchor->posZ + std::sin(angle) * radius;
+            const int groundY = worldMngr->getHeightValue(static_cast<int>(std::floor(spawnX)),
+                                                          static_cast<int>(std::floor(spawnZ)));
+            const double spawnY = std::max(anchor->posY, static_cast<double>(groundY));
+
+            entity->setPositionAndRotation(
+                spawnX,
+                spawnY,
+                spawnZ,
+                static_cast<float>(std::rand() % 360),
+                0.0f);
+            worldMngr->spawnEntityInWorld(std::move(entity));
+            ++spawned;
+        }
+
+        Logger::info("Spawned {} {} near {}.", spawned, entityNameRaw, anchor->username);
     } else if (lower.starts_with("say ")) {
         auto msg = argOf("say ");
         Logger::info("[Server] {}", msg);
