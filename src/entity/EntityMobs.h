@@ -2,6 +2,7 @@
 
 #include "EntityLiving.h"
 #include "EntityPlayerMP.h"
+#include "EntityArrow.h"
 #include "../core/Item.h"
 #include "../core/MathHelper.h"
 #include "../core/NBT.h"
@@ -32,7 +33,11 @@ public:
         if (attackCooldown_ > 0) {
             --attackCooldown_;
         }
+        if (daylightBurnTicks_ <= 0) {
+            fire = 0;
+        }
         if (daylightBurnTicks_ > 0) {
+            fire = std::max(fire, 20);
             if ((daylightBurnTicks_ % 20) == 0) {
                 damageEntity(1);
             }
@@ -94,6 +99,7 @@ protected:
     virtual void tickMobExtra() {}
     virtual int getDropItemId() const { return 0; }
     virtual int getDropCount() const { return 0; }
+    void damageEntity(int amount) override;
 
     void onDeath() override;
     void updateMobActionState();
@@ -122,6 +128,7 @@ protected:
     int reselectDirectionTime_ = 0;
     int attackCooldown_ = 0;
     int daylightBurnTicks_ = 0;
+    int targetRefreshTime_ = 0;
     EntityPlayerMP* targetPlayer_ = nullptr;
 };
 
@@ -201,10 +208,23 @@ inline bool EntityMob::shouldAggroPlayer(const EntityPlayerMP&) const {
 }
 
 inline void EntityMob::attackTarget(EntityPlayerMP& player, float distance) {
-    if (distance < getAttackReach() && attackCooldown_ == 0) {
+    if (distance < getAttackReach()
+        && player.boundingBox.maxY > boundingBox.minY
+        && player.boundingBox.minY < boundingBox.maxY
+        && attackCooldown_ == 0) {
         attackCooldown_ = 20;
-        player.damageEntity(getAttackStrength());
+        player.attackEntityFrom(this, getAttackStrength());
     }
+}
+
+inline void EntityMob::damageEntity(int amount) {
+    const bool wasAlive = !isDead;
+    EntityLiving::damageEntity(amount);
+    hurtTime = 10;
+    if (!worldObj || !wasAlive) {
+        return;
+    }
+    worldObj->sendEntityStatus(this, isDead ? 3 : 2);
 }
 
 inline void EntityMob::updateMobActionState() {
@@ -225,27 +245,40 @@ inline void EntityMob::updateMobActionState() {
         if (brightness > 0.5f && worldObj->canBlockSeeSky(x, y, z)
             && static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX) * 30.0f < (brightness - 0.4f) * 2.0f) {
             daylightBurnTicks_ = 300;
+            fire = std::max(fire, 300);
         }
     }
 
     const bool touchingLiquid = isTouchingLiquid();
     rotationPitch = 0.0f;
 
-    if (!hasValidTarget()) {
-        targetPlayer_ = acquireTarget();
-    } else if (!shouldAggroPlayer(*targetPlayer_)) {
+    if (--targetRefreshTime_ <= 0) {
+        targetRefreshTime_ = 5;
+        EntityPlayerMP* refreshedTarget = acquireTarget();
+        if (refreshedTarget) {
+            targetPlayer_ = refreshedTarget;
+        } else if (hasValidTarget()) {
+            const double maxDistance = static_cast<double>(getTargetRange()) * 1.5;
+            if (targetPlayer_->getDistanceSq(posX, posY, posZ) > maxDistance * maxDistance) {
+                targetPlayer_ = nullptr;
+            }
+        }
+    }
+
+    if (hasValidTarget() && !shouldAggroPlayer(*targetPlayer_)) {
         targetPlayer_ = nullptr;
     }
 
     if (hasValidTarget()) {
         const double dx = targetPlayer_->posX - posX;
+        const double dy = targetPlayer_->posY - posY;
         const double dz = targetPlayer_->posZ - posZ;
-        const float distance = MathHelper::sqrt_float(static_cast<float>(dx * dx + dz * dz));
+        const float distance = MathHelper::sqrt_float(static_cast<float>(dx * dx + dy * dy + dz * dz));
         const float targetYaw = static_cast<float>(
             std::atan2(dz, dx) * 180.0 / std::numbers::pi_v<double>) - 90.0f;
 
         rotationYaw = updateRotation(rotationYaw, targetYaw, 20.0f);
-        moveForward_ = getBaseMoveSpeed();
+        moveForward_ = getBaseMoveSpeed() * (distance > getAttackReach() + 1.0f ? 1.2f : 0.85f);
         attackTarget(*targetPlayer_, distance);
         if (shouldJumpToward(targetYaw) || collidedHorizontally) {
             isJumping_ = true;
@@ -491,7 +524,7 @@ public:
 
 protected:
     bool burnsInDaylight() const override { return true; }
-    int getAttackStrength() const override { return 5; }
+    int getAttackStrength() const override { return 2; }
     int getDropItemId() const override { return Item::feather ? Item::feather->itemID : 0; }
     int getDropCount() const override { return std::rand() % 3; }
 };
@@ -515,8 +548,15 @@ protected:
     void attackTarget(EntityPlayerMP& player, float distance) override {
         if (distance < 10.0f) {
             if (attackCooldown_ == 0) {
+                auto arrow = std::make_unique<EntityArrow>(worldObj, this);
+                arrow->posY += 1.4;
+                const double dx = player.posX - posX;
+                const double dz = player.posZ - posZ;
+                const double dy = player.posY + player.getEyeHeight() - 0.2 - arrow->posY;
+                const float lift = MathHelper::sqrt_float(static_cast<float>(dx * dx + dz * dz)) * 0.2f;
+                arrow->shoot(dx, dy + lift, dz, 0.6f, 12.0f);
+                worldObj->spawnEntityInWorld(std::move(arrow));
                 attackCooldown_ = 30;
-                player.damageEntity(4);
             }
             moveForward_ = distance < 6.0f ? 0.0f : getBaseMoveSpeed() * 0.6f;
         }
@@ -563,7 +603,7 @@ protected:
 
         if (distance < getAttackReach() && attackCooldown_ == 0) {
             attackCooldown_ = 20;
-            player.damageEntity(2);
+            player.attackEntityFrom(this, 1);
         }
     }
 
@@ -606,7 +646,7 @@ protected:
                         const double dz = other->posZ - posZ;
                         const double distSq = dx * dx + dy * dy + dz * dz;
                         if (distSq <= radius * radius) {
-                            other->damageEntity(12);
+                            other->attackEntityFrom(this, 12);
                         }
                     }
                 }

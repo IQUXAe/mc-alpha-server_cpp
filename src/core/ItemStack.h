@@ -88,7 +88,9 @@ public:
     }
     
     void hitEntity(EntityLiving* entity) {
-        // getItem()->hitEntity(this, entity);
+        if (Item* item = getItem()) {
+            item->hitEntity(this, entity);
+        }
     }
     
     void hitBlock(int x, int y, int z, int side) {
@@ -96,7 +98,9 @@ public:
     }
     
     int getDamageVsEntity(Entity* entity) {
-        // return getItem()->getDamageVsEntity(entity);
+        if (Item* item = getItem()) {
+            return item->getDamageVsEntity(entity);
+        }
         return 1;
     }
     

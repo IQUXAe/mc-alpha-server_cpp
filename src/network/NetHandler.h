@@ -14,6 +14,8 @@ public:
 
     // Game phase
     virtual void handleChat(Packet3Chat& pkt) { unexpectedPacket(); }
+    virtual void handleRespawn(Packet9Respawn& pkt) { unexpectedPacket(); }
+    virtual void handleUseEntity(Packet7UseEntity& pkt) { unexpectedPacket(); }
     virtual void handleFlying(Packet10Flying& pkt) { unexpectedPacket(); }
     virtual void handlePlayerPosition(Packet11PlayerPosition& pkt) { unexpectedPacket(); }
     virtual void handlePlayerLook(Packet12PlayerLook& pkt) { unexpectedPacket(); }

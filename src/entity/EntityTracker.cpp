@@ -1,4 +1,5 @@
 #include "EntityTracker.h"
+#include "EntityArrow.h"
 #include "EntityItem.h"
 #include "EntityAnimals.h"
 #include "EntityFallingSand.h"
@@ -43,6 +44,16 @@ std::unique_ptr<Packet> TrackerEntry::makeSpawnPacket() const {
         return pkt;
     }
 
+    if (auto* arrow = dynamic_cast<EntityArrow*>(entity)) {
+        auto pkt = std::make_unique<Packet23VehicleSpawn>();
+        pkt->entityId = arrow->entityId;
+        pkt->type = 60;
+        pkt->x = fx;
+        pkt->y = fy;
+        pkt->z = fz;
+        return pkt;
+    }
+
     if (auto* living = dynamic_cast<EntityLiving*>(entity)) {
         auto pkt = std::make_unique<Packet24MobSpawn>();
         pkt->entityId = entity->entityId;
@@ -83,6 +94,9 @@ void TrackerEntry::sendSpawnTo(EntityPlayerMP* player) {
         if (living->isSneaking)
             player->netHandler->sendPacket(
                 std::make_unique<Packet18ArmAnimation>(entity->entityId, 104));
+        if (living->fire > 0)
+            player->netHandler->sendPacket(
+                std::make_unique<Packet18ArmAnimation>(entity->entityId, 102));
     }
 
     // Sync lastFixed* to what we just sent so sendUpdates doesn't
@@ -203,8 +217,14 @@ void TrackerEntry::sendUpdates() {
     if (auto* living = dynamic_cast<EntityLiving*>(entity)) {
         if (living->isSneaking != lastSneaking) {
             lastSneaking = living->isSneaking;
-            broadcast(std::make_unique<Packet18ArmAnimation>(
+            broadcastIncludingSelf(std::make_unique<Packet18ArmAnimation>(
                 entity->entityId, lastSneaking ? 104 : 105));
+        }
+        const bool isBurning = living->fire > 0;
+        if (isBurning != lastBurning) {
+            lastBurning = isBurning;
+            broadcastIncludingSelf(std::make_unique<Packet18ArmAnimation>(
+                entity->entityId, isBurning ? 102 : 103));
         }
     }
 }
@@ -212,6 +232,14 @@ void TrackerEntry::sendUpdates() {
 // ─── EntityTracker ───────────────────────────────────────────────────────────
 
 EntityTracker::EntityTracker(MinecraftServer* server) : mcServer_(server) {}
+
+Entity* EntityTracker::getEntityById(int entityId) const {
+    auto it = entries_.find(entityId);
+    if (it == entries_.end() || !it->second) {
+        return nullptr;
+    }
+    return it->second->entity;
+}
 
 void EntityTracker::addEntity(Entity* entity) {
     if (!entity || entries_.count(entity->entityId)) return;
@@ -223,6 +251,10 @@ void EntityTracker::addEntity(Entity* entity) {
         range = 512; rate = 1;
     } else if (dynamic_cast<EntityItem*>(entity)) {
         range = 64; rate = 20; vel = true;
+    } else if (auto* arrow = dynamic_cast<EntityArrow*>(entity)) {
+        range = arrow->getTrackingRange();
+        rate = arrow->getTrackingRate();
+        vel = arrow->shouldSendVelocity();
     } else if (auto* living = dynamic_cast<EntityLiving*>(entity); living && living->getMobTypeId() != 0) {
         range = living->getTrackingRange();
         rate = living->getTrackingRate();

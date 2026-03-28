@@ -170,6 +170,67 @@ void NetServerHandler::tick() {
     }
 }
 
+void NetServerHandler::handleRespawn(Packet9Respawn&) {
+    if (player_->health > 0) {
+        return;
+    }
+
+    player_->isDead = false;
+    player_->health = player_->maxHealth;
+    player_->hurtTime = 0;
+    player_->deathTime = 0;
+    player_->fire = 0;
+    player_->air = 300;
+    player_->fallDistance = 0.0f;
+    player_->motionX = 0.0;
+    player_->motionY = 0.0;
+    player_->motionZ = 0.0;
+
+    const double spawnX = mcServer_->worldMngr->spawnX + 0.5;
+    const double spawnY = mcServer_->worldMngr->spawnY;
+    const double spawnZ = mcServer_->worldMngr->spawnZ + 0.5;
+    player_->setPositionAndRotation(spawnX, spawnY, spawnZ, 0.0f, 0.0f);
+
+    sendPacket(std::make_unique<Packet9Respawn>());
+    sendPacket(std::make_unique<Packet8UpdateHealth>(player_->health));
+    teleport(spawnX, spawnY, spawnZ, 0.0f, 0.0f);
+    sendInventory();
+}
+
+void NetServerHandler::handleUseEntity(Packet7UseEntity& pkt) {
+    if (!pkt.isLeftClick || !mcServer_ || !mcServer_->entityTracker) {
+        return;
+    }
+
+    Entity* target = mcServer_->entityTracker->getEntityById(pkt.targetEntityId);
+    if (!target || target == player_ || target->isDead || !target->canBeCollidedWith()) {
+        return;
+    }
+
+    const double reachSq = player_->getDistanceSqToEntity(*target);
+    if (reachSq > 36.0) {
+        return;
+    }
+
+    int damage = 1;
+    ItemStack* held = player_->getCurrentEquippedItem();
+    if (held) {
+        damage = held->getDamageVsEntity(target);
+    }
+
+    target->attackEntityFrom(player_, damage);
+
+    if (held) {
+        if (auto* living = dynamic_cast<EntityLiving*>(target)) {
+            held->hitEntity(living);
+            if (held->stackSize <= 0) {
+                player_->destroyCurrentEquippedItem();
+                sendInventory();
+            }
+        }
+    }
+}
+
 
 void NetServerHandler::kick(const std::string& reason) {
     if (disconnected) return;
@@ -362,21 +423,29 @@ void NetServerHandler::handleCommand(const std::string& msg) {
 }
 
 void NetServerHandler::handleFlying(Packet10Flying& pkt) {
-    // Update on-ground state
-    player_->onGround = pkt.onGround;
+    const bool wasOnGround = player_->onGround;
+    const double previousY = player_->posY;
 
     if (pkt.moving) {
-        player_->posX = pkt.x;
-        player_->posY = pkt.y;
-        player_->posZ = pkt.z;
+        player_->setPosition(pkt.x, pkt.y, pkt.z);
         lastX_ = pkt.x;
         lastY_ = pkt.y;
         lastZ_ = pkt.z;
+
+        if (!pkt.onGround && pkt.y < previousY) {
+            player_->fallDistance += static_cast<float>(previousY - pkt.y);
+        }
     }
 
     if (pkt.rotating) {
         player_->rotationYaw = pkt.yaw;
         player_->rotationPitch = pkt.pitch;
+    }
+
+    player_->onGround = pkt.onGround;
+    if (pkt.onGround && !wasOnGround && player_->fallDistance > 0.0f) {
+        player_->onFall(player_->fallDistance);
+        player_->fallDistance = 0.0f;
     }
 }
 

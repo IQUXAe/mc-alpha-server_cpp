@@ -6,6 +6,7 @@
 #include <cstdint>
 
 class World;
+class Material;
 
 class Entity {
 public:
@@ -22,6 +23,9 @@ public:
     float lastPitch = 0.0f;  // For entity tracking
     AxisAlignedBB boundingBox;
     bool onGround = false;
+    bool collidedHorizontally = false;
+    bool collidedVertically = false;
+    bool isCollided = false;
     bool isDead = false;
     float height = 1.8f;
     float width = 0.6f;
@@ -33,6 +37,7 @@ public:
     int air = 300;
     bool isInWater = false;
     int dimension = 0;
+    int fireResistance = 1;
 
     World* worldObj = nullptr;
 
@@ -50,6 +55,7 @@ public:
         lastZ = posZ;
         lastYaw = rotationYaw;
         lastPitch = rotationPitch;
+        updateEnvironmentalState();
     }
 
     virtual void setPosition(double x, double y, double z) {
@@ -74,7 +80,14 @@ public:
         motionZ += dz;
     }
     virtual bool canBePushed() const { return !isDead; }
+    virtual bool canBeCollidedWith() const { return !isDead; }
     virtual void applyEntityCollision(Entity* other);
+    virtual void attackEntityFrom(Entity* attacker, int amount) {}
+    virtual float getEyeHeight() const { return 0.0f; }
+    virtual void onFall(float distance) {}
+    virtual void setOnFire(int ticks);
+    virtual void onStruckByFire() { attackEntityFrom(nullptr, 1); }
+    virtual bool isImmuneToFire() const { return false; }
 
     double getDistanceSq(double x, double y, double z) const {
         double dx = posX - x;
@@ -90,4 +103,11 @@ public:
     virtual bool isEntityAlive() const { return !isDead; }
 
     static int32_t nextEntityId;
+
+protected:
+    void updateEnvironmentalState();
+    bool isInsideMaterial(Material* material) const;
+    bool isInsideOpaqueBlock() const;
+    bool isInLava() const;
+    void updateFallState(double dy);
 };

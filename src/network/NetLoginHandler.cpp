@@ -105,6 +105,7 @@ void NetLoginHandler::doLogin(Packet1Login& pkt) {
 
         // Send position
         serverHandler->teleport(player->posX, player->posY, player->posZ, player->rotationYaw, player->rotationPitch);
+        serverHandler->sendPacket(std::make_unique<Packet8UpdateHealth>(player->health));
         
         // Send full inventory to client (Packet5) - exactly as Java's NetServerHandler.func_40_d()
         serverHandler->sendInventory();
