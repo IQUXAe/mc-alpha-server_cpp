@@ -50,6 +50,7 @@ public:
     bool isSpawnAnimals() const { return spawnAnimals_; }
     bool isSpawnMonsters() const { return spawnMonsters_; }
     bool isPvpEnabled() const { return pvpEnabled_; }
+    int  getDifficulty() const { return difficulty_; }
     int  getViewDistance() const { return viewDistance_; }
     int  getAutoSaveInterval() const { return autoSaveInterval_; }
     bool isSaveModifiedChunksOnly() const { return saveModifiedChunksOnly_; }
@@ -70,6 +71,7 @@ private:
     bool        spawnAnimals_           = true;
     bool        spawnMonsters_          = true;
     bool        pvpEnabled_             = true;
+    int         difficulty_             = 2;
     int         viewDistance_           = 10;
     int         autoSaveInterval_       = 900;
     bool        saveModifiedChunksOnly_ = false;

@@ -41,6 +41,7 @@ public:
     int attackCooldownTicks = 0;
     int armSwingTicks = 0;
     bool isSwinging = false;
+    std::string lastDeathMessage_;
 
     EntityPlayerMP(MinecraftServer* server, World* world, const std::string& name)
         : mcServer(server), inventory(this) {
@@ -64,9 +65,7 @@ public:
     bool canAttackNow() const;
     void markAttackPerformed();
 
-    void damageEntity(int amount) override {
-        attackEntityFrom(nullptr, amount);
-    }
+    void damageEntity(int amount) override { attackEntityFrom(nullptr, amount); }
 
     void heal(int amount) override {
         EntityPlayer::heal(amount);
@@ -75,40 +74,7 @@ public:
         }
     }
 
-    void attackEntityFrom(Entity* attacker, int amount) override {
-        if (amount <= 0 || isDead || health <= 0) {
-            return;
-        }
-
-        if (respawnInvulnerabilityTicks > 0) {
-            return;
-        }
-
-        if (attacker && dynamic_cast<EntityPlayerMP*>(attacker) == nullptr) {
-            const int difficulty = 2;
-            if (difficulty <= 0) {
-                amount = 0;
-            } else if (difficulty == 1) {
-                amount = amount / 3 + 1;
-            } else if (difficulty >= 3) {
-                amount = amount * 3 / 2;
-            }
-        }
-
-        if (amount <= 0) {
-            return;
-        }
-
-        const int armor = inventory.getTotalArmorValue();
-        const int scaledDamage = amount * (25 - armor) + armorDamageCarry;
-        const int damageAfterArmor = scaledDamage / 25;
-        armorDamageCarry = scaledDamage % 25;
-        inventory.damageArmor(amount);
-        EntityPlayer::attackEntityFrom(attacker, damageAfterArmor);
-        if (netHandler) {
-            netHandler->sendPacket(std::make_unique<Packet8UpdateHealth>(health));
-        }
-    }
+    void attackEntityFrom(Entity* attacker, int amount) override;
 
     ItemStack* getCurrentEquippedItem() {
         return inventory.getCurrentItem();
@@ -215,4 +181,7 @@ public:
             return false;
         }
     }
+
+private:
+    void updateDeathMessage(Entity* attacker);
 };

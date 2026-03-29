@@ -5,6 +5,7 @@
 #include <iostream>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 
 enum class LogLevel { DEBUG, INFO, WARNING, SEVERE };
 
@@ -12,6 +13,8 @@ class Logger {
 public:
     static void setLevel(LogLevel level) { minLevel_ = level; }
     [[nodiscard]] static LogLevel getLevel() { return minLevel_; }
+    static void setConsoleLineProvider(std::function<std::string()> provider);
+    static void refreshConsoleLine();
 
     template<typename... Args>
     static void debug(std::format_string<Args...> fmt, Args&&... args) {
@@ -32,5 +35,6 @@ public:
 
 private:
     static LogLevel minLevel_;
+    static std::function<std::string()> consoleLineProvider_;
     static void log(LogLevel level, const std::string& msg);
 };
