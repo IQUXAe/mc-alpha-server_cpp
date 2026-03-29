@@ -52,6 +52,7 @@ public:
     void handlePickupSpawn(Packet21PickupSpawn& pkt) override;
     void handleComplexEntity(Packet59ComplexEntity& pkt) override;
     void handleErrorMessage(const std::string& reason) override;
+    bool shouldBypassReadTimeout() const override;
 
 private:
     void handleCommand(const std::string& msg);

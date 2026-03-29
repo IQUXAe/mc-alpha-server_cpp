@@ -63,7 +63,11 @@ public:
         {
             std::lock_guard lock(readMutex_);
             if (readPackets_.empty()) {
-                if (++timeSinceLastRead_ >= 1200) shutdown("Timed out");
+                if (netHandler_ && netHandler_->shouldBypassReadTimeout()) {
+                    timeSinceLastRead_ = 0;
+                } else if (++timeSinceLastRead_ >= 1200) {
+                    shutdown("Timed out");
+                }
             } else {
                 timeSinceLastRead_ = 0;
             }

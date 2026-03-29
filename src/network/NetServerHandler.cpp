@@ -285,6 +285,12 @@ void NetServerHandler::tick() {
     }
 }
 
+bool NetServerHandler::shouldBypassReadTimeout() const {
+    // While player is on the death screen, clients may stop sending movement packets
+    // for a long time; don't disconnect them for inactivity until they respawn/quit.
+    return player_ && (player_->isDead || player_->health <= 0);
+}
+
 void NetServerHandler::handleRespawn(Packet9Respawn&) {
     if (player_->health > 0) {
         return;
@@ -869,6 +875,12 @@ void NetServerHandler::handlePlace(Packet15Place& pkt) {
             if (itemstack) {
                 const bool isBoatItem = Item::boat && itemstack->itemID == Item::boat->itemID;
                 const bool clickedWater = mcServer_->worldMngr->getBlockMaterial(x, y, z) == &Material::water;
+                const int clickedId = mcServer_->worldMngr->getBlockId(x, y, z);
+                const bool clickedInteractiveBlock =
+                    clickedId == 54 || // chest
+                    clickedId == 58 || // crafting table
+                    clickedId == 61 || // furnace idle
+                    clickedId == 62;   // furnace active
 
                 if (isBoatItem && clickedWater) {
                     auto boatEntity = std::make_unique<EntityBoat>(mcServer_->worldMngr.get(),
@@ -880,6 +892,17 @@ void NetServerHandler::handlePlace(Packet15Place& pkt) {
                         --itemstack->stackSize;
                     }
                     used = true;
+                } else if (clickedInteractiveBlock) {
+                    // Interaction with GUI blocks must not also place held blocks.
+                    // Chest/furnace activation is handled by blockActivated();
+                    // workbench GUI is client-driven in this protocol, so consume click.
+                    Block* clickedBlock = (clickedId > 0 && clickedId < 256) ? Block::blocksList[clickedId] : nullptr;
+                    if (clickedBlock) {
+                        used = clickedBlock->blockActivated(mcServer_->worldMngr.get(), x, y, z, player_);
+                    }
+                    if (clickedId == 58) {
+                        used = true;
+                    }
                 } else {
                     used = player_->itemInWorldManager->activeBlockOrUseItem(
                         player_, mcServer_->worldMngr.get(), itemstack, x, y, z, direction);

@@ -470,6 +470,9 @@ void World::tick() {
         if (item && !item->isDead && item->pickupDelay <= 0) {
             if (mcServer && mcServer->configManager) {
                 for (auto* player : mcServer->configManager->playerEntities) {
+                    if (!player || player->isDead || player->health <= 0) {
+                        continue;
+                    }
                     // Java: item.boundingBox intersects player.boundingBox.expand(1.0, 0.0, 1.0)
                     // Player bbox: [posX±w/2, posY..posY+h, posZ±w/2]
                     // Expanded by (1,0,1): [posX±(w/2+1), posY..posY+h, posZ±(w/2+1)]
