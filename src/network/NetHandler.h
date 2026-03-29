@@ -31,6 +31,7 @@ public:
     // Disconnect
     virtual void handleKickDisconnect(Packet255KickDisconnect& pkt) { unexpectedPacket(); }
     virtual void handleErrorMessage(const std::string& reason) = 0;
+    virtual bool shouldBypassReadTimeout() const { return false; }
 
     virtual void handleGenericPacket(Packet& pkt) { unexpectedPacket(); }
 
