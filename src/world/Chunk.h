@@ -34,6 +34,11 @@ struct ChunkAnimalData {
     double posX, posY, posZ;
 };
 
+struct ChunkBoatData {
+    std::vector<uint8_t> nbtData;
+    double posX, posY, posZ;
+};
+
 class Chunk {
 public:
     const int xPosition;
@@ -47,6 +52,7 @@ public:
     std::vector<ChunkEntityData> pendingItems;
     std::vector<ChunkAnimalData> pendingAnimals;
     std::vector<ChunkAnimalData> pendingMonsters;
+    std::vector<ChunkBoatData> pendingBoats;
 
     // Direct flat arrays for massive CPU cache-locality (C++ advantage)
     std::vector<uint8_t> blocks;      // 32768 bytes

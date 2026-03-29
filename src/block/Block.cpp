@@ -55,6 +55,13 @@ class BlockFluid : public Block {
 public:
     BlockFluid(int id, Material* material) : Block(id, material) {}
 
+    bool canCollideCheck(int metadata, bool includeLiquids) const override {
+        if (metadata >= 8) {
+            metadata = 0;
+        }
+        return includeLiquids && metadata == 0;
+    }
+
     void onBlockAdded(World* world, int x, int y, int z) override {
         world->scheduleBlockUpdate(x, y, z, blockID, tickRate());
     }

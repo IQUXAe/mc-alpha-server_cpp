@@ -132,6 +132,7 @@ bool MinecraftServer::initialize() {
 
     // Initialize entity tracker
     entityTracker = std::make_unique<EntityTracker>(this);
+    worldMngr->registerLoadedEntitiesWithTracker(entityTracker.get());
 
     // Spawn position is already set by World constructor, but we ensure it here
     spawnX_ = worldMngr->spawnX;

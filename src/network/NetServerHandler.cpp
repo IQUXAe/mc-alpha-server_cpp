@@ -10,6 +10,8 @@
 #include "../world/TileEntitySign.h"
 #include "../block/Block.h"
 #include "../entity/EntityItem.h"
+#include "../core/Item.h"
+#include "../core/Material.h"
 #include "../core/NBT.h"
 #include "../core/Logger.h"
 
@@ -275,6 +277,12 @@ void NetServerHandler::tick() {
             ++it;
         }
     }
+
+    // Re-check tracked entities after new chunks become visible to this player.
+    // This avoids relog races where boat spawn packets are missed until much later.
+    if (sent > 0 && mcServer_ && mcServer_->entityTracker) {
+        mcServer_->entityTracker->sendAllToPlayer(player_);
+    }
 }
 
 void NetServerHandler::handleRespawn(Packet9Respawn&) {
@@ -338,7 +346,10 @@ void NetServerHandler::handleUseEntity(Packet7UseEntity& pkt) {
     if (!pkt.isLeftClick) {
         if (auto* boat = dynamic_cast<EntityBoat*>(target)) {
             if (boat->riddenByEntity && boat->riddenByEntity != player_) {
-                return;
+                if (dynamic_cast<EntityPlayerMP*>(boat->riddenByEntity)) {
+                    return;
+                }
+                boat->riddenByEntity->mountEntity(nullptr);
             }
             player_->mountEntity(player_->ridingEntity == boat ? nullptr : boat);
             if (player_->ridingEntity) {
@@ -854,9 +865,31 @@ void NetServerHandler::handlePlace(Packet15Place& pkt) {
                 }
             }
 
+            bool used = false;
             if (itemstack) {
-                player_->itemInWorldManager->activeBlockOrUseItem(
-                    player_, mcServer_->worldMngr.get(), itemstack, x, y, z, direction);
+                const bool isBoatItem = Item::boat && itemstack->itemID == Item::boat->itemID;
+                const bool clickedWater = mcServer_->worldMngr->getBlockMaterial(x, y, z) == &Material::water;
+
+                if (isBoatItem && clickedWater) {
+                    auto boatEntity = std::make_unique<EntityBoat>(mcServer_->worldMngr.get(),
+                        static_cast<double>(x) + 0.5,
+                        static_cast<double>(y) + 1.5,
+                        static_cast<double>(z) + 0.5);
+                    mcServer_->worldMngr->spawnEntityInWorld(std::move(boatEntity));
+                    if (itemstack->stackSize > 0) {
+                        --itemstack->stackSize;
+                    }
+                    used = true;
+                } else {
+                    used = player_->itemInWorldManager->activeBlockOrUseItem(
+                        player_, mcServer_->worldMngr.get(), itemstack, x, y, z, direction);
+
+                    // Alpha boats are right-click items; when client sends a place-on-block packet,
+                    // fall back to onItemRightClick so boat placement still works.
+                    if (!used && isBoatItem) {
+                        player_->itemInWorldManager->useItem(player_, mcServer_->worldMngr.get(), itemstack);
+                    }
+                }
             }
 
             for (auto& s : player_->inventory.mainInventory) {

@@ -432,21 +432,25 @@ ItemStack ItemBoat::onItemRightClick(ItemStack* stack, World* world, EntityPlaye
         return stack ? stack->copy() : ItemStack();
     }
 
-    const double pitchRadians = -static_cast<double>(player->rotationPitch) * std::numbers::pi / 180.0;
-    const double yawRadians = -static_cast<double>(player->rotationYaw) * std::numbers::pi / 180.0 - std::numbers::pi;
-    const double lookY = std::sin(pitchRadians);
-    const double lookHorizontal = -std::cos(pitchRadians);
-    const double lookX = std::sin(yawRadians) * lookHorizontal;
-    const double lookZ = std::cos(yawRadians) * lookHorizontal;
+    constexpr float partialTick = 1.0f;
+    const float pitch = player->prevRotationPitch + (player->rotationPitch - player->prevRotationPitch) * partialTick;
+    const float yaw = player->prevRotationYaw + (player->rotationYaw - player->prevRotationYaw) * partialTick;
+    const double startX = player->prevPosX + (player->posX - player->prevPosX) * static_cast<double>(partialTick);
+    const double startY = player->prevPosY + (player->posY - player->prevPosY) * static_cast<double>(partialTick)
+                        + 1.62 - static_cast<double>(player->yOffset);
+    const double startZ = player->prevPosZ + (player->posZ - player->prevPosZ) * static_cast<double>(partialTick);
 
-    const Vec3D start(player->posX, player->posY + player->getEyeHeight(), player->posZ);
+    const float cosYaw = MathHelper::cos(-yaw * (static_cast<float>(std::numbers::pi) / 180.0f) - static_cast<float>(std::numbers::pi));
+    const float sinYaw = MathHelper::sin(-yaw * (static_cast<float>(std::numbers::pi) / 180.0f) - static_cast<float>(std::numbers::pi));
+    const float lookHorizontal = -MathHelper::cos(-pitch * (static_cast<float>(std::numbers::pi) / 180.0f));
+    const float lookY = MathHelper::sin(-pitch * (static_cast<float>(std::numbers::pi) / 180.0f));
+    const float lookX = sinYaw * lookHorizontal;
+    const float lookZ = cosYaw * lookHorizontal;
+
+    const Vec3D start(startX, startY, startZ);
     const Vec3D end = start.addVector(lookX * 5.0, lookY * 5.0, lookZ * 5.0);
     auto hit = world->rayTraceBlocks(start, end, true);
     if (!hit) {
-        return stack->copy();
-    }
-
-    if (world->getBlockMaterial(hit->blockX, hit->blockY, hit->blockZ) != &Material::water) {
         return stack->copy();
     }
 
