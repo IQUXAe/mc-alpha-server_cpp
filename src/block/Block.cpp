@@ -226,11 +226,13 @@ public:
 
 class BlockCactus : public Block {
 public:
-    BlockCactus(int id, Material* mat) : Block(id, mat) {}
+    BlockCactus(int id, Material* mat) : Block(id, mat) {
+        setBlockBounds(0.0625f, 0.0f, 0.0625f, 0.9375f, 1.0f, 0.9375f);
+    }
     void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
         if (!canBlockStay(world, x, y, z)) {
             dropBlockAsItem(world, x, y, z, world->getBlockMetadata(x, y, z));
-            world->setBlockAndUpdate(x, y, z, 0);
+            world->setBlockWithNotify(x, y, z, 0);
         }
     }
     bool canBlockStay(World* world, int x, int y, int z) const override {
@@ -261,7 +263,7 @@ public:
     void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
         if (!canBlockStay(world, x, y, z)) {
             dropBlockAsItem(world, x, y, z, 0);
-            world->setBlockAndUpdate(x, y, z, 0);
+            world->setBlockWithNotify(x, y, z, 0);
         }
     }
     bool isReplaceable() const override { return true; }

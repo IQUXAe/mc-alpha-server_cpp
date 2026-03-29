@@ -46,6 +46,8 @@ bool MinecraftServer::initialize() {
     spawnAnimals_           = propertyManager->getBooleanProperty("spawn-animals", true);
     spawnMonsters_          = propertyManager->getBooleanProperty("spawn-monsters", true);
     pvpEnabled_             = propertyManager->getBooleanProperty("pvp", true);
+    difficulty_             = propertyManager->getIntProperty("difficulty", 2);
+    difficulty_             = std::clamp(difficulty_, 0, 3);
     viewDistance_           = propertyManager->getIntProperty("view-distance", 10);
     if (viewDistance_ < 3)  viewDistance_ = 3;
     if (viewDistance_ > 15) viewDistance_ = 15;

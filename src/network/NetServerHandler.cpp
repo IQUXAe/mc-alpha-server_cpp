@@ -296,6 +296,12 @@ void NetServerHandler::handleRespawn(Packet9Respawn&) {
         return;
     }
 
+    auto* tracker = (mcServer_ && mcServer_->entityTracker) ? mcServer_->entityTracker.get() : nullptr;
+    if (tracker) {
+        // Remove the dead tracked player first so other clients destroy the corpse entity.
+        tracker->removeEntity(player_);
+    }
+
     player_->isDead = false;
     player_->health = player_->maxHealth;
     player_->hurtTime = 0;
@@ -312,6 +318,10 @@ void NetServerHandler::handleRespawn(Packet9Respawn&) {
     const double spawnY = mcServer_->worldMngr->spawnY;
     const double spawnZ = mcServer_->worldMngr->spawnZ + 0.5;
     player_->setPositionAndRotation(spawnX, spawnY, spawnZ, 0.0f, 0.0f);
+
+    if (tracker) {
+        tracker->addEntity(player_);
+    }
 
     sendPacket(std::make_unique<Packet9Respawn>());
     sendPacket(std::make_unique<Packet8UpdateHealth>(player_->health));

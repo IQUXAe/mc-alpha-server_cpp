@@ -269,7 +269,7 @@ void Entity::updateEnvironmentalState() {
     }
 
     const int bbMinX = MathHelper::floor_double(boundingBox.minX);
-    const int bbMinY = MathHelper::floor_double(boundingBox.minY);
+    const int bbMinY = MathHelper::floor_double(boundingBox.minY - 0.001);
     const int bbMinZ = MathHelper::floor_double(boundingBox.minZ);
     const int bbMaxX = MathHelper::floor_double(boundingBox.maxX);
     const int bbMaxY = MathHelper::floor_double(boundingBox.maxY);
@@ -284,7 +284,14 @@ void Entity::updateEnvironmentalState() {
                 if (blockId == 51) {
                     touchedFire = true;
                 } else if (blockId == 81) {
-                    touchedCactus = true;
+                    Block* cactusBlock = Block::blocksList[blockId];
+                    if (!cactusBlock) {
+                        continue;
+                    }
+                    auto cactusBox = cactusBlock->getCollisionBoundingBoxFromPool(worldObj, x, y, z);
+                    if (cactusBox && boundingBox.expand(0.001, 0.001, 0.001).intersectsWith(*cactusBox)) {
+                        touchedCactus = true;
+                    }
                 }
             }
         }
