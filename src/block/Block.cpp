@@ -53,28 +53,6 @@ bool isChunkAreaLoaded(World* world, int minX, int minZ, int maxX, int maxZ) {
     return true;
 }
 
-bool hasNearbyLog(World* world, int x, int y, int z, int radius) {
-    if (!world) {
-        return false;
-    }
-
-    if (!isChunkAreaLoaded(world, x - radius, z - radius, x + radius, z + radius)) {
-        return true;
-    }
-
-    for (int checkX = x - radius; checkX <= x + radius; ++checkX) {
-        for (int checkY = std::max(0, y - radius); checkY <= std::min(CHUNK_SIZE_Y - 1, y + radius); ++checkY) {
-            for (int checkZ = z - radius; checkZ <= z + radius; ++checkZ) {
-                if (world->getBlockIdNoChunkLoad(checkX, checkY, checkZ) == 17) {
-                    return true;
-                }
-            }
-        }
-    }
-
-    return false;
-}
-
 void markBlocksForUpdate(World* world, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
     if (!world) {
         return;
@@ -384,7 +362,7 @@ public:
             ++height;
         }
 
-        if (height < 3 && randomChance(world, 3)) {
+        if (height < 3) {
             uint8_t age = world->getBlockMetadata(x, y, z);
             if (age >= kPlantGrowthStageMax) {
                 world->setBlockWithNotify(x, y + 1, z, blockID);
@@ -439,7 +417,7 @@ public:
             ++height;
         }
 
-        if (height < 3 && randomChance(world, 3)) {
+        if (height < 3) {
             uint8_t age = world->getBlockMetadata(x, y, z);
             if (age >= kPlantGrowthStageMax) {
                 world->setBlockWithNotify(x, y + 1, z, blockID);
@@ -533,25 +511,29 @@ public:
 
 class BlockLeaves : public Block {
 public:
-    BlockLeaves(int id, Material* material) : Block(id, material) {}
+    BlockLeaves(int id, Material* material) : Block(id, material) { setTickOnLoad(true); }
     void onBlockAdded(World* world, int x, int y, int z) override {
         scheduleBlockTick(world, this, x, y, z);
     }
     void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
-        scheduleBlockTick(world, this, x, y, z);
+        field_663_c = 0;
+        updateLeafDistance(world, x, y, z);
     }
     void updateTick(World* world, int x, int y, int z) override {
-        if (hasNearbyLog(world, x, y, z, 4)) {
+        if (!world) {
             return;
         }
 
-        if (!randomChance(world, 4)) {
-            scheduleBlockTick(world, this, x, y, z);
-            return;
+        int metadata = world->getBlockMetadata(x, y, z);
+        if (metadata == 0) {
+            field_663_c = 0;
+            updateLeafDistance(world, x, y, z);
+        } else if (metadata == 1) {
+            dropBlockAsItem(world, x, y, z, metadata);
+            world->setBlockWithNotify(x, y, z, 0);
+        } else if (randomChance(world, 10)) {
+            updateLeafDistance(world, x, y, z);
         }
-
-        dropBlockAsItemWithChance(world, x, y, z, world->getBlockMetadata(x, y, z), 1.0f);
-        world->setBlockWithNotify(x, y, z, 0);
     }
     int tickRate() const override { return 40; }
     void dropBlockAsItemWithChance(World* world, int x, int y, int z, int metadata, float chance) override {
@@ -564,7 +546,7 @@ public:
             return;
         }
 
-        if (!randomChance(world, 16)) {
+        if (!randomChance(world, 20)) {
             return;
         }
 
@@ -579,6 +561,89 @@ public:
     }
     int quantityDropped() const override { return 0; }
     int idDropped(int metadata) const override { return 0; }
+
+private:
+    int field_663_c = 0;
+
+    void updateLeafDistance(World* world, int x, int y, int z) {
+        if (!world || field_663_c++ >= 100) {
+            return;
+        }
+
+        // FIX 2: In Alpha 1.2.6, leaves on solid ground don't decay!
+        int candidate = 0;
+        Material* materialBelow = world->getBlockMaterialNoChunkLoad(x, y - 1, z);
+        if (materialBelow && materialBelow->isSolid()) {
+            candidate = 16;
+        }
+
+        int metadata = world->getBlockMetadata(x, y, z);
+        if (metadata == 0) {
+            metadata = 1;
+            world->setBlockMetadata(x, y, z, 1);
+            world->markBlockNeedsUpdate(x, y, z);
+        }
+
+        // Check neighbors (Notch forgot y+1, but we keep it for canopy reliability)
+        candidate = propagateLeafDistance(world, x - 1, y, z, candidate);
+        candidate = propagateLeafDistance(world, x + 1, y, z, candidate);
+        candidate = propagateLeafDistance(world, x, y - 1, z, candidate);
+        candidate = propagateLeafDistance(world, x, y + 1, z, candidate);
+        candidate = propagateLeafDistance(world, x, y, z - 1, candidate);
+        candidate = propagateLeafDistance(world, x, y, z + 1, candidate);
+
+        int newMetadata = candidate - 1;
+        if (newMetadata < 10) {
+            newMetadata = 1; // Charge depleted, order to decay
+        }
+
+        if (newMetadata != metadata) {
+            world->setBlockMetadata(x, y, z, static_cast<uint8_t>(newMetadata));
+            world->markBlockNeedsUpdate(x, y, z); // Packet to client
+            
+            // FIX 1: CRITICAL!
+            // Force neighbors to recalculate their light/life,
+            // otherwise the flood-fill chain reaction stops here!
+            world->notifyBlocksOfNeighborChange(x, y, z, blockID);
+
+            // Specific decay propagation when losing connection to log
+            updateNeighborLeafDistance(world, x - 1, y, z, metadata);
+            updateNeighborLeafDistance(world, x + 1, y, z, metadata);
+            updateNeighborLeafDistance(world, x, y - 1, z, metadata);
+            updateNeighborLeafDistance(world, x, y + 1, z, metadata);
+            updateNeighborLeafDistance(world, x, y, z - 1, metadata);
+            updateNeighborLeafDistance(world, x, y, z + 1, metadata);
+        }
+    }
+
+    int propagateLeafDistance(World* world, int x, int y, int z, int current) const {
+        const int blockId = world->getBlockIdNoChunkLoad(x, y, z);
+        
+        if (blockId == 17) { // 17 = Log
+            return 16; // Maximum life charge
+        }
+        
+        if (blockId == blockID) { // Neighboring leaf
+            const int metadata = world->getBlockMetadata(x, y, z);
+            // If neighbor is alive and its charge is greater than ours, adopt it
+            if (metadata != 0 && metadata > current) {
+                return metadata;
+            }
+        }
+
+        return current;
+    }
+
+    void updateNeighborLeafDistance(World* world, int x, int y, int z, int previousMetadata) {
+        if (world->getBlockIdNoChunkLoad(x, y, z) != blockID) {
+            return;
+        }
+
+        const int metadata = world->getBlockMetadata(x, y, z);
+        if (metadata != 0 && metadata == previousMetadata - 1) {
+            updateLeafDistance(world, x, y, z);
+        }
+    }
 };
 
 class BlockSapling : public Block {

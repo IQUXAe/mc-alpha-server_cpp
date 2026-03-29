@@ -72,7 +72,9 @@ public:
 
     // Chunk management
     Chunk* getChunk(int chunkX, int chunkZ, bool generate = true);
+    Chunk* getLoadedChunk(int chunkX, int chunkZ);
     Chunk* getChunkFromBlockCoords(int x, int z, bool generate = false);
+    Chunk* getLoadedChunkFromBlockCoords(int x, int z);
     bool chunkExists(int chunkX, int chunkZ) const;
     void ensureChunkPopulated(int chunkX, int chunkZ);  // Force population if not already done
     void requestChunkAsync(int chunkX, int chunkZ, int priority = 1);
@@ -88,6 +90,7 @@ public:
 
     // Block access and modification
     uint8_t getBlockId(int x, int y, int z);
+    uint8_t getBlockIdLoadedOnly(int x, int y, int z);
     uint8_t getBlockIdNoChunkLoad(int x, int y, int z);
     uint8_t getBlockMetadata(int x, int y, int z);
     bool setBlock(int x, int y, int z, uint8_t blockId);
