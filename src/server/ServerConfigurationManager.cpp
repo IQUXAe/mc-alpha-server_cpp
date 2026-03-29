@@ -96,6 +96,11 @@ void ServerConfigurationManager::playerLoggedOut(EntityPlayerMP* player) {
         Logger::info("Saved player data for {}", player->username);
 
     std::erase(playerEntities, player);
+
+    if (playerEntities.empty() && mcServer_ && mcServer_->worldMngr) {
+        Logger::info("Last player left; flushing world state to disk.");
+        mcServer_->worldMngr->saveWorld(true);
+    }
 }
 
 void ServerConfigurationManager::broadcastPacket(std::unique_ptr<Packet> pkt) {

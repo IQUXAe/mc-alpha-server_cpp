@@ -119,7 +119,7 @@ public:
     void spawnEntityInWorld(std::unique_ptr<Entity> entity);
     void removeEntity(Entity* entity);
 
-    void saveWorld();
+    void saveWorld(bool flushToDisk = false);
 
     // TileEntity management
     TileEntity* getTileEntity(int x, int y, int z);
@@ -136,6 +136,7 @@ private:
     void findSafeSpawnPoint();
     void prewarmSpawnArea();
     void saveWorker(std::stop_token st);
+    void waitForPendingSaves();
     void chunkWorker(std::stop_token st);
     bool loadLevelDat();
     void saveLevelDat();
@@ -163,8 +164,10 @@ private:
     std::queue<SaveTask> saveQueue_;
     std::mutex saveMutex_;
     std::condition_variable saveCondition_;
+    std::condition_variable saveDrainedCondition_;
     std::jthread saveThread_;
     std::atomic<bool> stopSaving_{false};
+    size_t activeSaveTasks_ = 0;
 
     struct PreparedChunk {
         std::unique_ptr<Chunk> chunk;
