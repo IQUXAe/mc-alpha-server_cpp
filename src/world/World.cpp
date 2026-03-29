@@ -463,20 +463,25 @@ void World::tick() {
     auto it = scheduledTicks.begin();
     while (it != scheduledTicks.end() && maxTicks-- > 0) {
         if (it->scheduledTime > worldTime) {
-            break; // Since it's a set sorted by scheduledTime, subsequent entries are also in the future
+            break;
         }
-        
+
         NextTickListEntry entry = *it;
         scheduledTicks.erase(it);
-        
-        uint8_t currentBlock = getBlockId(entry.x, entry.y, entry.z);
+
+        if (!getLoadedChunkFromBlockCoords(entry.x, entry.z)) {
+            it = scheduledTicks.begin();
+            continue;
+        }
+
+        uint8_t currentBlock = getBlockIdLoadedOnly(entry.x, entry.y, entry.z);
         if (currentBlock == entry.blockId && currentBlock > 0) {
             if (Block::blocksList[currentBlock]) {
                 Block::blocksList[currentBlock]->updateTick(this, entry.x, entry.y, entry.z);
             }
         }
-        
-        it = scheduledTicks.begin(); // Re-fetch begin as set might have been modified during updateTick
+
+        it = scheduledTicks.begin();
     }
 
     // Tick entities
@@ -688,6 +693,19 @@ void World::tick() {
                         .posZ = boat->posZ,
                     });
                     entitiesToRemove.insert(boat);
+                }
+
+                for (auto& e : entities_) {
+                    if (!e || e->isDead) continue;
+
+                    if (dynamic_cast<EntityPlayerMP*>(e.get())) continue;
+
+                    int cx = static_cast<int>(std::floor(e->posX)) >> 4;
+                    int cz = static_cast<int>(std::floor(e->posZ)) >> 4;
+
+                    if (cx == chunk->xPosition && cz == chunk->zPosition) {
+                        entitiesToRemove.insert(e.get());
+                    }
                 }
 
                 if (!entitiesToRemove.empty()) {
@@ -1066,6 +1084,16 @@ Chunk* World::getChunkFromBlockCoords(int x, int z, bool generate) {
     return getChunk(x >> 4, z >> 4, generate);
 }
 
+Chunk* World::getLoadedChunk(int chunkX, int chunkZ) {
+    std::lock_guard<std::mutex> lock(chunksMutex_);
+    auto it = chunks_.find(getChunkKey(chunkX, chunkZ));
+    return it != chunks_.end() ? it->second.get() : nullptr;
+}
+
+Chunk* World::getLoadedChunkFromBlockCoords(int x, int z) {
+    return getLoadedChunk(x >> 4, z >> 4);
+}
+
 bool World::chunkExists(int chunkX, int chunkZ) const {
     std::lock_guard<std::mutex> lock(chunksMutex_);
     return chunks_.find(getChunkKey(chunkX, chunkZ)) != chunks_.end();
@@ -1079,6 +1107,15 @@ uint8_t World::getBlockId(int x, int y, int z) {
     if (y < 0 || y >= CHUNK_SIZE_Y) return 0;
 
     Chunk* chunk = getChunkFromBlockCoords(x, z);
+    if (!chunk) return 0;
+
+    return chunk->getBlockID(x & 15, y, z & 15);
+}
+
+uint8_t World::getBlockIdLoadedOnly(int x, int y, int z) {
+    if (y < 0 || y >= CHUNK_SIZE_Y) return 0;
+
+    Chunk* chunk = getLoadedChunkFromBlockCoords(x, z);
     if (!chunk) return 0;
 
     return chunk->getBlockID(x & 15, y, z & 15);
