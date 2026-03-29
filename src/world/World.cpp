@@ -157,6 +157,32 @@ void restorePendingBoats(World* world, Chunk* chunk, std::vector<std::unique_ptr
     chunk->pendingBoats.clear();
 }
 
+void scheduleTickOnLoadForChunk(World* world, Chunk* chunk) {
+    if (!world || !chunk) {
+        return;
+    }
+
+    for (int localX = 0; localX < CHUNK_SIZE_X; ++localX) {
+        for (int localZ = 0; localZ < CHUNK_SIZE_Z; ++localZ) {
+            for (int y = 0; y < CHUNK_SIZE_Y; ++y) {
+                const uint8_t blockId = chunk->getBlockID(localX, y, localZ);
+                if (blockId == 0 || !Block::tickOnLoad[blockId] || !Block::blocksList[blockId]) {
+                    continue;
+                }
+
+                const int tickRate = std::max(1, Block::blocksList[blockId]->tickRate());
+                std::uniform_int_distribution<int> delayDist(1, tickRate * 4);
+                world->scheduleBlockUpdate(
+                    chunk->xPosition * CHUNK_SIZE_X + localX,
+                    y,
+                    chunk->zPosition * CHUNK_SIZE_Z + localZ,
+                    blockId,
+                    delayDist(world->rand));
+            }
+        }
+    }
+}
+
 } // namespace
 
 World::World(MinecraftServer* server, const std::string& savePath, int64_t seed)
@@ -919,6 +945,7 @@ bool World::commitPreparedChunk(uint64_t key) {
     restorePendingBoats(this, chunk, entities_, mcServer ? mcServer->entityTracker.get() : nullptr);
 
     tryPopulateChunksAround(chunk->xPosition, chunk->zPosition);
+    scheduleTickOnLoadForChunk(this, chunk);
     return true;
 }
 
@@ -1012,6 +1039,7 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
             restorePendingAnimals(this, ptr, entities_, mcServer ? mcServer->entityTracker.get() : nullptr);
             restorePendingMonsters(this, ptr, entities_, mcServer ? mcServer->entityTracker.get() : nullptr);
             restorePendingBoats(this, ptr, entities_, mcServer ? mcServer->entityTracker.get() : nullptr);
+            scheduleTickOnLoadForChunk(this, ptr);
             return ptr;
         }
     }
@@ -1029,6 +1057,7 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
     
     chunkProvider->generateChunk(*ptr, true);
     tryPopulateChunksAround(chunkX, chunkZ);
+    scheduleTickOnLoadForChunk(this, ptr);
 
     return ptr;
 }
@@ -1695,6 +1724,14 @@ std::optional<MovingObjectPosition> World::rayTraceBlocks(const Vec3D& from, con
         if (!hitLiquid) {
             if (auto collisionBox = block->getCollisionBoundingBoxFromPool(this, currentX, currentY, currentZ)) {
                 hitBox = *collisionBox;
+            } else {
+                hitBox = AxisAlignedBB::getBoundingBox(
+                    static_cast<double>(currentX) + block->minX,
+                    static_cast<double>(currentY) + block->minY,
+                    static_cast<double>(currentZ) + block->minZ,
+                    static_cast<double>(currentX) + block->maxX,
+                    static_cast<double>(currentY) + block->maxY,
+                    static_cast<double>(currentZ) + block->maxZ);
             }
         }
 

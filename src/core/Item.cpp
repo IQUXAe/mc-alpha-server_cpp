@@ -5,11 +5,13 @@
 #include "../world/TileEntitySign.h"
 #include "../entity/EntityPlayerMP.h"
 #include "../entity/EntityBoat.h"
+#include "../entity/EntityItem.h"
 #include "ItemStack.h"
 #include "AxisAlignedBB.h"
 #include "Material.h"
 #include "MathHelper.h"
 #include <iostream>
+#include <random>
 #include <numbers>
 
 Item* Item::itemsList[32000] = {nullptr};
@@ -109,6 +111,83 @@ Item* Item::lightstoneDust = nullptr;
 Item* Item::fishRaw = nullptr;
 Item* Item::fishCooked = nullptr;
 
+namespace {
+
+class ItemHoe : public Item {
+public:
+    ItemHoe(int id, int durability) : Item(id) {
+        maxStackSize = 1;
+        maxDamage = durability;
+    }
+
+    bool onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side) override {
+        if (!stack || !player || !world) {
+            return false;
+        }
+
+        const int blockId = world->getBlockId(x, y, z);
+        const int aboveId = world->getBlockId(x, y + 1, z);
+        Block* aboveBlock = (aboveId > 0 && aboveId < 256) ? Block::blocksList[aboveId] : nullptr;
+        const bool hasSolidCover = aboveBlock
+            && aboveBlock->isCollidable()
+            && aboveBlock->getCollisionBoundingBoxFromPool(world, x, y + 1, z).has_value();
+
+        if (((hasSolidCover || blockId != 2) && blockId != 3)) {
+            return false;
+        }
+
+        if (!world->setBlockWithNotify(x, y, z, 60)) {
+            return false;
+        }
+
+        if (blockId == 2 && Item::seeds) {
+            std::uniform_int_distribution<int> seedRoll(0, 7);
+            if (seedRoll(world->rand) == 0) {
+                auto entity = std::make_unique<EntityItem>(Item::seeds->itemID, 1, 0);
+                entity->setPosition(x + 0.5, y + 1.1, z + 0.5);
+                entity->worldObj = world;
+                std::uniform_real_distribution<double> velocityDist(-0.05, 0.05);
+                entity->motionX = velocityDist(world->rand);
+                entity->motionY = 0.12;
+                entity->motionZ = velocityDist(world->rand);
+                world->spawnEntityInWorld(std::move(entity));
+            }
+        }
+
+        stack->damageItem(1);
+        if (stack->stackSize <= 0) {
+            player->destroyCurrentEquippedItem();
+        }
+        return true;
+    }
+};
+
+class ItemSeeds : public Item {
+public:
+    explicit ItemSeeds(int id) : Item(id) {}
+
+    bool onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side) override {
+        if (!stack || !world || side != 1) {
+            return false;
+        }
+
+        if (world->getBlockId(x, y, z) != 60 || world->getBlockId(x, y + 1, z) != 0) {
+            return false;
+        }
+
+        if (!world->setBlockAndMetadataWithNotify(x, y + 1, z, 59, 0)) {
+            return false;
+        }
+
+        if (stack->stackSize > 0) {
+            --stack->stackSize;
+        }
+        return true;
+    }
+};
+
+} // namespace
+
 Item::Item(int id) : itemID(id + 256) {
     if (id < 0 || id >= 32000 - 256) throw std::runtime_error("Invalid item ID");
     if (itemsList[itemID] != nullptr) throw std::runtime_error("Item slot " + std::to_string(itemID) + " occupied");
@@ -150,12 +229,12 @@ void Item::initItems() {
     silk = (new Item(31));
     feather = (new Item(32));
     gunpowder = (new Item(33));
-    hoeWood = (new Item(34))->setMaxStackSize(1)->setMaxDamage(59);
-    hoeStone = (new Item(35))->setMaxStackSize(1)->setMaxDamage(131);
-    hoeSteel = (new Item(36))->setMaxStackSize(1)->setMaxDamage(250);
-    hoeDiamond = (new Item(37))->setMaxStackSize(1)->setMaxDamage(1561);
-    hoeGold = (new Item(38))->setMaxStackSize(1)->setMaxDamage(32);
-    seeds = (new Item(39));
+    hoeWood = (new ItemHoe(34, 59));
+    hoeStone = (new ItemHoe(35, 131));
+    hoeSteel = (new ItemHoe(36, 250));
+    hoeDiamond = (new ItemHoe(37, 1561));
+    hoeGold = (new ItemHoe(38, 64));
+    seeds = (new ItemSeeds(39));
     wheat = (new Item(40));
     bread = (new ItemFood(41, 5));
     helmetLeather = (new Item(42))->setMaxStackSize(1)->setMaxDamage(33);
