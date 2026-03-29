@@ -761,6 +761,99 @@ public:
     std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World*, int, int, int) override { return std::nullopt; }
 };
 
+class BlockSoil : public Block {
+public:
+    BlockSoil(int id, Material* mat) : Block(id, mat) {
+        setTickOnLoad(true);
+        setBlockBounds(0.0f, 0.0f, 0.0f, 1.0f, 15.0f / 16.0f, 1.0f);
+        setLightOpacity(255);
+    }
+
+    void onBlockAdded(World* world, int x, int y, int z) override {
+        scheduleBlockTick(world, this, x, y, z);
+    }
+
+    std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World*, int x, int y, int z) override {
+        return AxisAlignedBB::getBoundingBox(x, y, z, x + 1, y + 1, z + 1);
+    }
+
+    void updateTick(World* world, int x, int y, int z) override {
+        if (!world) {
+            return;
+        }
+
+        if (randomChance(world, 5)) {
+            if (hasNearbyWater(world, x, y, z)) {
+                setMoisture(world, x, y, z, 7);
+            } else {
+                const int moisture = world->getBlockMetadata(x, y, z);
+                if (moisture > 0) {
+                    setMoisture(world, x, y, z, moisture - 1);
+                } else if (!hasCrops(world, x, y, z)) {
+                    world->setBlockWithNotify(x, y, z, 3);
+                    return;
+                }
+            }
+        }
+
+        scheduleBlockTick(world, this, x, y, z);
+    }
+
+    void onEntityWalking(World* world, int x, int y, int z, Entity* entity) override {
+        if (!world || !entity) {
+            return;
+        }
+        if (randomChance(world, 4)) {
+            world->setBlockWithNotify(x, y, z, 3);
+        }
+    }
+
+    void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
+        if (!world) {
+            return;
+        }
+
+        const int aboveId = world->getBlockId(x, y + 1, z);
+        Block* aboveBlock = (aboveId > 0 && aboveId < 256) ? Block::blocksList[aboveId] : nullptr;
+        if (aboveBlock && aboveBlock->isCollidable()
+            && aboveBlock->getCollisionBoundingBoxFromPool(world, x, y + 1, z).has_value()) {
+            world->setBlockWithNotify(x, y, z, 3);
+            return;
+        }
+
+        scheduleBlockTick(world, this, x, y, z);
+    }
+
+    int idDropped(int metadata) const override { return 3; }
+
+private:
+    static bool hasNearbyWater(World* world, int x, int y, int z) {
+        for (int checkX = x - 4; checkX <= x + 4; ++checkX) {
+            for (int checkY = y; checkY <= y + 1; ++checkY) {
+                for (int checkZ = z - 4; checkZ <= z + 4; ++checkZ) {
+                    Material* material = world->getBlockMaterial(checkX, checkY, checkZ);
+                    if (material == &Material::water) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    static bool hasCrops(World* world, int x, int y, int z) {
+        return world->getBlockId(x, y + 1, z) == 59;
+    }
+
+    static void setMoisture(World* world, int x, int y, int z, int moisture) {
+        if (world->getBlockMetadata(x, y, z) == moisture) {
+            return;
+        }
+        world->setBlockMetadata(x, y, z, static_cast<uint8_t>(moisture));
+        world->markBlockNeedsUpdate(x, y, z);
+    }
+};
+
 void Block::initBlocks() {
     stone = (new BlockStone(1, &Material::rock))->setHardness(1.5f)->setResistance(10.0f);
     grass = (new BlockGrass(2, &Material::ground))->setHardness(0.6f);
@@ -820,7 +913,7 @@ void Block::initBlocks() {
     (new Block(57, &Material::iron))->setHardness(5.0f);     // diamond block
     (new Block(58, &Material::wood))->setHardness(2.5f);     // crafting table
     (new BlockCrops(59, &Material::plants))->setHardness(0.0f)->setLightOpacity(0)->setTickOnLoad(true);   // crops
-    (new Block(60, &Material::ground))->setHardness(0.6f);   // farmland
+    (new BlockSoil(60, &Material::ground))->setHardness(0.6f);   // farmland
     blocksList[61] = new BlockFurnace(61, false);            // furnace idle
     blocksList[61]->setHardness(3.5f);
     blocksList[62] = new BlockFurnace(62, true);             // furnace active

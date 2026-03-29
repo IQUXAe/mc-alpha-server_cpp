@@ -85,6 +85,20 @@ void Entity::moveEntity(double dx, double dy, double dz) {
     if (!suppressMoveFallState) {
         updateFallState(dy);
     }
+
+    if (worldObj && onGround && (oldX != dx || oldZ != dz)) {
+        const int blockX = MathHelper::floor_double(posX);
+        const int blockY = MathHelper::floor_double(boundingBox.minY - 0.2);
+        const int blockZ = MathHelper::floor_double(posZ);
+        const int blockId = worldObj->getBlockIdNoChunkLoad(blockX, blockY, blockZ);
+        if (blockId > 0) {
+            Block* block = Block::blocksList[blockId];
+            if (block) {
+                block->onEntityWalking(worldObj, blockX, blockY, blockZ, this);
+            }
+        }
+    }
+
     updateEnvironmentalState();
 }
 

@@ -84,6 +84,7 @@ public:
     virtual void onBlockAdded(World* world, int x, int y, int z) {}
     virtual void onBlockRemoval(World* world, int x, int y, int z) {}
     virtual void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) {}
+    virtual void onEntityWalking(World* world, int x, int y, int z, Entity* entity) {}
     virtual void onBlockDestroyedByPlayer(World* world, int x, int y, int z, int metadata) {}
     virtual bool blockActivated(World* world, int x, int y, int z, EntityPlayer* player) { return false; }
     
