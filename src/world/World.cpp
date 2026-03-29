@@ -75,7 +75,11 @@ void restorePendingAnimals(World* world, Chunk* chunk, std::vector<std::unique_p
             continue;
         }
 
-        auto animal = createAnimalEntity(world, animalData.entityId);
+        std::string entityId = animalData.entityId;
+        if (entityId.empty()) {
+            entityId = root->getString("id");
+        }
+        auto animal = createAnimalEntity(world, entityId);
         if (!animal) {
             continue;
         }
@@ -105,7 +109,11 @@ void restorePendingMonsters(World* world, Chunk* chunk, std::vector<std::unique_
             continue;
         }
 
-        auto mob = createHostileEntity(world, mobData.entityId);
+        std::string entityId = mobData.entityId;
+        if (entityId.empty()) {
+            entityId = root->getString("id");
+        }
+        auto mob = createHostileEntity(world, entityId);
         if (!mob) {
             continue;
         }
@@ -172,12 +180,36 @@ World::World(MinecraftServer* server, const std::string& savePath, int64_t seed)
     prewarmSpawnArea();
 }
 
-void World::saveWorld() {
+void World::saveWorld(bool flushToDisk) {
     saveLevelDat();
 
+    std::vector<Chunk*> loadedChunks;
+    {
+        std::lock_guard lock(chunksMutex_);
+        loadedChunks.reserve(chunks_.size());
+        for (const auto& [key, chunk] : chunks_) {
+            if (chunk) {
+                loadedChunks.push_back(chunk.get());
+            }
+        }
+    }
+
+    if (flushToDisk && db_) {
+        waitForPendingSaves();
+
+        int savedCount = 0;
+        for (Chunk* chunk : loadedChunks) {
+            saveChunkImmediate(chunk);
+            ++savedCount;
+        }
+        Logger::info("Saved level.dat and flushed {} loaded chunks to disk.", savedCount);
+        return;
+    }
+
     int savedCount = 0;
-    for (const auto& [key, chunk] : chunks_) {
-        auto data = compressChunkData(chunk.get());
+    for (Chunk* chunk : loadedChunks) {
+        const uint64_t key = getChunkKey(chunk->xPosition, chunk->zPosition);
+        auto data = compressChunkData(chunk);
         {
             std::lock_guard lock(saveMutex_);
             saveQueue_.push({key, std::move(data)});
@@ -497,6 +529,7 @@ void World::tick() {
             auto it = chunks_.find(key);
             if (it != chunks_.end()) {
                 Chunk* chunk = it->second.get();
+                std::unordered_set<Entity*> entitiesToRemove;
 
                 // Move live EntityItems from this chunk into pendingItems before unloading
                 chunk->pendingItems.clear();
@@ -509,7 +542,7 @@ void World::tick() {
                     chunk->pendingItems.push_back({item->itemID, item->count, item->metadata,
                                                    item->age, item->pickupDelay,
                                                    item->posX, item->posY, item->posZ});
-                    item->isDead = true; // will be removed from entities_ in tick()
+                    entitiesToRemove.insert(item);
                 }
 
                 chunk->pendingAnimals.clear();
@@ -532,7 +565,7 @@ void World::tick() {
                         .posY = animal->posY,
                         .posZ = animal->posZ,
                     });
-                    animal->isDead = true;
+                    entitiesToRemove.insert(animal);
                 }
 
                 for (auto& e : entities_) {
@@ -553,7 +586,22 @@ void World::tick() {
                         .posY = mob->posY,
                         .posZ = mob->posZ,
                     });
-                    mob->isDead = true;
+                    entitiesToRemove.insert(mob);
+                }
+
+                if (!entitiesToRemove.empty()) {
+                    if (mcServer && mcServer->entityTracker) {
+                        for (Entity* entity : entitiesToRemove) {
+                            mcServer->entityTracker->removeEntity(entity);
+                        }
+                    }
+
+                    entities_.erase(
+                        std::remove_if(entities_.begin(), entities_.end(),
+                            [&entitiesToRemove](const std::unique_ptr<Entity>& e) {
+                                return e && entitiesToRemove.contains(e.get());
+                            }),
+                        entities_.end());
                 }
 
                 bool shouldSave = true;
@@ -564,12 +612,23 @@ void World::tick() {
                 }
 
                 if (shouldSave) {
-                    std::vector<uint8_t> data = compressChunkData(chunk);
-                    {
-                        std::lock_guard<std::mutex> lock(saveMutex_);
-                        saveQueue_.push({key, data});
+                    const bool hasPendingEntities =
+                        !chunk->pendingItems.empty() ||
+                        !chunk->pendingAnimals.empty() ||
+                        !chunk->pendingMonsters.empty();
+
+                    // Entity unload data is critical; persist synchronously to avoid
+                    // losing mobs/items if the process is restarted right after logout.
+                    if (hasPendingEntities && db_) {
+                        saveChunkImmediate(chunk);
+                    } else {
+                        std::vector<uint8_t> data = compressChunkData(chunk);
+                        {
+                            std::lock_guard<std::mutex> lock(saveMutex_);
+                            saveQueue_.push({key, data});
+                        }
+                        saveCondition_.notify_one();
                     }
-                    saveCondition_.notify_one();
                 }
 
                 // Remove all TileEntities belonging to this chunk so they stop ticking
@@ -1176,15 +1235,18 @@ void World::spawnHostileMobs() {
 
         const int baseX = chunkX * 16;
         const int baseZ = chunkZ * 16;
-        int originX = baseX + (std::rand() % 16);
-        int originY = std::rand() % CHUNK_SIZE_Y;
-        int originZ = baseZ + (std::rand() % 16);
+        const int selectedMob = std::rand() % 4; // Java picks mob class once per chunk attempt.
+        const int originX = baseX + (std::rand() % 16);
+        const int originY = std::rand() % CHUNK_SIZE_Y;
+        const int originZ = baseZ + (std::rand() % 16);
 
-        if (isBlockSolid(originX, originY, originZ) || getBlockMaterial(originX, originY, originZ) != &Material::air) {
+        if (isBlockSolidNoChunkLoad(originX, originY, originZ)
+            || getBlockMaterialNoChunkLoad(originX, originY, originZ) != &Material::air) {
             continue;
         }
 
-        for (int groupAttempt = 0; groupAttempt < 3; ++groupAttempt) {
+        bool moveToNextChunk = false;
+        for (int groupAttempt = 0; groupAttempt < 3 && !moveToNextChunk; ++groupAttempt) {
             int groupCount = 0;
             int x = originX;
             int y = originY;
@@ -1192,11 +1254,12 @@ void World::spawnHostileMobs() {
 
             for (int packAttempt = 0; packAttempt < 4; ++packAttempt) {
                 x += (std::rand() % 6) - (std::rand() % 6);
-                y += (std::rand() % 1) - (std::rand() % 1);
                 z += (std::rand() % 6) - (std::rand() % 6);
 
-                if (!isBlockSolid(x, y - 1, z) || isBlockSolid(x, y, z) || getBlockMaterial(x, y, z)->getIsLiquid()
-                    || isBlockSolid(x, y + 1, z)) {
+                if (!isBlockSolidNoChunkLoad(x, y - 1, z)
+                    || isBlockSolidNoChunkLoad(x, y, z)
+                    || getBlockMaterialNoChunkLoad(x, y, z)->getIsLiquid()
+                    || isBlockSolidNoChunkLoad(x, y + 1, z)) {
                     continue;
                 }
 
@@ -1215,22 +1278,37 @@ void World::spawnHostileMobs() {
                 }
 
                 std::unique_ptr<EntityMob> mob;
-                switch (std::rand() % 4) {
+                switch (selectedMob) {
                     case 0: mob = std::make_unique<EntitySpider>(this); break;
                     case 1: mob = std::make_unique<EntityZombie>(this); break;
                     case 2: mob = std::make_unique<EntitySkeleton>(this); break;
                     default: mob = std::make_unique<EntityCreeper>(this); break;
                 }
+                if (!mob) {
+                    continue;
+                }
 
-                mob->setPositionAndRotation(fx, fy, fz, static_cast<float>(std::rand() % 360), 0.0f);
+                mob->setPositionAndRotation(fx, fy, fz, static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX) * 360.0f, 0.0f);
                 if (!mob->getCanSpawnHere()) {
                     continue;
                 }
 
                 const int maxInChunk = mob->getMaxSpawnedInChunk();
+                EntityMob* spawnedMob = mob.get();
                 spawnEntityInWorld(std::move(mob));
                 ++groupCount;
+
+                // Alpha spider jockey chance.
+                if (dynamic_cast<EntitySpider*>(spawnedMob) != nullptr && (std::rand() % 100) == 0) {
+                    auto skeleton = std::make_unique<EntitySkeleton>(this);
+                    skeleton->setPositionAndRotation(fx, fy, fz, spawnedMob->rotationYaw, 0.0f);
+                    EntitySkeleton* skelPtr = skeleton.get();
+                    spawnEntityInWorld(std::move(skeleton));
+                    skelPtr->mountEntity(spawnedMob);
+                }
+
                 if (groupCount >= maxInChunk) {
+                    moveToNextChunk = true; // Java: continue label110
                     break;
                 }
             }
@@ -1278,17 +1356,18 @@ void World::spawnPassiveMobs() {
 
         const int baseX = chunkX * 16;
         const int baseZ = chunkZ * 16;
-        int originX = baseX + (std::rand() % 16);
-        int originY = std::rand() % CHUNK_SIZE_Y;
-        int originZ = baseZ + (std::rand() % 16);
+        const int selectedAnimal = std::rand() % 4; // Java picks class once per chunk attempt.
+        const int originX = baseX + (std::rand() % 16);
+        const int originY = std::rand() % CHUNK_SIZE_Y;
+        const int originZ = baseZ + (std::rand() % 16);
 
-        if (isBlockSolid(originX, originY, originZ) || getBlockMaterial(originX, originY, originZ) != &Material::air) {
+        if (isBlockSolidNoChunkLoad(originX, originY, originZ)
+            || getBlockMaterialNoChunkLoad(originX, originY, originZ) != &Material::air) {
             continue;
         }
 
-        const MobSpawnerBase biome = func_4077_a()->func_4067_a(baseX + 8, baseZ + 8);
-
-        for (int groupAttempt = 0; groupAttempt < 3; ++groupAttempt) {
+        bool moveToNextChunk = false;
+        for (int groupAttempt = 0; groupAttempt < 3 && !moveToNextChunk; ++groupAttempt) {
             int groupCount = 0;
             int x = originX;
             int y = originY;
@@ -1296,11 +1375,12 @@ void World::spawnPassiveMobs() {
 
             for (int packAttempt = 0; packAttempt < 4; ++packAttempt) {
                 x += (std::rand() % 6) - (std::rand() % 6);
-                y += (std::rand() % 1) - (std::rand() % 1);
                 z += (std::rand() % 6) - (std::rand() % 6);
 
-                if (!isBlockSolid(x, y - 1, z) || isBlockSolid(x, y, z) || getBlockMaterial(x, y, z)->getIsLiquid()
-                    || isBlockSolid(x, y + 1, z)) {
+                if (!isBlockSolidNoChunkLoad(x, y - 1, z)
+                    || isBlockSolidNoChunkLoad(x, y, z)
+                    || getBlockMaterialNoChunkLoad(x, y, z)->getIsLiquid()
+                    || isBlockSolidNoChunkLoad(x, y + 1, z)) {
                     continue;
                 }
 
@@ -1319,22 +1399,17 @@ void World::spawnPassiveMobs() {
                 }
 
                 std::unique_ptr<EntityAnimals> animal;
-                switch (biome.type) {
-                    default:
-                        switch (std::rand() % 4) {
-                            case 0: animal = std::make_unique<EntitySheep>(this); break;
-                            case 1: animal = std::make_unique<EntityPig>(this); break;
-                            case 2: animal = std::make_unique<EntityChicken>(this); break;
-                            default: animal = std::make_unique<EntityCow>(this); break;
-                        }
-                        break;
+                switch (selectedAnimal) {
+                    case 0: animal = std::make_unique<EntitySheep>(this); break;
+                    case 1: animal = std::make_unique<EntityPig>(this); break;
+                    case 2: animal = std::make_unique<EntityChicken>(this); break;
+                    default: animal = std::make_unique<EntityCow>(this); break;
                 }
-
                 if (!animal) {
                     continue;
                 }
 
-                animal->setPositionAndRotation(fx, fy, fz, static_cast<float>(std::rand() % 360), 0.0f);
+                animal->setPositionAndRotation(fx, fy, fz, static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX) * 360.0f, 0.0f);
                 if (!animal->getCanSpawnHere()) {
                     continue;
                 }
@@ -1343,6 +1418,7 @@ void World::spawnPassiveMobs() {
                 spawnEntityInWorld(std::move(animal));
                 ++groupCount;
                 if (groupCount >= maxInChunk) {
+                    moveToNextChunk = true; // Java: continue label110
                     break;
                 }
             }
@@ -1589,6 +1665,7 @@ void World::saveWorker(std::stop_token st) {
         while (!saveQueue_.empty()) {
             SaveTask task = std::move(saveQueue_.front());
             saveQueue_.pop();
+            ++activeSaveTasks_;
             lock.unlock();
 
             if (db_) {
@@ -1600,11 +1677,24 @@ void World::saveWorker(std::stop_token st) {
             }
 
             lock.lock();
+            if (activeSaveTasks_ > 0) {
+                --activeSaveTasks_;
+            }
+            if (saveQueue_.empty() && activeSaveTasks_ == 0) {
+                saveDrainedCondition_.notify_all();
+            }
         }
 
         // Exit only when queue is empty AND stop was requested
         if (stopSaving_.load() && saveQueue_.empty()) break;
     }
+}
+
+void World::waitForPendingSaves() {
+    std::unique_lock lock(saveMutex_);
+    saveDrainedCondition_.wait(lock, [this] {
+        return saveQueue_.empty() && activeSaveTasks_ == 0;
+    });
 }
 
 std::vector<uint8_t> World::compressChunkData(Chunk* chunk) {
@@ -1664,12 +1754,24 @@ std::vector<uint8_t> World::compressChunkData(Chunk* chunk) {
     {
         auto animalList = std::make_shared<NBTList>();
         animalList->tagType = NBTTagType::TAG_Compound;
+        std::unordered_set<std::string> seenAnimals;
+
+        auto makeEntityKey = [](const std::string& id, double x, double y, double z) {
+            const int32_t fx = static_cast<int32_t>(std::floor(x * 32.0));
+            const int32_t fy = static_cast<int32_t>(std::floor(y * 32.0));
+            const int32_t fz = static_cast<int32_t>(std::floor(z * 32.0));
+            return id + "#" + std::to_string(fx) + ":" + std::to_string(fy) + ":" + std::to_string(fz);
+        };
 
         for (const auto& animalData : chunk->pendingAnimals) {
             ByteBuffer buf(animalData.nbtData);
             auto root = NBTCompound::readRoot(buf);
             if (root) {
-                animalList->tags.push_back(std::make_shared<NBTCompound>(*root));
+                const std::string id = root->getString("id");
+                const std::string key = makeEntityKey(id, root->getDouble("PosX"), root->getDouble("PosY"), root->getDouble("PosZ"));
+                if (seenAnimals.insert(key).second) {
+                    animalList->tags.push_back(std::make_shared<NBTCompound>(*root));
+                }
             }
         }
 
@@ -1680,6 +1782,8 @@ std::vector<uint8_t> World::compressChunkData(Chunk* chunk) {
             const int cz = static_cast<int>(std::floor(animal->posZ)) >> 4;
             if (cx != chunk->xPosition || cz != chunk->zPosition) continue;
 
+            const std::string key = makeEntityKey(animal->getEntityStringId(), animal->posX, animal->posY, animal->posZ);
+            if (!seenAnimals.insert(key).second) continue;
             auto tag = std::make_shared<NBTCompound>();
             animal->writeToNBT(*tag);
             animalList->tags.push_back(tag);
@@ -1693,12 +1797,24 @@ std::vector<uint8_t> World::compressChunkData(Chunk* chunk) {
     {
         auto monsterList = std::make_shared<NBTList>();
         monsterList->tagType = NBTTagType::TAG_Compound;
+        std::unordered_set<std::string> seenMonsters;
+
+        auto makeEntityKey = [](const std::string& id, double x, double y, double z) {
+            const int32_t fx = static_cast<int32_t>(std::floor(x * 32.0));
+            const int32_t fy = static_cast<int32_t>(std::floor(y * 32.0));
+            const int32_t fz = static_cast<int32_t>(std::floor(z * 32.0));
+            return id + "#" + std::to_string(fx) + ":" + std::to_string(fy) + ":" + std::to_string(fz);
+        };
 
         for (const auto& mobData : chunk->pendingMonsters) {
             ByteBuffer buf(mobData.nbtData);
             auto root = NBTCompound::readRoot(buf);
             if (root) {
-                monsterList->tags.push_back(std::make_shared<NBTCompound>(*root));
+                const std::string id = root->getString("id");
+                const std::string key = makeEntityKey(id, root->getDouble("PosX"), root->getDouble("PosY"), root->getDouble("PosZ"));
+                if (seenMonsters.insert(key).second) {
+                    monsterList->tags.push_back(std::make_shared<NBTCompound>(*root));
+                }
             }
         }
 
@@ -1709,6 +1825,8 @@ std::vector<uint8_t> World::compressChunkData(Chunk* chunk) {
             const int cz = static_cast<int>(std::floor(mob->posZ)) >> 4;
             if (cx != chunk->xPosition || cz != chunk->zPosition) continue;
 
+            const std::string key = makeEntityKey(mob->getEntityStringId(), mob->posX, mob->posY, mob->posZ);
+            if (!seenMonsters.insert(key).second) continue;
             auto tag = std::make_shared<NBTCompound>();
             mob->writeToNBT(*tag);
             monsterList->tags.push_back(tag);
@@ -1807,6 +1925,9 @@ void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data,
     chunk->skylight.data   = level->getByteArray("SkyLight");
     chunk->blocklight.data = level->getByteArray("BlockLight");
     chunk->heightMap    = level->getByteArray("HeightMap");
+    chunk->pendingItems.clear();
+    chunk->pendingAnimals.clear();
+    chunk->pendingMonsters.clear();
 
     // Load TileEntities
     auto tileEntitiesTag = level->tags.find("TileEntities");
@@ -2010,7 +2131,6 @@ void World::saveChunkImmediate(Chunk* chunk) {
         
         if (status.ok()) {
             chunk->isModified = false;
-            Logger::info("Immediately saved chunk ({}, {}) with TileEntities", chunk->xPosition, chunk->zPosition);
         } else {
             Logger::severe("Failed to immediately save chunk: {}", status.ToString());
         }

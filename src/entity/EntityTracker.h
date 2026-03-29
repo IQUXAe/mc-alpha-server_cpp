@@ -28,6 +28,7 @@ struct TrackerEntry {
     bool lastBurning = false;
     int32_t lastMountedEntityId = -1;
     double lastMotionX = 0.0, lastMotionY = 0.0, lastMotionZ = 0.0;
+    int16_t lastHealth = -1;
 
     int tickCounter = 0;
 
@@ -42,6 +43,9 @@ struct TrackerEntry {
         lastYawByte   = static_cast<int8_t>(static_cast<int>(std::floor(e->rotationYaw   * 256.0f / 360.0f)) & 0xFF);
         lastPitchByte = static_cast<int8_t>(static_cast<int>(std::floor(e->rotationPitch * 256.0f / 360.0f)) & 0xFF);
         lastMountedEntityId = e->ridingEntity ? e->ridingEntity->entityId : -1;
+        if (auto* living = dynamic_cast<EntityLiving*>(e)) {
+            lastHealth = living->health;
+        }
     }
 
     // Build the initial spawn packet for this entity

@@ -114,6 +114,7 @@ void TrackerEntry::sendSpawnTo(EntityPlayerMP* player) {
         if (living->fire > 0)
             player->netHandler->sendPacket(
                 std::make_unique<Packet18ArmAnimation>(entity->entityId, 102));
+        lastHealth = living->health;
     }
 
     // Sync lastFixed* to what we just sent so sendUpdates doesn't
@@ -233,6 +234,13 @@ void TrackerEntry::sendUpdates() {
 
     // Sneak state update
     if (auto* living = dynamic_cast<EntityLiving*>(entity)) {
+        if (lastHealth >= 0 && living->health != lastHealth) {
+            if (living->health < lastHealth && living->health > 0) {
+                broadcast(std::make_unique<Packet38EntityStatus>(entity->entityId, 2));
+            }
+            lastHealth = living->health;
+        }
+
         if (living->isSneaking != lastSneaking) {
             lastSneaking = living->isSneaking;
             broadcastIncludingSelf(std::make_unique<Packet18ArmAnimation>(

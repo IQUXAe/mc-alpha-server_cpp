@@ -21,6 +21,9 @@ public:
     explicit EntityAnimals(World* world) {
         worldObj = world;
         stepHeight = 1.0f;
+        // Slightly lower i-frames than vanilla default (20) so co-op hits
+        // combine more reliably while still preventing multi-hit spam in one tick.
+        maxHurtResistantTime = 12;
     }
 
     int getTrackingRange() const override { return 160; }
@@ -56,6 +59,7 @@ public:
         nbt.setFloat("RotationYaw", rotationYaw);
         nbt.setFloat("RotationPitch", rotationPitch);
         nbt.setShort("Health", health);
+        nbt.setShort("MaxHealth", maxHealth);
     }
 
     virtual void readFromNBT(const NBTCompound& nbt) override {
@@ -68,10 +72,13 @@ public:
         motionX = nbt.getDouble("MotionX");
         motionY = nbt.getDouble("MotionY");
         motionZ = nbt.getDouble("MotionZ");
-        health = nbt.getShort("Health");
-        if (health <= 0) {
-            health = maxHealth;
+        const int16_t savedMaxHealth = nbt.getShort("MaxHealth");
+        if (savedMaxHealth > 0) {
+            maxHealth = savedMaxHealth;
         }
+        health = nbt.getShort("Health");
+        if (health > maxHealth) health = maxHealth;
+        if (health <= 0) health = maxHealth;
     }
 
     virtual bool getCanSpawnHere() const;
