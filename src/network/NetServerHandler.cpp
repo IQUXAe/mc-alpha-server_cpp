@@ -2,6 +2,7 @@
 #include "NetServerHandler.h"
 #include "../MinecraftServer.h"
 #include "../entity/EntityPlayerMP.h"
+#include "../entity/EntityBoat.h"
 #include "../entity/EntityTracker.h"
 #include "../world/Chunk.h"
 #include "../world/TileEntity.h"
@@ -15,10 +16,116 @@
 #include <iomanip>
 #include <sstream>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <ranges>
 #include <functional>
 #include <zlib.h>
+
+namespace {
+
+constexpr double kMaxAttackReach = 5.0;
+constexpr double kMaxAttackReachSq = kMaxAttackReach * kMaxAttackReach;
+constexpr double kSoftMovementRejectSq = 225.0;
+constexpr double kHardMovementRejectSq = 900.0;
+
+double clampToRange(double value, double minValue, double maxValue) {
+    return std::max(minValue, std::min(maxValue, value));
+}
+
+double distanceSqToBoundingBox(const Vec3D& point, const AxisAlignedBB& box) {
+    const double closestX = clampToRange(point.xCoord, box.minX, box.maxX);
+    const double closestY = clampToRange(point.yCoord, box.minY, box.maxY);
+    const double closestZ = clampToRange(point.zCoord, box.minZ, box.maxZ);
+    return point.squareDistanceTo(closestX, closestY, closestZ);
+}
+
+bool rayHitsSolidBlock(World* world, const Vec3D& from, const Vec3D& to) {
+    if (!world) {
+        return false;
+    }
+
+    const int minX = MathHelper::floor_double(std::min(from.xCoord, to.xCoord));
+    const int minY = MathHelper::floor_double(std::min(from.yCoord, to.yCoord));
+    const int minZ = MathHelper::floor_double(std::min(from.zCoord, to.zCoord));
+    const int maxX = MathHelper::floor_double(std::max(from.xCoord, to.xCoord));
+    const int maxY = MathHelper::floor_double(std::max(from.yCoord, to.yCoord));
+    const int maxZ = MathHelper::floor_double(std::max(from.zCoord, to.zCoord));
+    const double targetDistSq = from.squareDistanceTo(to);
+
+    for (int x = minX; x <= maxX; ++x) {
+        for (int y = minY; y <= maxY; ++y) {
+            for (int z = minZ; z <= maxZ; ++z) {
+                const int blockId = world->getBlockIdNoChunkLoad(x, y, z);
+                if (blockId <= 0 || blockId >= 256) {
+                    continue;
+                }
+
+                Block* block = Block::blocksList[blockId];
+                if (!block) {
+                    continue;
+                }
+
+                auto collisionBox = block->getCollisionBoundingBoxFromPool(world, x, y, z);
+                if (!collisionBox) {
+                    continue;
+                }
+
+                auto clip = collisionBox->clip(from, to);
+                if (!clip) {
+                    continue;
+                }
+
+                if (from.squareDistanceTo(clip->hitVec) + 1.0E-6 < targetDistSq) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+bool hasLineOfSight(const Entity& attacker, const Entity& target) {
+    if (!attacker.worldObj) {
+        return false;
+    }
+
+    const Vec3D eye(attacker.posX, attacker.posY + attacker.getEyeHeight(), attacker.posZ);
+    const std::array<Vec3D, 3> targetSamples{
+        Vec3D(target.posX, target.boundingBox.minY + 0.1, target.posZ),
+        Vec3D(target.posX, target.posY + target.height * 0.5, target.posZ),
+        Vec3D(target.posX, target.posY + target.getEyeHeight(), target.posZ),
+    };
+
+    for (const Vec3D& sample : targetSamples) {
+        if (!rayHitsSolidBlock(attacker.worldObj, eye, sample)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void broadcastVelocityIfNeeded(MinecraftServer* server, Entity& entity,
+                               double beforeX, double beforeY, double beforeZ) {
+    if (!server || !server->entityTracker) {
+        return;
+    }
+
+    const double dx = entity.motionX - beforeX;
+    const double dy = entity.motionY - beforeY;
+    const double dz = entity.motionZ - beforeZ;
+    if (dx * dx + dy * dy + dz * dz <= 1.0E-6) {
+        return;
+    }
+
+    server->entityTracker->broadcastPacketIncludingSelf(
+        &entity, std::make_unique<Packet28EntityVelocity>(
+            entity.entityId, entity.motionX, entity.motionY, entity.motionZ));
+}
+
+} // namespace
 
 NetServerHandler::NetServerHandler(MinecraftServer* server, std::unique_ptr<NetworkManager> netMgr, EntityPlayerMP* player)
     : mcServer_(server), netManager_(std::move(netMgr)), player_(player) {
@@ -185,6 +292,7 @@ void NetServerHandler::handleRespawn(Packet9Respawn&) {
     player_->motionX = 0.0;
     player_->motionY = 0.0;
     player_->motionZ = 0.0;
+    player_->resetCombatState();
 
     const double spawnX = mcServer_->worldMngr->spawnX + 0.5;
     const double spawnY = mcServer_->worldMngr->spawnY;
@@ -198,7 +306,11 @@ void NetServerHandler::handleRespawn(Packet9Respawn&) {
 }
 
 void NetServerHandler::handleUseEntity(Packet7UseEntity& pkt) {
-    if (!pkt.isLeftClick || !mcServer_ || !mcServer_->entityTracker) {
+    if (!mcServer_ || !mcServer_->entityTracker) {
+        return;
+    }
+
+    if (pkt.playerEntityId != player_->entityId) {
         return;
     }
 
@@ -213,22 +325,46 @@ void NetServerHandler::handleUseEntity(Packet7UseEntity& pkt) {
         return;
     }
 
-    const double reachSq = player_->getDistanceSqToEntity(*target);
-    if (reachSq > 36.0) {
+    const Vec3D attackerEye(player_->posX, player_->posY + player_->getEyeHeight(), player_->posZ);
+    const double reachSq = distanceSqToBoundingBox(attackerEye, target->boundingBox);
+    if (reachSq > kMaxAttackReachSq) {
         return;
     }
 
-    int damage = 1;
-    ItemStack* held = getSelectedItemStack();
-    if (held) {
-        damage = held->getDamageVsEntity(target);
+    if (!hasLineOfSight(*player_, *target)) {
+        return;
     }
+
+    if (!pkt.isLeftClick) {
+        if (auto* boat = dynamic_cast<EntityBoat*>(target)) {
+            if (boat->riddenByEntity && boat->riddenByEntity != player_) {
+                return;
+            }
+            player_->mountEntity(player_->ridingEntity == boat ? nullptr : boat);
+            if (player_->ridingEntity) {
+                player_->ridingEntity->updateRiderPosition();
+            }
+        }
+        return;
+    }
+
+    if (!player_->canAttackNow()) {
+        return;
+    }
+
+    ItemStack* held = getSelectedItemStack();
+    int damage = held ? std::max(1, held->getDamageVsEntity(target)) : 1;
 
     if (damage <= 0) {
         return;
     }
 
+    const double oldMotionX = target->motionX;
+    const double oldMotionY = target->motionY;
+    const double oldMotionZ = target->motionZ;
     target->attackEntityFrom(player_, damage);
+    player_->markAttackPerformed();
+    broadcastVelocityIfNeeded(mcServer_, *target, oldMotionX, oldMotionY, oldMotionZ);
 
     if (held) {
         if (auto* living = dynamic_cast<EntityLiving*>(target)) {
@@ -300,6 +436,7 @@ void NetServerHandler::teleport(double x, double y, double z, float yaw, float p
     lastX_ = x;
     lastY_ = y;
     lastZ_ = z;
+    hasMoved_ = false;
     player_->setPosition(x, y, z);
     player_->rotationYaw = yaw;
     player_->rotationPitch = pitch;
@@ -479,30 +616,106 @@ void NetServerHandler::handleCommand(const std::string& msg) {
 }
 
 void NetServerHandler::handleFlying(Packet10Flying& pkt) {
-    const bool wasOnGround = player_->onGround;
-    const double previousY = player_->posY;
+    if (!hasMoved_) {
+        lastX_ = player_->posX;
+        lastY_ = player_->posY;
+        lastZ_ = player_->posZ;
+        hasMoved_ = true;
+    }
+
+    float yaw = pkt.rotating ? pkt.yaw : player_->rotationYaw;
+    float pitch = pkt.rotating ? pkt.pitch : player_->rotationPitch;
+
+    if (player_->ridingEntity) {
+        player_->rotationYaw = yaw;
+        player_->rotationPitch = pitch;
+        player_->onGround = pkt.onGround;
+        player_->motionX = 0.0;
+        player_->motionY = 0.0;
+        player_->motionZ = 0.0;
+        if (pkt.moving && pkt.y == -999.0 && pkt.stance == -999.0) {
+            player_->motionX = pkt.x;
+            player_->motionZ = pkt.z;
+        }
+        player_->ridingEntity->updateRiderPosition();
+        lastX_ = player_->posX;
+        lastY_ = player_->posY;
+        lastZ_ = player_->posZ;
+        return;
+    }
+
+    if (pkt.moving && pkt.y == -999.0 && pkt.stance == -999.0) {
+        pkt.moving = false;
+    }
 
     if (pkt.moving) {
-        player_->setPosition(pkt.x, pkt.y, pkt.z);
-        lastX_ = pkt.x;
-        lastY_ = pkt.y;
-        lastZ_ = pkt.z;
-
-        if (!pkt.onGround && pkt.y < previousY) {
-            player_->fallDistance += static_cast<float>(previousY - pkt.y);
+        const double stance = pkt.stance - pkt.y;
+        if (stance < 0.1 || stance > 1.65) {
+            kick("Illegal stance");
+            return;
+        }
+        if (std::abs(pkt.x) > 3.2E7 || std::abs(pkt.z) > 3.2E7) {
+            kick("Illegal position");
+            return;
         }
     }
 
-    if (pkt.rotating) {
-        player_->rotationYaw = pkt.yaw;
-        player_->rotationPitch = pkt.pitch;
+    const double baseX = lastX_;
+    const double baseY = lastY_;
+    const double baseZ = lastZ_;
+
+    player_->setPositionAndRotation(baseX, baseY, baseZ, yaw, pitch);
+    player_->motionX = 0.0;
+    player_->motionY = 0.0;
+    player_->motionZ = 0.0;
+
+    if (!pkt.moving) {
+        player_->rotationYaw = yaw;
+        player_->rotationPitch = pitch;
+        player_->onGround = pkt.onGround;
+        lastX_ = player_->posX;
+        lastY_ = player_->posY;
+        lastZ_ = player_->posZ;
+        return;
+    }
+
+    const double moveX = pkt.x - baseX;
+    const double moveY = pkt.y - baseY;
+    const double moveZ = pkt.z - baseZ;
+    const double requestedMoveSq = moveX * moveX + moveY * moveY + moveZ * moveZ;
+
+    if (requestedMoveSq > kHardMovementRejectSq) {
+        kick("Moved too quickly");
+        return;
+    }
+
+    if (requestedMoveSq > kSoftMovementRejectSq) {
+        teleport(baseX, baseY, baseZ, yaw, pitch);
+        return;
+    }
+
+    player_->suppressMoveFallState = true;
+    player_->moveEntity(moveX, moveY, moveZ);
+    player_->suppressMoveFallState = false;
+    player_->rotationYaw = yaw;
+    player_->rotationPitch = pitch;
+
+    const double acceptedDeltaY = player_->posY - baseY;
+    if (pkt.onGround) {
+        if (player_->isInWater) {
+            player_->fallDistance = 0.0f;
+        } else if (player_->fallDistance > 0.0f) {
+            player_->onFall(player_->fallDistance);
+            player_->fallDistance = 0.0f;
+        }
+    } else if (acceptedDeltaY < 0.0) {
+        player_->fallDistance = static_cast<float>(player_->fallDistance - acceptedDeltaY);
     }
 
     player_->onGround = pkt.onGround;
-    if (pkt.onGround && !wasOnGround && player_->fallDistance > 0.0f) {
-        player_->onFall(player_->fallDistance);
-        player_->fallDistance = 0.0f;
-    }
+    lastX_ = player_->posX;
+    lastY_ = player_->posY;
+    lastZ_ = player_->posZ;
 }
 
 void NetServerHandler::handlePlayerPosition(Packet11PlayerPosition& pkt) {
@@ -709,8 +922,7 @@ void NetServerHandler::handleBlockItemSwitch(Packet16BlockItemSwitch& pkt) {
 
 void NetServerHandler::handleArmAnimation(Packet18ArmAnimation& pkt) {
     if (pkt.animate == 1) {
-        auto broadcastPkt = std::make_unique<Packet18ArmAnimation>(player_->entityId, 1);
-        mcServer_->entityTracker->broadcastPacket(player_, std::move(broadcastPkt));
+        player_->swingItem();
     } else if (pkt.animate == 104) {
         player_->isSneaking = true;
     } else if (pkt.animate == 105) {

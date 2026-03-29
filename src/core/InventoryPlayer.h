@@ -35,6 +35,13 @@ public:
         return nullptr;
     }
 
+    const ItemStack* getCurrentItem() const {
+        if (currentItem >= 0 && currentItem < (int)mainInventory.size()) {
+            return mainInventory[currentItem].get();
+        }
+        return nullptr;
+    }
+
     int getInventorySlotContainItem(int id) {
         for (size_t i = 0; i < mainInventory.size(); ++i) {
             if (mainInventory[i] && mainInventory[i]->itemID == id) return i;

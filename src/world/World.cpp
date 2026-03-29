@@ -1431,6 +1431,131 @@ void World::getEntitiesWithinAABBExcludingEntity(Entity* entity, const AxisAlign
     }
 }
 
+bool World::isPlacementVolumeClear(const AxisAlignedBB& mask) {
+    std::vector<Entity*> entities;
+    getEntitiesWithinAABBExcludingEntity(nullptr, mask, entities);
+    for (Entity* entity : entities) {
+        if (entity && !entity->isDead && entity->preventsEntitySpawning()) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::optional<MovingObjectPosition> World::rayTraceBlocks(const Vec3D& from, const Vec3D& to, bool includeLiquids) {
+    Vec3D current = from;
+    const Vec3D target = to;
+
+    if (std::isnan(current.xCoord) || std::isnan(current.yCoord) || std::isnan(current.zCoord)
+        || std::isnan(target.xCoord) || std::isnan(target.yCoord) || std::isnan(target.zCoord)) {
+        return std::nullopt;
+    }
+
+    int targetX = MathHelper::floor_double(target.xCoord);
+    int targetY = MathHelper::floor_double(target.yCoord);
+    int targetZ = MathHelper::floor_double(target.zCoord);
+    int currentX = MathHelper::floor_double(current.xCoord);
+    int currentY = MathHelper::floor_double(current.yCoord);
+    int currentZ = MathHelper::floor_double(current.zCoord);
+
+    for (int steps = 0; steps <= 200; ++steps) {
+        if (std::isnan(current.xCoord) || std::isnan(current.yCoord) || std::isnan(current.zCoord)) {
+            return std::nullopt;
+        }
+
+        if (currentX == targetX && currentY == targetY && currentZ == targetZ) {
+            return std::nullopt;
+        }
+
+        double nextBoundaryX = 999.0;
+        double nextBoundaryY = 999.0;
+        double nextBoundaryZ = 999.0;
+        if (targetX > currentX) nextBoundaryX = static_cast<double>(currentX) + 1.0;
+        if (targetX < currentX) nextBoundaryX = static_cast<double>(currentX);
+        if (targetY > currentY) nextBoundaryY = static_cast<double>(currentY) + 1.0;
+        if (targetY < currentY) nextBoundaryY = static_cast<double>(currentY);
+        if (targetZ > currentZ) nextBoundaryZ = static_cast<double>(currentZ) + 1.0;
+        if (targetZ < currentZ) nextBoundaryZ = static_cast<double>(currentZ);
+
+        const double deltaX = target.xCoord - current.xCoord;
+        const double deltaY = target.yCoord - current.yCoord;
+        const double deltaZ = target.zCoord - current.zCoord;
+
+        double scaleX = 999.0;
+        double scaleY = 999.0;
+        double scaleZ = 999.0;
+        if (nextBoundaryX != 999.0 && std::abs(deltaX) > 1.0E-7) scaleX = (nextBoundaryX - current.xCoord) / deltaX;
+        if (nextBoundaryY != 999.0 && std::abs(deltaY) > 1.0E-7) scaleY = (nextBoundaryY - current.yCoord) / deltaY;
+        if (nextBoundaryZ != 999.0 && std::abs(deltaZ) > 1.0E-7) scaleZ = (nextBoundaryZ - current.zCoord) / deltaZ;
+
+        int8_t crossedSide = 0;
+        if (scaleX < scaleY && scaleX < scaleZ) {
+            crossedSide = targetX > currentX ? 4 : 5;
+            current.xCoord = nextBoundaryX;
+            current.yCoord += deltaY * scaleX;
+            current.zCoord += deltaZ * scaleX;
+        } else if (scaleY < scaleZ) {
+            crossedSide = targetY > currentY ? 0 : 1;
+            current.xCoord += deltaX * scaleY;
+            current.yCoord = nextBoundaryY;
+            current.zCoord += deltaZ * scaleY;
+        } else {
+            crossedSide = targetZ > currentZ ? 2 : 3;
+            current.xCoord += deltaX * scaleZ;
+            current.yCoord += deltaY * scaleZ;
+            current.zCoord = nextBoundaryZ;
+        }
+
+        currentX = MathHelper::floor_double(current.xCoord);
+        if (crossedSide == 5) {
+            --currentX;
+        }
+        currentY = MathHelper::floor_double(current.yCoord);
+        if (crossedSide == 1) {
+            --currentY;
+        }
+        currentZ = MathHelper::floor_double(current.zCoord);
+        if (crossedSide == 3) {
+            --currentZ;
+        }
+
+        const int blockId = getBlockId(currentX, currentY, currentZ);
+        if (blockId <= 0) {
+            continue;
+        }
+
+        Block* block = Block::blocksList[blockId];
+        if (!block) {
+            continue;
+        }
+
+        const int metadata = getBlockMetadata(currentX, currentY, currentZ);
+        const Material* material = getBlockMaterial(currentX, currentY, currentZ);
+        const bool hitLiquid = includeLiquids && material && material->getIsLiquid();
+        if (!hitLiquid && !block->canCollideCheck(metadata, includeLiquids)) {
+            continue;
+        }
+
+        AxisAlignedBB hitBox(static_cast<double>(currentX), static_cast<double>(currentY), static_cast<double>(currentZ),
+                             static_cast<double>(currentX + 1), static_cast<double>(currentY + 1), static_cast<double>(currentZ + 1));
+        if (!hitLiquid) {
+            if (auto collisionBox = block->getCollisionBoundingBoxFromPool(this, currentX, currentY, currentZ)) {
+                hitBox = *collisionBox;
+            }
+        }
+
+        auto hit = hitBox.clip(current, target);
+        if (hit) {
+            hit->blockX = currentX;
+            hit->blockY = currentY;
+            hit->blockZ = currentZ;
+            return hit;
+        }
+    }
+
+    return std::nullopt;
+}
+
 void World::findSafeSpawnPoint() {
     Logger::info("Searching for safe spawn point...");
     std::uniform_int_distribution<int> dist(-1, 1);

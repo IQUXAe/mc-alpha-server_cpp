@@ -38,6 +38,7 @@ class EntityArrow;
 class TileEntity;
 class AxisAlignedBB;
 class Vec3D;
+struct MovingObjectPosition;
 class Material;
 class PropertyManager;
 class PlayerManager;

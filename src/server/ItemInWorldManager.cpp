@@ -98,10 +98,26 @@ bool ItemInWorldManager::harvestBlock(int x, int y, int z) {
 
 bool ItemInWorldManager::useItem(EntityPlayerMP* player, World* world, ItemStack* itemstack) {
     if (!itemstack || itemstack->stackSize <= 0) return false;
-    Item* item = Item::itemsList[itemstack->itemID];
-    if (!item) return false;
-    // onItemRightClick for non-block items (food, bow etc.) - not implemented yet
-    return false;
+    const ItemStack original = itemstack->copy();
+    const ItemStack result = itemstack->useItemRightClick(world, player);
+
+    const bool changed = result.itemID != original.itemID
+        || result.stackSize != original.stackSize
+        || result.itemDamage != original.itemDamage;
+    if (!changed) {
+        return false;
+    }
+
+    if (result.itemID <= 0 || result.stackSize <= 0) {
+        player->inventory.mainInventory[player->inventory.currentItem].reset();
+    } else {
+        player->inventory.mainInventory[player->inventory.currentItem] = std::make_unique<ItemStack>(result);
+    }
+
+    if (player->netHandler) {
+        player->netHandler->sendInventory();
+    }
+    return true;
 }
 
 bool ItemInWorldManager::activeBlockOrUseItem(EntityPlayerMP* player, World* world, ItemStack* itemstack, int x, int y, int z, int side) {
@@ -110,10 +126,7 @@ bool ItemInWorldManager::activeBlockOrUseItem(EntityPlayerMP* player, World* wor
         return true;
     if (!itemstack || itemstack->stackSize <= 0) return false;
 
-    Item* item = Item::itemsList[itemstack->itemID];
-    if (!item) return false;
-
-    bool used = item->onItemUse(itemstack, player, world, x, y, z, side);
+    bool used = itemstack->useItem(player, world, x, y, z, side);
     if (used) {
         if (player->netHandler) player->netHandler->sendInventory();
     }

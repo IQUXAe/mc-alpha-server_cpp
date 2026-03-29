@@ -4,11 +4,13 @@
 #include "../world/World.h"
 #include "../world/TileEntitySign.h"
 #include "../entity/EntityPlayerMP.h"
+#include "../entity/EntityBoat.h"
 #include "ItemStack.h"
 #include "AxisAlignedBB.h"
 #include "Material.h"
 #include "MathHelper.h"
 #include <iostream>
+#include <numbers>
 
 Item* Item::itemsList[32000] = {nullptr};
 Item* Item::shovelSteel = nullptr;
@@ -118,7 +120,7 @@ void Item::initItems() {
     pickaxeSteel = (new ItemPickaxe(256 + 1, 2));
     axeSteel = (new ItemAxe(256 + 2, 2));
     flintAndSteel = (new Item(3))->setMaxStackSize(1)->setMaxDamage(64);
-    appleRed = (new Item(4));
+    appleRed = (new ItemFood(4, 4));
     bow = (new Item(5))->setMaxStackSize(1)->setMaxDamage(384);
     arrow = (new Item(6));
     coal = (new Item(7));
@@ -140,7 +142,7 @@ void Item::initItems() {
     axeDiamond = (new ItemAxe(256 + 23, 3));
     stick = (new Item(24));
     bowlEmpty = (new Item(25));
-    bowlSoup = (new Item(26))->setMaxStackSize(1);
+    bowlSoup = (new ItemSoup(26, 10));
     swordGold = (new ItemSword(256 + 27, 0));
     shovelGold = (new ItemSpade(256 + 28, 0));
     pickaxeGold = (new ItemPickaxe(256 + 29, 0));
@@ -155,7 +157,7 @@ void Item::initItems() {
     hoeGold = (new Item(38))->setMaxStackSize(1)->setMaxDamage(32);
     seeds = (new Item(39));
     wheat = (new Item(40));
-    bread = (new Item(41));
+    bread = (new ItemFood(41, 5));
     helmetLeather = (new Item(42))->setMaxStackSize(1)->setMaxDamage(33);
     plateLeather = (new Item(43))->setMaxStackSize(1)->setMaxDamage(48);
     legsLeather = (new Item(44))->setMaxStackSize(1)->setMaxDamage(45);
@@ -177,10 +179,10 @@ void Item::initItems() {
     legsGold = (new Item(60))->setMaxStackSize(1)->setMaxDamage(90);
     bootsGold = (new Item(61))->setMaxStackSize(1)->setMaxDamage(78);
     flint = (new Item(62));
-    porkRaw = (new Item(63));
-    porkCooked = (new Item(64));
+    porkRaw = (new ItemFood(63, 3));
+    porkCooked = (new ItemFood(64, 8));
     painting = (new Item(65));
-    appleGold = (new Item(66));
+    appleGold = (new ItemFood(66, 42));
     sign = new ItemSign(323);  // Item ID 323 = 256 + 67
     doorWood = (new Item(68))->setMaxStackSize(1);
     bucketEmpty = (new Item(69))->setMaxStackSize(1);
@@ -191,7 +193,7 @@ void Item::initItems() {
     doorSteel = (new Item(74))->setMaxStackSize(1);
     redstone = (new Item(75));
     snowball = (new Item(76))->setMaxStackSize(16);
-    boat = (new Item(77))->setMaxStackSize(1);
+    boat = (new ItemBoat(77));
     leather = (new Item(78));
     bucketMilk = (new Item(79))->setMaxStackSize(1);
     brick = (new Item(80));
@@ -207,8 +209,8 @@ void Item::initItems() {
     fishingRod = (new Item(90))->setMaxStackSize(1)->setMaxDamage(64);
     pocketSundial = (new Item(91));
     lightstoneDust = (new Item(92));
-    fishRaw = (new Item(93));
-    fishCooked = (new Item(94));
+    fishRaw = (new ItemFood(93, 2));
+    fishCooked = (new ItemFood(94, 5));
 
     // Register ItemBlock for every block (IDs 1-255 map to item IDs 1-255)
     // In Java: Item.itemsList[blockID] = new ItemBlock(blockID - 256, blockID)
@@ -234,6 +236,32 @@ Item* Item::setMaxDamage(int damage) {
 
 bool Item::onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side) {
     return false;
+}
+
+ItemStack Item::onItemRightClick(ItemStack* stack, World* world, EntityPlayerMP* player) {
+    return stack ? stack->copy() : ItemStack();
+}
+
+ItemFood::ItemFood(int id, int healAmount) : Item(id), healAmount_(healAmount) {
+    maxStackSize = 1;
+}
+
+ItemStack ItemFood::onItemRightClick(ItemStack* stack, World* world, EntityPlayerMP* player) {
+    if (!stack || !player) {
+        return stack ? stack->copy() : ItemStack();
+    }
+
+    ItemStack result = stack->copy();
+    if (result.stackSize > 0) {
+        --result.stackSize;
+        player->heal(healAmount_);
+    }
+    return result;
+}
+
+ItemStack ItemSoup::onItemRightClick(ItemStack* stack, World* world, EntityPlayerMP* player) {
+    ItemFood::onItemRightClick(stack, world, player);
+    return Item::bowlEmpty ? ItemStack(Item::bowlEmpty) : ItemStack();
 }
 
 void ItemTool::hitEntity(ItemStack* stack, EntityLiving* entity) {
@@ -371,13 +399,9 @@ bool ItemBlock::onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world
     // Check block can stay here
     if (!block->canBlockStay(world, x, y, z)) return false;
 
-    // Check player bbox doesn't intersect placed block
     auto bb = block->getCollisionBoundingBoxFromPool(world, x, y, z);
-    if (bb) {
-        double px = player->posX, py = player->posY, pz = player->posZ;
-        double hw = player->width / 2.0;
-        AxisAlignedBB playerBB(px - hw, py, pz - hw, px + hw, py + player->height, pz + hw);
-        if (playerBB.intersectsWith(*bb)) return false;
+    if (bb && !world->isPlacementVolumeClear(*bb)) {
+        return false;
     }
 
     if (world->setBlockWithNotifyNoClientUpdate(x, y, z, blockID)) {
@@ -397,4 +421,44 @@ bool ItemBlock::onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world
         return true;
     }
     return false;
+}
+
+ItemBoat::ItemBoat(int id) : Item(id) {
+    maxStackSize = 1;
+}
+
+ItemStack ItemBoat::onItemRightClick(ItemStack* stack, World* world, EntityPlayerMP* player) {
+    if (!stack || !world || !player) {
+        return stack ? stack->copy() : ItemStack();
+    }
+
+    const double pitchRadians = -static_cast<double>(player->rotationPitch) * std::numbers::pi / 180.0;
+    const double yawRadians = -static_cast<double>(player->rotationYaw) * std::numbers::pi / 180.0 - std::numbers::pi;
+    const double lookY = std::sin(pitchRadians);
+    const double lookHorizontal = -std::cos(pitchRadians);
+    const double lookX = std::sin(yawRadians) * lookHorizontal;
+    const double lookZ = std::cos(yawRadians) * lookHorizontal;
+
+    const Vec3D start(player->posX, player->posY + player->getEyeHeight(), player->posZ);
+    const Vec3D end = start.addVector(lookX * 5.0, lookY * 5.0, lookZ * 5.0);
+    auto hit = world->rayTraceBlocks(start, end, true);
+    if (!hit) {
+        return stack->copy();
+    }
+
+    if (world->getBlockMaterial(hit->blockX, hit->blockY, hit->blockZ) != &Material::water) {
+        return stack->copy();
+    }
+
+    auto boatEntity = std::make_unique<EntityBoat>(world,
+        static_cast<double>(hit->blockX) + 0.5,
+        static_cast<double>(hit->blockY) + 1.5,
+        static_cast<double>(hit->blockZ) + 0.5);
+    world->spawnEntityInWorld(std::move(boatEntity));
+
+    ItemStack result = stack->copy();
+    if (result.stackSize > 0) {
+        --result.stackSize;
+    }
+    return result;
 }
