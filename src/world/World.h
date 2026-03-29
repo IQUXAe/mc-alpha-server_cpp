@@ -118,6 +118,7 @@ public:
     void sendEntityStatus(Entity* entity, int8_t status);
     void spawnEntityInWorld(std::unique_ptr<Entity> entity);
     void removeEntity(Entity* entity);
+    void registerLoadedEntitiesWithTracker(EntityTracker* tracker);
 
     void saveWorld(bool flushToDisk = false);
 

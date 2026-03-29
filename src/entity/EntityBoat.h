@@ -2,10 +2,12 @@
 
 #include "Entity.h"
 #include "EntityItem.h"
+#include "EntityPlayerMP.h"
 #include "../block/Block.h"
 #include "../core/Item.h"
 #include "../core/Material.h"
 #include "../core/MathHelper.h"
+#include "../core/NBT.h"
 #include "../world/World.h"
 
 #include <algorithm>
@@ -41,6 +43,39 @@ public:
     bool preventsEntitySpawning() const override { return true; }
     double getMountedYOffset() const override { return -0.3; }
 
+    void writeToNBT(NBTCompound& nbt) const {
+        nbt.setString("id", "Boat");
+        nbt.setDouble("PosX", posX);
+        nbt.setDouble("PosY", posY);
+        nbt.setDouble("PosZ", posZ);
+        nbt.setDouble("MotionX", motionX);
+        nbt.setDouble("MotionY", motionY);
+        nbt.setDouble("MotionZ", motionZ);
+        nbt.setFloat("RotationYaw", rotationYaw);
+        nbt.setFloat("RotationPitch", rotationPitch);
+        nbt.setInt("TimeSinceHit", timeSinceHit);
+        nbt.setInt("DamageTaken", damageTaken);
+        nbt.setInt("ForwardDirection", forwardDirection);
+    }
+
+    void readFromNBT(const NBTCompound& nbt) {
+        setPositionAndRotation(
+            nbt.getDouble("PosX"),
+            nbt.getDouble("PosY"),
+            nbt.getDouble("PosZ"),
+            nbt.getFloat("RotationYaw"),
+            nbt.getFloat("RotationPitch"));
+        motionX = nbt.getDouble("MotionX");
+        motionY = nbt.getDouble("MotionY");
+        motionZ = nbt.getDouble("MotionZ");
+        timeSinceHit = nbt.getInt("TimeSinceHit");
+        damageTaken = nbt.getInt("DamageTaken");
+        const int savedForwardDirection = nbt.getInt("ForwardDirection");
+        if (savedForwardDirection != 0) {
+            forwardDirection = savedForwardDirection;
+        }
+    }
+
     void attackEntityFrom(Entity* attacker, int amount) override {
         if (isDead || amount <= 0) {
             return;
@@ -70,6 +105,12 @@ public:
         }
         if (damageTaken > 0) {
             --damageTaken;
+        }
+
+        // Alpha boats are player-driven; if a mob somehow became a rider
+        // (edge case from custom server logic), eject it to avoid stuck boats.
+        if (riddenByEntity && !dynamic_cast<EntityPlayerMP*>(riddenByEntity)) {
+            riddenByEntity->mountEntity(nullptr);
         }
 
         const double waterFraction = computeWaterFraction();

@@ -9,6 +9,20 @@
 #include <cmath>
 #include <algorithm>
 
+namespace {
+
+bool observerHasEntityChunkLoaded(Entity* entity, EntityPlayerMP* observer) {
+    if (!entity || !observer || !observer->netHandler) {
+        return false;
+    }
+
+    const int chunkX = static_cast<int>(std::floor(entity->posX)) >> 4;
+    const int chunkZ = static_cast<int>(std::floor(entity->posZ)) >> 4;
+    return observer->netHandler->hasChunkLoaded(NetServerHandler::chunkKey(chunkX, chunkZ));
+}
+
+}
+
 // ─── TrackerEntry helpers ────────────────────────────────────────────────────
 
 std::unique_ptr<Packet> TrackerEntry::makeSpawnPacket() const {
@@ -147,13 +161,14 @@ void TrackerEntry::updateTracking(const std::vector<EntityPlayerMP*>& allPlayers
         double dz = player->posZ - (double)(lastFixedZ / 32);
         bool inRange = dx >= -trackingRange && dx <= trackingRange
                     && dz >= -trackingRange && dz <= trackingRange;
+        bool chunkLoaded = observerHasEntityChunkLoaded(entity, player);
 
         bool alreadyTracking = trackingPlayers.count(player) > 0;
 
-        if (inRange && !alreadyTracking && player != entity) {
+        if (inRange && chunkLoaded && !alreadyTracking && player != entity) {
             trackingPlayers.insert(player);
             sendSpawnTo(player);
-        } else if (!inRange && alreadyTracking) {
+        } else if ((!inRange || !chunkLoaded) && alreadyTracking) {
             trackingPlayers.erase(player);
             player->netHandler->sendPacket(
                 std::make_unique<Packet29DestroyEntity>(entity->entityId));
@@ -306,20 +321,14 @@ void EntityTracker::addEntity(Entity* entity) {
 
     auto entry = std::make_unique<TrackerEntry>(entity, range, rate, vel);
 
-    // If it's a player, send them all existing entities
     if (auto* newPlayer = dynamic_cast<EntityPlayerMP*>(entity)) {
+        // Defer initial entity spawns until the corresponding chunks are actually
+        // sent to the client; otherwise vehicles can vanish on relog because the
+        // client receives spawn packets before Packet51MapChunk.
+        const std::vector<EntityPlayerMP*> onlyNewPlayer{newPlayer};
         for (auto& [id, e] : entries_) {
             if (e->entity != entity) {
-                e->sendSpawnTo(newPlayer);
-                e->trackingPlayers.insert(newPlayer);
-            }
-        }
-        for (auto& [id, e] : entries_) {
-            if (e->entity != entity && e->entity->ridingEntity && newPlayer->netHandler) {
-                auto mountPkt = std::make_unique<Packet39AttachEntity>();
-                mountPkt->entityId = e->entity->entityId;
-                mountPkt->vehicleEntityId = e->entity->ridingEntity->entityId;
-                newPlayer->netHandler->sendPacket(std::move(mountPkt));
+                e->updateTracking(onlyNewPlayer);
             }
         }
     }
@@ -374,18 +383,14 @@ void EntityTracker::broadcastPacketIncludingSelf(Entity* entity, std::unique_ptr
 }
 
 void EntityTracker::sendAllToPlayer(EntityPlayerMP* player) {
+    if (!player) {
+        return;
+    }
+
+    const std::vector<EntityPlayerMP*> onlyPlayer{player};
     for (auto& [id, entry] : entries_) {
         if (entry->entity != player) {
-            entry->sendSpawnTo(player);
-            entry->trackingPlayers.insert(player);
-        }
-    }
-    for (auto& [id, entry] : entries_) {
-        if (entry->entity != player && entry->entity->ridingEntity && player->netHandler) {
-            auto mountPkt = std::make_unique<Packet39AttachEntity>();
-            mountPkt->entityId = entry->entity->entityId;
-            mountPkt->vehicleEntityId = entry->entity->ridingEntity->entityId;
-            player->netHandler->sendPacket(std::move(mountPkt));
+            entry->updateTracking(onlyPlayer);
         }
     }
 }

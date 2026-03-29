@@ -4,6 +4,7 @@
 #include "../entity/EntityAnimals.h"
 #include "../entity/EntityMobs.h"
 #include "../entity/EntityItem.h"
+#include "../entity/EntityBoat.h"
 #include "../entity/EntityPlayerMP.h"
 #include "../entity/EntityTracker.h"
 #include "../network/packets/AllPackets.h"
@@ -130,6 +131,32 @@ void restorePendingMonsters(World* world, Chunk* chunk, std::vector<std::unique_
     chunk->pendingMonsters.clear();
 }
 
+void restorePendingBoats(World* world, Chunk* chunk, std::vector<std::unique_ptr<Entity>>& entities,
+                         EntityTracker* entityTracker) {
+    if (!world || !chunk) {
+        return;
+    }
+
+    for (const auto& boatData : chunk->pendingBoats) {
+        ByteBuffer buf(boatData.nbtData);
+        auto root = NBTCompound::readRoot(buf);
+        if (!root) {
+            continue;
+        }
+
+        auto boat = std::make_unique<EntityBoat>(world);
+        boat->readFromNBT(*root);
+        boat->worldObj = world;
+        Entity* ptr = boat.get();
+        entities.push_back(std::move(boat));
+        if (entityTracker) {
+            entityTracker->addEntity(ptr);
+        }
+    }
+
+    chunk->pendingBoats.clear();
+}
+
 } // namespace
 
 World::World(MinecraftServer* server, const std::string& savePath, int64_t seed)
@@ -182,6 +209,30 @@ World::World(MinecraftServer* server, const std::string& savePath, int64_t seed)
 
 void World::saveWorld(bool flushToDisk) {
     saveLevelDat();
+
+    if (flushToDisk) {
+        // Ensure chunks containing live boats are present in chunks_ before we snapshot loadedChunks.
+        // Without this, a boat that drifted into a not-currently-loaded chunk can be skipped by
+        // saveWorld() and disappear after relog/restart.
+        std::unordered_set<uint64_t> touchedBoatChunks;
+        for (const auto& entity : entities_) {
+            auto* boat = dynamic_cast<EntityBoat*>(entity.get());
+            if (!boat || boat->isDead) {
+                continue;
+            }
+
+            const int chunkX = static_cast<int>(std::floor(boat->posX)) >> 4;
+            const int chunkZ = static_cast<int>(std::floor(boat->posZ)) >> 4;
+            const uint64_t key = getChunkKey(chunkX, chunkZ);
+            if (!touchedBoatChunks.insert(key).second) {
+                continue;
+            }
+
+            if (Chunk* chunk = getChunk(chunkX, chunkZ, true)) {
+                chunk->isModified = true;
+            }
+        }
+    }
 
     std::vector<Chunk*> loadedChunks;
     {
@@ -547,6 +598,7 @@ void World::tick() {
 
                 chunk->pendingAnimals.clear();
                 chunk->pendingMonsters.clear();
+                chunk->pendingBoats.clear();
                 for (auto& e : entities_) {
                     auto* animal = dynamic_cast<EntityAnimals*>(e.get());
                     if (!animal || animal->isDead) continue;
@@ -589,6 +641,26 @@ void World::tick() {
                     entitiesToRemove.insert(mob);
                 }
 
+                for (auto& e : entities_) {
+                    auto* boat = dynamic_cast<EntityBoat*>(e.get());
+                    if (!boat || boat->isDead) continue;
+                    const int cx = static_cast<int>(std::floor(boat->posX)) >> 4;
+                    const int cz = static_cast<int>(std::floor(boat->posZ)) >> 4;
+                    if (cx != chunk->xPosition || cz != chunk->zPosition) continue;
+
+                    NBTCompound nbt;
+                    boat->writeToNBT(nbt);
+                    ByteBuffer buf;
+                    nbt.writeRoot(buf, "Boat");
+                    chunk->pendingBoats.push_back({
+                        .nbtData = std::move(buf.data),
+                        .posX = boat->posX,
+                        .posY = boat->posY,
+                        .posZ = boat->posZ,
+                    });
+                    entitiesToRemove.insert(boat);
+                }
+
                 if (!entitiesToRemove.empty()) {
                     if (mcServer && mcServer->entityTracker) {
                         for (Entity* entity : entitiesToRemove) {
@@ -607,7 +679,7 @@ void World::tick() {
                 bool shouldSave = true;
                 if (mcServer && mcServer->isSaveModifiedChunksOnly() && !chunk->isModified
                     && chunk->pendingItems.empty() && chunk->pendingAnimals.empty()
-                    && chunk->pendingMonsters.empty()) {
+                    && chunk->pendingMonsters.empty() && chunk->pendingBoats.empty()) {
                     shouldSave = false;
                 }
 
@@ -615,7 +687,8 @@ void World::tick() {
                     const bool hasPendingEntities =
                         !chunk->pendingItems.empty() ||
                         !chunk->pendingAnimals.empty() ||
-                        !chunk->pendingMonsters.empty();
+                        !chunk->pendingMonsters.empty() ||
+                        !chunk->pendingBoats.empty();
 
                     // Entity unload data is critical; persist synchronously to avoid
                     // losing mobs/items if the process is restarted right after logout.
@@ -840,6 +913,7 @@ bool World::commitPreparedChunk(uint64_t key) {
 
     restorePendingAnimals(this, chunk, entities_, mcServer ? mcServer->entityTracker.get() : nullptr);
     restorePendingMonsters(this, chunk, entities_, mcServer ? mcServer->entityTracker.get() : nullptr);
+    restorePendingBoats(this, chunk, entities_, mcServer ? mcServer->entityTracker.get() : nullptr);
 
     tryPopulateChunksAround(chunk->xPosition, chunk->zPosition);
     return true;
@@ -934,6 +1008,7 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
             ptr->pendingItems.clear();
             restorePendingAnimals(this, ptr, entities_, mcServer ? mcServer->entityTracker.get() : nullptr);
             restorePendingMonsters(this, ptr, entities_, mcServer ? mcServer->entityTracker.get() : nullptr);
+            restorePendingBoats(this, ptr, entities_, mcServer ? mcServer->entityTracker.get() : nullptr);
             return ptr;
         }
     }
@@ -1837,6 +1912,46 @@ std::vector<uint8_t> World::compressChunkData(Chunk* chunk) {
         }
     }
 
+    {
+        auto boatList = std::make_shared<NBTList>();
+        boatList->tagType = NBTTagType::TAG_Compound;
+        std::unordered_set<std::string> seenBoats;
+
+        auto makeBoatKey = [](double x, double y, double z) {
+            const int32_t fx = static_cast<int32_t>(std::floor(x * 32.0));
+            const int32_t fy = static_cast<int32_t>(std::floor(y * 32.0));
+            const int32_t fz = static_cast<int32_t>(std::floor(z * 32.0));
+            return std::to_string(fx) + ":" + std::to_string(fy) + ":" + std::to_string(fz);
+        };
+
+        for (const auto& boatData : chunk->pendingBoats) {
+            ByteBuffer buf(boatData.nbtData);
+            auto root = NBTCompound::readRoot(buf);
+            if (!root) continue;
+            const std::string key = makeBoatKey(root->getDouble("PosX"), root->getDouble("PosY"), root->getDouble("PosZ"));
+            if (!seenBoats.insert(key).second) continue;
+            boatList->tags.push_back(std::make_shared<NBTCompound>(*root));
+        }
+
+        for (const auto& e : entities_) {
+            auto* boat = dynamic_cast<EntityBoat*>(e.get());
+            if (!boat || boat->isDead) continue;
+            const int cx = static_cast<int>(std::floor(boat->posX)) >> 4;
+            const int cz = static_cast<int>(std::floor(boat->posZ)) >> 4;
+            if (cx != chunk->xPosition || cz != chunk->zPosition) continue;
+
+            const std::string key = makeBoatKey(boat->posX, boat->posY, boat->posZ);
+            if (!seenBoats.insert(key).second) continue;
+            auto tag = std::make_shared<NBTCompound>();
+            boat->writeToNBT(*tag);
+            boatList->tags.push_back(tag);
+        }
+
+        if (!boatList->tags.empty()) {
+            level.tags["Boats"] = boatList;
+        }
+    }
+
     // Save TileEntities
     std::vector<std::shared_ptr<NBTTag>> tileEntityList;
     for (const auto& [key, te] : chunk->getTileEntities()) {
@@ -1928,6 +2043,7 @@ void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data,
     chunk->pendingItems.clear();
     chunk->pendingAnimals.clear();
     chunk->pendingMonsters.clear();
+    chunk->pendingBoats.clear();
 
     // Load TileEntities
     auto tileEntitiesTag = level->tags.find("TileEntities");
@@ -2023,6 +2139,25 @@ void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data,
         }
     }
 
+    auto boatsTag = level->tags.find("Boats");
+    if (boatsTag != level->tags.end()) {
+        auto listTag = std::dynamic_pointer_cast<NBTList>(boatsTag->second);
+        if (listTag) {
+            for (const auto& tag : listTag->tags) {
+                auto boatTag = std::dynamic_pointer_cast<NBTCompound>(tag);
+                if (!boatTag) continue;
+                ByteBuffer buf;
+                boatTag->writeRoot(buf, "Boat");
+                chunk->pendingBoats.push_back({
+                    .nbtData = std::move(buf.data),
+                    .posX = boatTag->getDouble("PosX"),
+                    .posY = boatTag->getDouble("PosY"),
+                    .posZ = boatTag->getDouble("PosZ"),
+                });
+            }
+        }
+    }
+
     if (chunk->heightMap.empty() || chunk->heightMap.size() < 256) {
         chunk->heightMap.assign(256, 0);
         chunk->generateHeightMap();
@@ -2042,6 +2177,19 @@ void World::spawnEntityInWorld(std::unique_ptr<Entity> entity) {
     // EntityTracker handles sending spawn packets to players
     if (mcServer && mcServer->entityTracker) {
         mcServer->entityTracker->addEntity(ptr);
+    }
+}
+
+void World::registerLoadedEntitiesWithTracker(EntityTracker* tracker) {
+    if (!tracker) {
+        return;
+    }
+
+    for (const auto& entity : entities_) {
+        if (!entity || entity->isDead) {
+            continue;
+        }
+        tracker->addEntity(entity.get());
     }
 }
 

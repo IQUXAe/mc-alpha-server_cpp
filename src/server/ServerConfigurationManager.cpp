@@ -86,6 +86,13 @@ void ServerConfigurationManager::playerLoggedIn(EntityPlayerMP* player) {
 }
 
 void ServerConfigurationManager::playerLoggedOut(EntityPlayerMP* player) {
+    if (player && player->ridingEntity) {
+        player->mountEntity(nullptr);
+    }
+    if (player && player->riddenByEntity) {
+        player->riddenByEntity->mountEntity(nullptr);
+    }
+
     if (mcServer_->entityTracker) mcServer_->entityTracker->removeEntity(player);
 
     const auto& saveDir = mcServer_->getPlayerSaveDir();
@@ -95,6 +102,9 @@ void ServerConfigurationManager::playerLoggedOut(EntityPlayerMP* player) {
     else
         Logger::info("Saved player data for {}", player->username);
 
+    if (player) {
+        player->isDead = true;
+    }
     std::erase(playerEntities, player);
 
     if (playerEntities.empty() && mcServer_ && mcServer_->worldMngr) {
