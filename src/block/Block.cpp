@@ -10,6 +10,7 @@
 #include "../world/TileEntityChest.h"
 #include "../world/TileEntityFurnace.h"
 #include "../world/TileEntitySign.h"
+#include "../world/gen/Decorators.h"
 #include "../entity/EntityItem.h"
 #include "../entity/EntityFallingSand.h"
 #include "../entity/EntityPlayerMP.h"
@@ -18,6 +19,79 @@
 #include <iostream>
 #include <random>
 #include <queue>
+
+namespace {
+
+constexpr int kPlantGrowthStageMax = 15;
+
+void scheduleBlockTick(World* world, Block* block, int x, int y, int z) {
+    if (!world || !block) {
+        return;
+    }
+    world->scheduleBlockUpdate(x, y, z, block->blockID, block->tickRate());
+}
+
+bool randomChance(World* world, int oneIn) {
+    if (!world || oneIn <= 1) {
+        return true;
+    }
+    std::uniform_int_distribution<int> dist(0, oneIn - 1);
+    return dist(world->rand) == 0;
+}
+
+bool isChunkAreaLoaded(World* world, int minX, int minZ, int maxX, int maxZ) {
+    if (!world) {
+        return false;
+    }
+    for (int chunkX = minX >> 4; chunkX <= maxX >> 4; ++chunkX) {
+        for (int chunkZ = minZ >> 4; chunkZ <= maxZ >> 4; ++chunkZ) {
+            if (!world->chunkExists(chunkX, chunkZ)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool hasNearbyLog(World* world, int x, int y, int z, int radius) {
+    if (!world) {
+        return false;
+    }
+
+    if (!isChunkAreaLoaded(world, x - radius, z - radius, x + radius, z + radius)) {
+        return true;
+    }
+
+    for (int checkX = x - radius; checkX <= x + radius; ++checkX) {
+        for (int checkY = std::max(0, y - radius); checkY <= std::min(CHUNK_SIZE_Y - 1, y + radius); ++checkY) {
+            for (int checkZ = z - radius; checkZ <= z + radius; ++checkZ) {
+                if (world->getBlockIdNoChunkLoad(checkX, checkY, checkZ) == 17) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+void markBlocksForUpdate(World* world, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
+    if (!world) {
+        return;
+    }
+
+    minY = std::max(0, minY);
+    maxY = std::min(CHUNK_SIZE_Y - 1, maxY);
+    for (int x = minX; x <= maxX; ++x) {
+        for (int y = minY; y <= maxY; ++y) {
+            for (int z = minZ; z <= maxZ; ++z) {
+                world->markBlockNeedsUpdate(x, y, z);
+            }
+        }
+    }
+}
+
+} // namespace
 
 class BlockSand : public Block {
 public:
@@ -127,10 +201,14 @@ private:
 
 class BlockFlower : public Block {
 public:
-    BlockFlower(int id, Material* mat) : Block(id, mat) {}
+    BlockFlower(int id, Material* mat) : Block(id, mat) {
+        setTickOnLoad(true);
+        setBlockBounds(0.3f, 0.0f, 0.3f, 0.7f, 0.6f, 0.7f);
+    }
     bool canBlockStay(World* world, int x, int y, int z) const override {
         int below = world->getBlockId(x, y - 1, z);
-        return below == 2 || below == 3 || below == 60;
+        return (world->getBlockLightValue(x, y, z) >= 8 || world->canBlockSeeSky(x, y, z))
+            && (below == 2 || below == 3 || below == 60);
     }
     void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
         if (!canBlockStay(world, x, y, z)) {
@@ -138,8 +216,46 @@ public:
             world->setBlockAndUpdate(x, y, z, 0);
         }
     }
+    void updateTick(World* world, int x, int y, int z) override {
+        if (!canBlockStay(world, x, y, z)) {
+            dropBlockAsItem(world, x, y, z, world->getBlockMetadata(x, y, z));
+            world->setBlockWithNotify(x, y, z, 0);
+        }
+    }
     bool isReplaceable() const override { return true; }
     std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World*, int, int, int) override { return std::nullopt; }
+};
+
+class BlockTallGrass : public BlockFlower {
+public:
+    BlockTallGrass(int id, Material* mat) : BlockFlower(id, mat) {}
+
+    void dropBlockAsItemWithChance(World* world, int x, int y, int z, int metadata, float chance) override {
+        if (!world || !Item::seeds) {
+            return;
+        }
+
+        std::uniform_real_distribution<float> chanceDist(0.0f, 1.0f);
+        if (chanceDist(world->rand) > chance) {
+            return;
+        }
+
+        if (!randomChance(world, 8)) {
+            return;
+        }
+
+        auto entity = std::make_unique<EntityItem>(Item::seeds->itemID, 1, 0);
+        entity->setPosition(x + 0.5, y + 0.5, z + 0.5);
+        entity->worldObj = world;
+        std::uniform_real_distribution<double> velocityDist(-0.05, 0.05);
+        entity->motionX = velocityDist(world->rand);
+        entity->motionY = 0.15;
+        entity->motionZ = velocityDist(world->rand);
+        world->spawnEntityInWorld(std::move(entity));
+    }
+
+    int quantityDropped() const override { return 0; }
+    int idDropped(int metadata) const override { return 0; }
 };
 
 class BlockMushroom : public Block {
@@ -229,11 +345,16 @@ public:
     BlockCactus(int id, Material* mat) : Block(id, mat) {
         setBlockBounds(0.0625f, 0.0f, 0.0625f, 0.9375f, 1.0f, 0.9375f);
     }
+    void onBlockAdded(World* world, int x, int y, int z) override {
+        scheduleBlockTick(world, this, x, y, z);
+    }
     void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
         if (!canBlockStay(world, x, y, z)) {
             dropBlockAsItem(world, x, y, z, world->getBlockMetadata(x, y, z));
             world->setBlockWithNotify(x, y, z, 0);
+            return;
         }
+        scheduleBlockTick(world, this, x, y, z);
     }
     bool canBlockStay(World* world, int x, int y, int z) const override {
         auto solid = [&](int bx, int by, int bz) {
@@ -246,11 +367,44 @@ public:
         int below = world->getBlockId(x, y-1, z);
         return below == 12 || below == 81;
     }
+    void updateTick(World* world, int x, int y, int z) override {
+        if (!canBlockStay(world, x, y, z)) {
+            dropBlockAsItem(world, x, y, z, world->getBlockMetadata(x, y, z));
+            world->setBlockWithNotify(x, y, z, 0);
+            return;
+        }
+
+        if (world->getBlockId(x, y + 1, z) != 0) {
+            scheduleBlockTick(world, this, x, y, z);
+            return;
+        }
+
+        int height = 1;
+        while (world->getBlockId(x, y - height, z) == blockID) {
+            ++height;
+        }
+
+        if (height < 3 && randomChance(world, 3)) {
+            uint8_t age = world->getBlockMetadata(x, y, z);
+            if (age >= kPlantGrowthStageMax) {
+                world->setBlockWithNotify(x, y + 1, z, blockID);
+                world->setBlockMetadata(x, y, z, 0);
+            } else {
+                world->setBlockMetadata(x, y, z, static_cast<uint8_t>(age + 1));
+            }
+        }
+
+        scheduleBlockTick(world, this, x, y, z);
+    }
+    int tickRate() const override { return 20; }
 };
 
 class BlockReed : public Block {
 public:
     BlockReed(int id, Material* mat) : Block(id, mat) {}
+    void onBlockAdded(World* world, int x, int y, int z) override {
+        scheduleBlockTick(world, this, x, y, z);
+    }
     bool canBlockStay(World* world, int x, int y, int z) const override {
         int below = world->getBlockId(x, y-1, z);
         if (below == 83) return true;
@@ -264,8 +418,40 @@ public:
         if (!canBlockStay(world, x, y, z)) {
             dropBlockAsItem(world, x, y, z, 0);
             world->setBlockWithNotify(x, y, z, 0);
+            return;
         }
+        scheduleBlockTick(world, this, x, y, z);
     }
+    void updateTick(World* world, int x, int y, int z) override {
+        if (!canBlockStay(world, x, y, z)) {
+            dropBlockAsItem(world, x, y, z, 0);
+            world->setBlockWithNotify(x, y, z, 0);
+            return;
+        }
+
+        if (world->getBlockId(x, y + 1, z) != 0) {
+            scheduleBlockTick(world, this, x, y, z);
+            return;
+        }
+
+        int height = 1;
+        while (world->getBlockId(x, y - height, z) == blockID) {
+            ++height;
+        }
+
+        if (height < 3 && randomChance(world, 3)) {
+            uint8_t age = world->getBlockMetadata(x, y, z);
+            if (age >= kPlantGrowthStageMax) {
+                world->setBlockWithNotify(x, y + 1, z, blockID);
+                world->setBlockMetadata(x, y, z, 0);
+            } else {
+                world->setBlockMetadata(x, y, z, static_cast<uint8_t>(age + 1));
+            }
+        }
+
+        scheduleBlockTick(world, this, x, y, z);
+    }
+    int tickRate() const override { return 20; }
     bool isReplaceable() const override { return true; }
     std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World*, int, int, int) override { return std::nullopt; }
 };
@@ -348,8 +534,231 @@ public:
 class BlockLeaves : public Block {
 public:
     BlockLeaves(int id, Material* material) : Block(id, material) {}
-    int quantityDropped() const override { return 0; } // Leaves drop nothing by default
+    void onBlockAdded(World* world, int x, int y, int z) override {
+        scheduleBlockTick(world, this, x, y, z);
+    }
+    void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
+        scheduleBlockTick(world, this, x, y, z);
+    }
+    void updateTick(World* world, int x, int y, int z) override {
+        if (hasNearbyLog(world, x, y, z, 4)) {
+            return;
+        }
+
+        if (!randomChance(world, 4)) {
+            scheduleBlockTick(world, this, x, y, z);
+            return;
+        }
+
+        dropBlockAsItemWithChance(world, x, y, z, world->getBlockMetadata(x, y, z), 1.0f);
+        world->setBlockWithNotify(x, y, z, 0);
+    }
+    int tickRate() const override { return 40; }
+    void dropBlockAsItemWithChance(World* world, int x, int y, int z, int metadata, float chance) override {
+        if (!world || !Item::itemsList[6]) {
+            return;
+        }
+
+        std::uniform_real_distribution<float> chanceDist(0.0f, 1.0f);
+        if (chanceDist(world->rand) > chance) {
+            return;
+        }
+
+        if (!randomChance(world, 16)) {
+            return;
+        }
+
+        auto entity = std::make_unique<EntityItem>(6, 1, 0);
+        entity->setPosition(x + 0.5, y + 0.5, z + 0.5);
+        entity->worldObj = world;
+        std::uniform_real_distribution<double> velocityDist(-0.05, 0.05);
+        entity->motionX = velocityDist(world->rand);
+        entity->motionY = 0.15;
+        entity->motionZ = velocityDist(world->rand);
+        world->spawnEntityInWorld(std::move(entity));
+    }
+    int quantityDropped() const override { return 0; }
     int idDropped(int metadata) const override { return 0; }
+};
+
+class BlockSapling : public Block {
+public:
+    BlockSapling(int id, Material* mat) : Block(id, mat) {
+        setTickOnLoad(true);
+        setBlockBounds(0.1f, 0.0f, 0.1f, 0.9f, 0.8f, 0.9f);
+    }
+
+    void onBlockAdded(World* world, int x, int y, int z) override {
+        scheduleBlockTick(world, this, x, y, z);
+    }
+
+    bool canBlockStay(World* world, int x, int y, int z) const override {
+        const int below = world->getBlockId(x, y - 1, z);
+        return (world->getBlockLightValue(x, y, z) >= 8 || world->canBlockSeeSky(x, y, z))
+            && (below == 2 || below == 3 || below == 60);
+    }
+
+    void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
+        if (!canBlockStay(world, x, y, z)) {
+            dropBlockAsItem(world, x, y, z, 0);
+            world->setBlockWithNotify(x, y, z, 0);
+            return;
+        }
+        scheduleBlockTick(world, this, x, y, z);
+    }
+
+    void updateTick(World* world, int x, int y, int z) override {
+        if (!canBlockStay(world, x, y, z)) {
+            dropBlockAsItem(world, x, y, z, 0);
+            world->setBlockWithNotify(x, y, z, 0);
+            return;
+        }
+
+        if (world->getBlockLightValue(x, y + 1, z) < 9 || !randomChance(world, 5)) {
+            scheduleBlockTick(world, this, x, y, z);
+            return;
+        }
+
+        const uint8_t metadata = world->getBlockMetadata(x, y, z);
+        if (metadata < 15) {
+            world->setBlockMetadata(x, y, z, static_cast<uint8_t>(metadata + 1));
+            world->markBlockNeedsUpdate(x, y, z);
+            scheduleBlockTick(world, this, x, y, z);
+            return;
+        }
+
+        JavaRandom treeRand(static_cast<int64_t>(world->rand()));
+        world->setBlockWithNotify(x, y, z, 0);
+
+        bool generated = false;
+        if (randomChance(world, 10)) {
+            WorldGenBigTree bigTree;
+            generated = bigTree.generate(world, treeRand, x, y, z);
+        }
+        if (!generated) {
+            WorldGenTrees tree;
+            generated = tree.generate(world, treeRand, x, y, z);
+        }
+
+        if (!generated) {
+            world->setBlockWithNotify(x, y, z, blockID);
+            return;
+        }
+
+        markBlocksForUpdate(world, x - 8, y - 1, z - 8, x + 8, y + 16, z + 8);
+    }
+
+    int tickRate() const override { return 100; }
+    bool isReplaceable() const override { return true; }
+    std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World*, int, int, int) override { return std::nullopt; }
+};
+
+class BlockCrops : public Block {
+public:
+    BlockCrops(int id, Material* mat) : Block(id, mat) {}
+
+    void onBlockAdded(World* world, int x, int y, int z) override {
+        scheduleBlockTick(world, this, x, y, z);
+    }
+
+    bool canBlockStay(World* world, int x, int y, int z) const override {
+        return world->getBlockId(x, y - 1, z) == 60
+            && (world->getBlockLightValue(x, y, z) >= 8 || world->canBlockSeeSky(x, y, z));
+    }
+
+    void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
+        if (!canBlockStay(world, x, y, z)) {
+            dropBlockAsItemWithChance(world, x, y, z, world->getBlockMetadata(x, y, z), 1.0f);
+            world->setBlockWithNotify(x, y, z, 0);
+            return;
+        }
+        scheduleBlockTick(world, this, x, y, z);
+    }
+
+    void updateTick(World* world, int x, int y, int z) override {
+        if (!canBlockStay(world, x, y, z)) {
+            dropBlockAsItemWithChance(world, x, y, z, world->getBlockMetadata(x, y, z), 1.0f);
+            world->setBlockWithNotify(x, y, z, 0);
+            return;
+        }
+
+        if (world->getBlockLightValue(x, y + 1, z) >= 9) {
+            const int metadata = world->getBlockMetadata(x, y, z);
+            if (metadata < 7) {
+                float growthRate = 1.0f;
+                for (int dx = -1; dx <= 1; ++dx) {
+                    for (int dz = -1; dz <= 1; ++dz) {
+                        float soilBonus = 0.0f;
+                        if (world->getBlockId(x + dx, y - 1, z + dz) == 60) {
+                            soilBonus = (dx == 0 && dz == 0) ? 3.0f : 1.0f;
+                            if (dx != 0 || dz != 0) {
+                                soilBonus /= 4.0f;
+                            }
+                        }
+                        growthRate += soilBonus;
+                    }
+                }
+
+                const bool sameRow = world->getBlockId(x - 1, y, z) == blockID || world->getBlockId(x + 1, y, z) == blockID;
+                const bool sameColumn = world->getBlockId(x, y, z - 1) == blockID || world->getBlockId(x, y, z + 1) == blockID;
+                const bool sameDiagonal =
+                    world->getBlockId(x - 1, y, z - 1) == blockID || world->getBlockId(x + 1, y, z - 1) == blockID ||
+                    world->getBlockId(x + 1, y, z + 1) == blockID || world->getBlockId(x - 1, y, z + 1) == blockID;
+                if (sameDiagonal || (sameRow && sameColumn)) {
+                    growthRate /= 2.0f;
+                }
+
+                const int growthChance = std::max(2, static_cast<int>(100.0f / growthRate));
+                std::uniform_int_distribution<int> dist(0, growthChance - 1);
+                if (dist(world->rand) == 0) {
+                    world->setBlockMetadata(x, y, z, static_cast<uint8_t>(metadata + 1));
+                    world->markBlockNeedsUpdate(x, y, z);
+                }
+            }
+        }
+
+        scheduleBlockTick(world, this, x, y, z);
+    }
+
+    int tickRate() const override { return 20; }
+
+    void dropBlockAsItemWithChance(World* world, int x, int y, int z, int metadata, float chance) override {
+        if (!world || !Item::seeds || !Item::wheat) {
+            return;
+        }
+
+        std::uniform_real_distribution<float> chanceDist(0.0f, 1.0f);
+        if (chanceDist(world->rand) > chance) {
+            return;
+        }
+
+        auto spawnDrop = [&](int itemId, int count) {
+            if (count <= 0) {
+                return;
+            }
+            auto entity = std::make_unique<EntityItem>(itemId, count, 0);
+            entity->setPosition(x + 0.5, y + 0.5, z + 0.5);
+            entity->worldObj = world;
+            std::uniform_real_distribution<double> velocityDist(-0.05, 0.05);
+            entity->motionX = velocityDist(world->rand);
+            entity->motionY = 0.15;
+            entity->motionZ = velocityDist(world->rand);
+            world->spawnEntityInWorld(std::move(entity));
+        };
+
+        if (metadata >= 7) {
+            spawnDrop(Item::wheat->itemID, 1);
+            std::uniform_int_distribution<int> seedsDist(0, 2);
+            spawnDrop(Item::seeds->itemID, 1 + seedsDist(world->rand));
+        } else {
+            spawnDrop(Item::seeds->itemID, 1);
+        }
+    }
+
+    int quantityDropped() const override { return 0; }
+    int idDropped(int metadata) const override { return 0; }
+    bool isReplaceable() const override { return true; }
+    std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World*, int, int, int) override { return std::nullopt; }
 };
 
 void Block::initBlocks() {
@@ -358,7 +767,7 @@ void Block::initBlocks() {
     dirt = (new Block(3, &Material::ground))->setHardness(0.5f);
     cobblestone = (new Block(4, &Material::rock))->setHardness(2.0f)->setResistance(10.0f);
     planks = (new Block(5, &Material::wood))->setHardness(2.0f)->setResistance(5.0f);
-    sapling = (new Block(6, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);
+    sapling = (new BlockSapling(6, &Material::plants))->setHardness(0.0f)->setLightOpacity(0)->setTickOnLoad(true);
     bedrock = (new Block(7, &Material::rock))->setHardness(-1.0f)->setResistance(6000000.0f);
     // water and lava
     blocksList[8] = (new BlockFluid(8, &Material::water))->setLightOpacity(3);
@@ -371,7 +780,7 @@ void Block::initBlocks() {
     oreIron = (new BlockOre(15, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
     oreCoal = (new BlockOre(16, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
     wood = (new Block(17, &Material::wood))->setHardness(2.0f);
-    leaves = (new BlockLeaves(18, &Material::leaves))->setHardness(0.2f)->setLightOpacity(1);
+    leaves = (new BlockLeaves(18, &Material::leaves))->setHardness(0.2f)->setLightOpacity(1)->setTickOnLoad(true);
     (new Block(19, &Material::ground))->setHardness(0.4f);   // sponge
     glass = (new Block(20, &Material::glass))->setHardness(0.3f)->setLightOpacity(0);
     (new Block(21, &Material::rock))->setHardness(3.0f);     // lapis ore
@@ -383,7 +792,7 @@ void Block::initBlocks() {
     (new Block(28, &Material::ground))->setHardness(0.7f);   // detector rail
     (new Block(29, &Material::rock))->setHardness(3.5f);     // sticky piston
     (new Block(30, &Material::web))->setHardness(4.0f)->setLightOpacity(1);      // web
-    (new Block(31, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);   // tall grass
+    (new BlockTallGrass(31, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);   // tall grass
     (new Block(32, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);   // dead bush
     (new Block(33, &Material::rock))->setHardness(3.5f);     // piston
     (new Block(35, &Material::cloth))->setHardness(0.8f);    // wool
@@ -410,7 +819,7 @@ void Block::initBlocks() {
     oreDiamond = (new BlockOre(56, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
     (new Block(57, &Material::iron))->setHardness(5.0f);     // diamond block
     (new Block(58, &Material::wood))->setHardness(2.5f);     // crafting table
-    (new Block(59, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);   // crops
+    (new BlockCrops(59, &Material::plants))->setHardness(0.0f)->setLightOpacity(0)->setTickOnLoad(true);   // crops
     (new Block(60, &Material::ground))->setHardness(0.6f);   // farmland
     blocksList[61] = new BlockFurnace(61, false);            // furnace idle
     blocksList[61]->setHardness(3.5f);
@@ -436,9 +845,9 @@ void Block::initBlocks() {
     snow = (new Block(78, &Material::snow))->setHardness(0.1f);
     ice = (new Block(79, &Material::ice))->setHardness(0.5f);
     (new Block(80, &Material::snow))->setHardness(0.2f);     // snow block
-    cactus = (new BlockCactus(81, &Material::cactus))->setHardness(0.4f)->setLightOpacity(0);
+    cactus = (new BlockCactus(81, &Material::cactus))->setHardness(0.4f)->setLightOpacity(0)->setTickOnLoad(true);
     blockClay = (new Block(82, &Material::clay))->setHardness(0.6f);
-    reed = (new BlockReed(83, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);
+    reed = (new BlockReed(83, &Material::plants))->setHardness(0.0f)->setLightOpacity(0)->setTickOnLoad(true);
     (new Block(84, &Material::wood))->setHardness(0.8f);     // jukebox
     (new Block(85, &Material::wood))->setHardness(2.0f);     // fence
     pumpkin = (new Block(86, &Material::pumpkin))->setHardness(1.0f);
