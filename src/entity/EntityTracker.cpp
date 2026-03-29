@@ -1,5 +1,6 @@
 #include "EntityTracker.h"
 #include "EntityArrow.h"
+#include "EntityBoat.h"
 #include "EntityItem.h"
 #include "EntityAnimals.h"
 #include "EntityFallingSand.h"
@@ -54,6 +55,16 @@ std::unique_ptr<Packet> TrackerEntry::makeSpawnPacket() const {
         return pkt;
     }
 
+    if (auto* boat = dynamic_cast<EntityBoat*>(entity)) {
+        auto pkt = std::make_unique<Packet23VehicleSpawn>();
+        pkt->entityId = boat->entityId;
+        pkt->type = 1;
+        pkt->x = fx;
+        pkt->y = fy;
+        pkt->z = fz;
+        return pkt;
+    }
+
     if (auto* living = dynamic_cast<EntityLiving*>(entity)) {
         auto pkt = std::make_unique<Packet24MobSpawn>();
         pkt->entityId = entity->entityId;
@@ -82,6 +93,12 @@ void TrackerEntry::sendSpawnTo(EntityPlayerMP* player) {
     if (!player || !player->netHandler) return;
     auto spawnPkt = makeSpawnPacket();
     if (spawnPkt) player->netHandler->sendPacket(std::move(spawnPkt));
+    if (entity->ridingEntity) {
+        auto attachPkt = std::make_unique<Packet39AttachEntity>();
+        attachPkt->entityId = entity->entityId;
+        attachPkt->vehicleEntityId = entity->ridingEntity->entityId;
+        player->netHandler->sendPacket(std::move(attachPkt));
+    }
 
     // Send velocity for items/projectiles
     if (sendVelocity && (entity->motionX != 0 || entity->motionY != 0 || entity->motionZ != 0)) {
@@ -141,6 +158,7 @@ void TrackerEntry::updateTracking(const std::vector<EntityPlayerMP*>& allPlayers
                 std::make_unique<Packet29DestroyEntity>(entity->entityId));
         }
     }
+
 }
 
 void TrackerEntry::sendUpdates() {
@@ -227,6 +245,15 @@ void TrackerEntry::sendUpdates() {
                 entity->entityId, isBurning ? 102 : 103));
         }
     }
+
+    const int32_t mountedEntityId = entity->ridingEntity ? entity->ridingEntity->entityId : -1;
+    if (mountedEntityId != lastMountedEntityId) {
+        lastMountedEntityId = mountedEntityId;
+        auto mountPkt = std::make_unique<Packet39AttachEntity>();
+        mountPkt->entityId = entity->entityId;
+        mountPkt->vehicleEntityId = mountedEntityId;
+        broadcastIncludingSelf(std::move(mountPkt));
+    }
 }
 
 // ─── EntityTracker ───────────────────────────────────────────────────────────
@@ -255,6 +282,10 @@ void EntityTracker::addEntity(Entity* entity) {
         range = arrow->getTrackingRange();
         rate = arrow->getTrackingRate();
         vel = arrow->shouldSendVelocity();
+    } else if (dynamic_cast<EntityBoat*>(entity)) {
+        range = 160;
+        rate = 5;
+        vel = true;
     } else if (auto* living = dynamic_cast<EntityLiving*>(entity); living && living->getMobTypeId() != 0) {
         range = living->getTrackingRange();
         rate = living->getTrackingRate();
@@ -273,6 +304,14 @@ void EntityTracker::addEntity(Entity* entity) {
             if (e->entity != entity) {
                 e->sendSpawnTo(newPlayer);
                 e->trackingPlayers.insert(newPlayer);
+            }
+        }
+        for (auto& [id, e] : entries_) {
+            if (e->entity != entity && e->entity->ridingEntity && newPlayer->netHandler) {
+                auto mountPkt = std::make_unique<Packet39AttachEntity>();
+                mountPkt->entityId = e->entity->entityId;
+                mountPkt->vehicleEntityId = e->entity->ridingEntity->entityId;
+                newPlayer->netHandler->sendPacket(std::move(mountPkt));
             }
         }
     }
@@ -331,6 +370,14 @@ void EntityTracker::sendAllToPlayer(EntityPlayerMP* player) {
         if (entry->entity != player) {
             entry->sendSpawnTo(player);
             entry->trackingPlayers.insert(player);
+        }
+    }
+    for (auto& [id, entry] : entries_) {
+        if (entry->entity != player && entry->entity->ridingEntity && player->netHandler) {
+            auto mountPkt = std::make_unique<Packet39AttachEntity>();
+            mountPkt->entityId = entry->entity->entityId;
+            mountPkt->vehicleEntityId = entry->entity->ridingEntity->entityId;
+            player->netHandler->sendPacket(std::move(mountPkt));
         }
     }
 }

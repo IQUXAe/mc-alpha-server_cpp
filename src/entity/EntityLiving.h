@@ -22,6 +22,12 @@ public:
     bool isSneaking = false;
 
     virtual void onDeath() {
+        if (riddenByEntity) {
+            riddenByEntity->mountEntity(nullptr);
+        }
+        if (ridingEntity) {
+            mountEntity(nullptr);
+        }
         if (worldObj) {
             worldObj->sendEntityStatus(this, 3);
         }
@@ -33,10 +39,17 @@ public:
     virtual int getTrackingRange() const { return 160; }
     virtual int getTrackingRate() const { return 3; }
     virtual bool shouldSendVelocity() const { return false; }
+    bool preventsEntitySpawning() const override { return true; }
     virtual void writeToNBT(NBTCompound&) const {}
     virtual void readFromNBT(const NBTCompound&) {}
 
     virtual void damageEntity(int amount) { attackEntityFrom(nullptr, amount); }
+    virtual void heal(int amount) {
+        if (amount <= 0 || isDead || health <= 0) {
+            return;
+        }
+        health = static_cast<int16_t>(std::min<int>(maxHealth, health + amount));
+    }
 
     void attackEntityFrom(Entity* attacker, int amount) override {
         if (amount <= 0 || isDead || health <= 0) {

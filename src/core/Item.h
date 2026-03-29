@@ -124,6 +124,7 @@ public:
     int getMaxStackSize() const { return maxStackSize; }
 
     virtual bool onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side);
+    virtual ItemStack onItemRightClick(ItemStack* stack, World* world, EntityPlayerMP* player);
     virtual int getDamageVsEntity(Entity* entity) const { return 1; }
     virtual void hitEntity(ItemStack* stack, EntityLiving* entity) {}
 
@@ -151,6 +152,23 @@ public:
         itemsList[id] = this;
     }
     bool onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side) override;
+};
+
+class ItemFood : public Item {
+public:
+    ItemFood(int id, int healAmount);
+
+    ItemStack onItemRightClick(ItemStack* stack, World* world, EntityPlayerMP* player) override;
+
+protected:
+    int healAmount_;
+};
+
+class ItemSoup : public ItemFood {
+public:
+    ItemSoup(int id, int healAmount) : ItemFood(id, healAmount) {}
+
+    ItemStack onItemRightClick(ItemStack* stack, World* world, EntityPlayerMP* player) override;
 };
 
 // Tool material levels: 0=wood, 1=stone, 2=steel, 3=diamond, 4=gold
@@ -228,4 +246,11 @@ public:
     void hitEntity(ItemStack* stack, EntityLiving* entity) override;
 private:
     int damageVsEntity_ = 4;
+};
+
+class ItemBoat : public Item {
+public:
+    explicit ItemBoat(int id);
+
+    ItemStack onItemRightClick(ItemStack* stack, World* world, EntityPlayerMP* player) override;
 };

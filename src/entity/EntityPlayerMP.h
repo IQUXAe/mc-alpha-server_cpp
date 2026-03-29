@@ -5,7 +5,6 @@
 #include "../server/ItemInWorldManager.h"
 #include "../core/InventoryPlayer.h"
 #include "../core/NBT.h"
-#include "EntityArrow.h"
 #include <string>
 #include <fstream>
 #include <iostream>
@@ -16,6 +15,9 @@ class World;
 
 class EntityPlayerMP : public EntityPlayer {
 public:
+    using EntityLiving::readFromNBT;
+    using EntityLiving::writeToNBT;
+
     NetServerHandler* netHandler = nullptr;
     MinecraftServer* mcServer = nullptr;
     ItemInWorldManager* itemInWorldManager = nullptr;
@@ -35,6 +37,10 @@ public:
     // Persisted held item id (restored into NetServerHandler on login)
     int savedHeldItemId = 0;
     int armorDamageCarry = 0;
+    int respawnInvulnerabilityTicks = 60;
+    int attackCooldownTicks = 0;
+    int armSwingTicks = 0;
+    bool isSwinging = false;
 
     EntityPlayerMP(MinecraftServer* server, World* world, const std::string& name)
         : mcServer(server), inventory(this) {
@@ -44,23 +50,37 @@ public:
         this->username = name;
         height = 1.8f;
         width = 0.6f;
+        stepHeight = 0.5f;
     }
 
     ~EntityPlayerMP() {
         delete itemInWorldManager;
     }
 
-    void tick() override {
-        EntityPlayer::tick();
-        if (itemInWorldManager) itemInWorldManager->tick();
-    }
+    void tick() override;
+    void onDeath() override;
+    void swingItem();
+    void resetCombatState();
+    bool canAttackNow() const;
+    void markAttackPerformed();
 
     void damageEntity(int amount) override {
         attackEntityFrom(nullptr, amount);
     }
 
+    void heal(int amount) override {
+        EntityPlayer::heal(amount);
+        if (netHandler) {
+            netHandler->sendPacket(std::make_unique<Packet8UpdateHealth>(health));
+        }
+    }
+
     void attackEntityFrom(Entity* attacker, int amount) override {
         if (amount <= 0 || isDead || health <= 0) {
+            return;
+        }
+
+        if (respawnInvulnerabilityTicks > 0) {
             return;
         }
 

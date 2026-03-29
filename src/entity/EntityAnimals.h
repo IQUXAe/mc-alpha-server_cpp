@@ -447,6 +447,23 @@ public:
         EntityAnimals::readFromNBT(nbt);
         sheared = nbt.getByte("Sheared") != 0;
     }
+    void attackEntityFrom(Entity* attacker, int amount) override {
+        if (!sheared && worldObj && attacker && dynamic_cast<EntityLiving*>(attacker)) {
+            sheared = true;
+            const int woolCount = 1 + (std::rand() % 3);
+            for (int i = 0; i < woolCount; ++i) {
+                auto wool = std::make_unique<EntityItem>(35, 1, 0);
+                wool->setPosition(posX, posY + static_cast<double>(height) * 0.75, posZ);
+                wool->motionY += static_cast<double>(std::rand()) / static_cast<double>(RAND_MAX) * 0.05;
+                wool->motionX += (static_cast<double>(std::rand()) / static_cast<double>(RAND_MAX)
+                    - static_cast<double>(std::rand()) / static_cast<double>(RAND_MAX)) * 0.1;
+                wool->motionZ += (static_cast<double>(std::rand()) / static_cast<double>(RAND_MAX)
+                    - static_cast<double>(std::rand()) / static_cast<double>(RAND_MAX)) * 0.1;
+                worldObj->spawnEntityInWorld(std::move(wool));
+            }
+        }
+        EntityAnimals::attackEntityFrom(attacker, amount);
+    }
 protected:
     int getDropItemId() const override { return sheared ? 0 : 35; }
     int getDropCount() const override { return sheared ? 0 : (1 + (std::rand() % 3)); }

@@ -36,11 +36,14 @@ public:
     Item* getItem() {
         return Item::itemsList[itemID];
     }
+
+    const Item* getItem() const {
+        return Item::itemsList[itemID];
+    }
     
     bool useItem(EntityPlayerMP* player, World* world, int x, int y, int z, int side) {
-        // Assume onItemUse exists in Item
-        // return getItem()->onItemUse(this, player, world, x, y, z, side);
-        return false;
+        Item* item = getItem();
+        return item ? item->onItemUse(this, player, world, x, y, z, side) : false;
     }
     
     float getStrVsBlock(Block* block) {
@@ -50,8 +53,8 @@ public:
     }
     
     ItemStack useItemRightClick(World* world, EntityPlayerMP* player) {
-        // return getItem()->onItemRightClick(this, world, player);
-        return *this;
+        Item* item = getItem();
+        return item ? item->onItemRightClick(this, world, player) : *this;
     }
 
     std::shared_ptr<NBTCompound> writeToNBT(std::shared_ptr<NBTCompound> nbt) {

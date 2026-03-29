@@ -38,6 +38,9 @@ public:
     bool isInWater = false;
     int dimension = 0;
     int fireResistance = 1;
+    bool suppressMoveFallState = false;
+    Entity* ridingEntity = nullptr;
+    Entity* riddenByEntity = nullptr;
 
     World* worldObj = nullptr;
 
@@ -45,6 +48,12 @@ public:
     virtual ~Entity() = default;
 
     virtual void tick() {
+        if (ridingEntity && ridingEntity->isDead) {
+            ridingEntity = nullptr;
+        }
+        if (riddenByEntity && riddenByEntity->isDead) {
+            riddenByEntity = nullptr;
+        }
         prevPosX = posX;
         prevPosY = posY;
         prevPosZ = posZ;
@@ -81,9 +90,14 @@ public:
     }
     virtual bool canBePushed() const { return !isDead; }
     virtual bool canBeCollidedWith() const { return !isDead; }
+    virtual bool preventsEntitySpawning() const { return false; }
     virtual void applyEntityCollision(Entity* other);
     virtual void attackEntityFrom(Entity* attacker, int amount) {}
     virtual float getEyeHeight() const { return 0.0f; }
+    virtual double getMountedYOffset() const { return static_cast<double>(height) * 0.75; }
+    virtual void updateRiderPosition();
+    virtual void updateRidden();
+    virtual void mountEntity(Entity* vehicle);
     virtual void onFall(float distance) {}
     virtual void setOnFire(int ticks);
     virtual void onStruckByFire() { attackEntityFrom(nullptr, 1); }

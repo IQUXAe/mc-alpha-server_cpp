@@ -82,7 +82,9 @@ void Entity::moveEntity(double dx, double dy, double dz) {
     if (oldY != dy) motionY = 0.0;
     if (oldZ != dz) motionZ = 0.0;
 
-    updateFallState(dy);
+    if (!suppressMoveFallState) {
+        updateFallState(dy);
+    }
     updateEnvironmentalState();
 }
 
@@ -112,6 +114,50 @@ void Entity::applyEntityCollision(Entity* other) {
 
     addVelocity(-dx, 0.0, -dz);
     other->addVelocity(dx, 0.0, dz);
+}
+
+void Entity::updateRiderPosition() {
+    if (!riddenByEntity) {
+        return;
+    }
+    riddenByEntity->setPosition(posX, posY + getMountedYOffset(), posZ);
+}
+
+void Entity::updateRidden() {
+    if (!ridingEntity) {
+        return;
+    }
+    if (ridingEntity->isDead) {
+        mountEntity(nullptr);
+        return;
+    }
+    motionX = 0.0;
+    motionY = 0.0;
+    motionZ = 0.0;
+    ridingEntity->updateRiderPosition();
+}
+
+void Entity::mountEntity(Entity* vehicle) {
+    if (ridingEntity == vehicle) {
+        if (vehicle && vehicle->riddenByEntity == this) {
+            vehicle->riddenByEntity = nullptr;
+        }
+        ridingEntity = nullptr;
+        return;
+    }
+
+    if (ridingEntity && ridingEntity->riddenByEntity == this) {
+        ridingEntity->riddenByEntity = nullptr;
+    }
+
+    if (vehicle && vehicle->riddenByEntity && vehicle->riddenByEntity != this) {
+        vehicle->riddenByEntity->ridingEntity = nullptr;
+    }
+
+    ridingEntity = vehicle;
+    if (vehicle) {
+        vehicle->riddenByEntity = this;
+    }
 }
 
 void Entity::setOnFire(int ticks) {
@@ -216,6 +262,10 @@ void Entity::updateEnvironmentalState() {
             if (isInWater) break;
         }
         if (isInWater) break;
+    }
+
+    if (isInWater) {
+        fallDistance = 0.0f;
     }
 
     const int bbMinX = MathHelper::floor_double(boundingBox.minX);
