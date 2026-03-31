@@ -29,7 +29,7 @@ bool BlockChest::blockActivated(World* world, int x, int y, int z, EntityPlayer*
         playerMP->netHandler->sendTileEntityPacket(chest);
     }
 
-    // TODO: Handle double chest (InventoryLargeChest) when GUI system is implemented
+
     
     return true;
 }

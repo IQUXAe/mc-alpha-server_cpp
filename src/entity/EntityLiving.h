@@ -138,8 +138,7 @@ public:
 class EntityPlayer : public EntityLiving {
 public:
     std::string username;
-    // Inventory inventory; // TODO
-    // ItemStack heldItem; // TODO
+
     bool sleeping = false;
     float foodLevel = 20.0f;
 
