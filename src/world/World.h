@@ -155,6 +155,8 @@ private:
     std::unordered_map<uint64_t, std::unique_ptr<Chunk>> chunks_;
     mutable std::mutex chunksMutex_;  // Protects chunks_ map from concurrent access
     std::vector<std::unique_ptr<Entity>> entities_;
+    std::mutex pendingEntitiesMutex_;
+    std::vector<std::unique_ptr<Entity>> pendingEntities_;
     std::string worldPath_;
     std::set<NextTickListEntry> scheduledTicks;
     std::unordered_map<uint64_t, std::unique_ptr<TileEntity>> tileEntities_;
