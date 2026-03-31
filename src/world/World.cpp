@@ -63,8 +63,7 @@ std::unique_ptr<EntityMob> createHostileEntity(World* world, const std::string& 
     return nullptr;
 }
 
-void restorePendingAnimals(World* world, Chunk* chunk, std::vector<std::unique_ptr<Entity>>& entities,
-                           EntityTracker* entityTracker) {
+void restorePendingAnimals(World* world, Chunk* chunk) {
     if (!world || !chunk) {
         return;
     }
@@ -86,19 +85,13 @@ void restorePendingAnimals(World* world, Chunk* chunk, std::vector<std::unique_p
         }
 
         animal->readFromNBT(*root);
-        animal->worldObj = world;
-        Entity* ptr = animal.get();
-        entities.push_back(std::move(animal));
-        if (entityTracker) {
-            entityTracker->addEntity(ptr);
-        }
+        world->spawnEntityInWorld(std::move(animal));
     }
 
     chunk->pendingAnimals.clear();
 }
 
-void restorePendingMonsters(World* world, Chunk* chunk, std::vector<std::unique_ptr<Entity>>& entities,
-                            EntityTracker* entityTracker) {
+void restorePendingMonsters(World* world, Chunk* chunk) {
     if (!world || !chunk) {
         return;
     }
@@ -120,19 +113,13 @@ void restorePendingMonsters(World* world, Chunk* chunk, std::vector<std::unique_
         }
 
         mob->readFromNBT(*root);
-        mob->worldObj = world;
-        Entity* ptr = mob.get();
-        entities.push_back(std::move(mob));
-        if (entityTracker) {
-            entityTracker->addEntity(ptr);
-        }
+        world->spawnEntityInWorld(std::move(mob));
     }
 
     chunk->pendingMonsters.clear();
 }
 
-void restorePendingBoats(World* world, Chunk* chunk, std::vector<std::unique_ptr<Entity>>& entities,
-                         EntityTracker* entityTracker) {
+void restorePendingBoats(World* world, Chunk* chunk) {
     if (!world || !chunk) {
         return;
     }
@@ -146,12 +133,7 @@ void restorePendingBoats(World* world, Chunk* chunk, std::vector<std::unique_ptr
 
         auto boat = std::make_unique<EntityBoat>(world);
         boat->readFromNBT(*root);
-        boat->worldObj = world;
-        Entity* ptr = boat.get();
-        entities.push_back(std::move(boat));
-        if (entityTracker) {
-            entityTracker->addEntity(ptr);
-        }
+        world->spawnEntityInWorld(std::move(boat));
     }
 
     chunk->pendingBoats.clear();
@@ -434,6 +416,31 @@ World::~World() {
 
 void World::tick() {
     drainPreparedChunks();
+
+    // Безопасное добавление накопившихся сущностей в главный поток
+    std::vector<std::unique_ptr<Entity>> entitiesToAdd;
+    {
+        std::lock_guard<std::mutex> lock(pendingEntitiesMutex_);
+        entitiesToAdd.swap(pendingEntities_);
+    }
+    
+    for (auto& entity : entitiesToAdd) {
+        if (!entity) continue;
+        entity->worldObj = this;
+        
+        if (Chunk* chunk = getChunkFromBlockCoords(static_cast<int>(std::floor(entity->posX)),
+                                                   static_cast<int>(std::floor(entity->posZ)), false)) {
+            chunk->isModified = true;
+        }
+        
+        Entity* ptr = entity.get();
+        entities_.push_back(std::move(entity));
+        
+        if (mcServer && mcServer->entityTracker) {
+            mcServer->entityTracker->addEntity(ptr);
+        }
+    }
+
     worldTime++;
 
     if (mcServer && mcServer->isSpawnMonsters()) {
@@ -953,14 +960,13 @@ bool World::commitPreparedChunk(uint64_t key) {
         item->setPosition(ed.posX, ed.posY, ed.posZ);
         item->age = ed.age;
         item->pickupDelay = ed.pickupDelay;
-        item->worldObj = this;
-        entities_.push_back(std::move(item));
+        spawnEntityInWorld(std::move(item));
     }
     chunk->pendingItems.clear();
 
-    restorePendingAnimals(this, chunk, entities_, mcServer ? mcServer->entityTracker.get() : nullptr);
-    restorePendingMonsters(this, chunk, entities_, mcServer ? mcServer->entityTracker.get() : nullptr);
-    restorePendingBoats(this, chunk, entities_, mcServer ? mcServer->entityTracker.get() : nullptr);
+    restorePendingAnimals(this, chunk);
+    restorePendingMonsters(this, chunk);
+    restorePendingBoats(this, chunk);
 
     tryPopulateChunksAround(chunk->xPosition, chunk->zPosition);
     scheduleTickOnLoadForChunk(this, chunk);
@@ -1050,13 +1056,12 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
                 item->setPosition(ed.posX, ed.posY, ed.posZ);
                 item->age         = ed.age;
                 item->pickupDelay = ed.pickupDelay;
-                item->worldObj    = this;
-                entities_.push_back(std::move(item));
+                spawnEntityInWorld(std::move(item));
             }
             ptr->pendingItems.clear();
-            restorePendingAnimals(this, ptr, entities_, mcServer ? mcServer->entityTracker.get() : nullptr);
-            restorePendingMonsters(this, ptr, entities_, mcServer ? mcServer->entityTracker.get() : nullptr);
-            restorePendingBoats(this, ptr, entities_, mcServer ? mcServer->entityTracker.get() : nullptr);
+            restorePendingAnimals(this, ptr);
+            restorePendingMonsters(this, ptr);
+            restorePendingBoats(this, ptr);
             scheduleTickOnLoadForChunk(this, ptr);
             return ptr;
         }
@@ -2244,17 +2249,8 @@ void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data,
 
 void World::spawnEntityInWorld(std::unique_ptr<Entity> entity) {
     if (!entity) return;
-    entity->worldObj = this;
-    if (Chunk* chunk = getChunkFromBlockCoords(static_cast<int>(std::floor(entity->posX)),
-                                               static_cast<int>(std::floor(entity->posZ)), false)) {
-        chunk->isModified = true;
-    }
-    Entity* ptr = entity.get();
-    entities_.push_back(std::move(entity));
-    // EntityTracker handles sending spawn packets to players
-    if (mcServer && mcServer->entityTracker) {
-        mcServer->entityTracker->addEntity(ptr);
-    }
+    std::lock_guard<std::mutex> lock(pendingEntitiesMutex_);
+    pendingEntities_.push_back(std::move(entity));
 }
 
 void World::registerLoadedEntitiesWithTracker(EntityTracker* tracker) {
