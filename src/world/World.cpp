@@ -244,7 +244,7 @@ void World::saveWorld(bool flushToDisk) {
 
     std::vector<Chunk*> loadedChunks;
     {
-        std::lock_guard lock(chunksMutex_);
+        std::shared_lock lock(chunksMutex_);
         loadedChunks.reserve(chunks_.size());
         for (const auto& [key, chunk] : chunks_) {
             if (chunk) {
@@ -455,7 +455,7 @@ void World::tick() {
     // since updateEntity() may call setTileEntity/removeTileEntity which lock tileEntitiesMutex_
     std::vector<TileEntity*> toUpdate;
     {
-        std::lock_guard lock(tileEntitiesMutex_);
+        std::shared_lock lock(tileEntitiesMutex_);
         toUpdate.reserve(tileEntities_.size());
         for (auto& [key, te] : tileEntities_) {
             if (te) toUpdate.push_back(te.get());
@@ -760,7 +760,7 @@ void World::tick() {
 
                 // Remove all TileEntities belonging to this chunk so they stop ticking
                 {
-                    std::lock_guard lock(tileEntitiesMutex_);
+                    std::unique_lock lock(tileEntitiesMutex_);
                     for (const auto& [teKey, te] : chunk->getTileEntities()) {
                         if (te) tileEntities_.erase(getTileEntityKey(te->xCoord, te->yCoord, te->zCoord));
                     }
@@ -804,7 +804,7 @@ void World::requestChunkAsync(int chunkX, int chunkZ, int priority) {
     const auto key = getChunkKey(chunkX, chunkZ);
 
     {
-        std::lock_guard lock(chunksMutex_);
+        std::shared_lock lock(chunksMutex_);
         if (chunks_.contains(key)) {
             return;
         }
@@ -919,7 +919,7 @@ bool World::commitPreparedChunk(uint64_t key) {
     }
 
     {
-        std::lock_guard lock(chunksMutex_);
+        std::shared_lock lock(chunksMutex_);
         if (chunks_.contains(key)) {
             return true;
         }
@@ -928,7 +928,7 @@ bool World::commitPreparedChunk(uint64_t key) {
 
     Chunk* chunk = nullptr;
     {
-        std::lock_guard lock(chunksMutex_);
+        std::shared_lock lock(chunksMutex_);
         chunk = chunks_[key].get();
     }
     if (!chunk) {
@@ -946,7 +946,7 @@ bool World::commitPreparedChunk(uint64_t key) {
     }
 
     {
-        std::lock_guard lock(tileEntitiesMutex_);
+        std::unique_lock lock(tileEntitiesMutex_);
         for (auto& te : prepared.tileEntities) {
             if (!te) continue;
             te->worldObj = this;
@@ -986,7 +986,7 @@ void World::populateChunkIfReady(int chunkX, int chunkZ) {
     bool shouldPopulate = false;
 
     {
-        std::lock_guard lock(chunksMutex_);
+        std::shared_lock lock(chunksMutex_);
         auto it = chunks_.find(getChunkKey(chunkX, chunkZ));
         if (it == chunks_.end()) return;
 
@@ -1031,7 +1031,7 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
     commitPreparedChunk(key);
     
     {
-        std::lock_guard<std::mutex> lock(chunksMutex_);
+        std::unique_lock lock(chunksMutex_);
         auto it = chunks_.find(key);
         if (it != chunks_.end()) return it->second.get();
     }
@@ -1047,7 +1047,7 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
             decompressChunkData(chunk.get(), data);
             Chunk* ptr = chunk.get();
             {
-                std::lock_guard<std::mutex> lock(chunksMutex_);
+                std::unique_lock lock(chunksMutex_);
                 chunks_[key] = std::move(chunk);
             }
             // Spawn EntityItems that were frozen while chunk was unloaded
@@ -1074,7 +1074,7 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
     Chunk* ptr = chunk.get();
     
     {
-        std::lock_guard<std::mutex> lock(chunksMutex_);
+        std::unique_lock lock(chunksMutex_);
         chunks_[key] = std::move(chunk);
     }
     
@@ -1090,7 +1090,7 @@ Chunk* World::getChunkFromBlockCoords(int x, int z, bool generate) {
 }
 
 Chunk* World::getLoadedChunk(int chunkX, int chunkZ) {
-    std::lock_guard<std::mutex> lock(chunksMutex_);
+    std::shared_lock lock(chunksMutex_);
     auto it = chunks_.find(getChunkKey(chunkX, chunkZ));
     return it != chunks_.end() ? it->second.get() : nullptr;
 }
@@ -1100,7 +1100,7 @@ Chunk* World::getLoadedChunkFromBlockCoords(int x, int z) {
 }
 
 bool World::chunkExists(int chunkX, int chunkZ) const {
-    std::lock_guard<std::mutex> lock(chunksMutex_);
+    std::shared_lock lock(chunksMutex_);
     return chunks_.find(getChunkKey(chunkX, chunkZ)) != chunks_.end();
 }
 
@@ -2145,7 +2145,7 @@ void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data,
                             int x = te->xCoord;
                             int y = te->yCoord;
                             int z = te->zCoord;
-                            std::lock_guard lock(tileEntitiesMutex_);
+                            std::shared_lock lock(tileEntitiesMutex_);
                             auto key = getTileEntityKey(x, y, z);
                             if (!tileEntities_.contains(key)) {
                                 chunk->addTileEntity(te.get());
@@ -2286,7 +2286,7 @@ void World::sendEntityStatus(Entity* entity, int8_t status) {
 
 
 TileEntity* World::getTileEntity(int x, int y, int z) {
-    std::lock_guard lock(tileEntitiesMutex_);
+    std::shared_lock lock(tileEntitiesMutex_);
     auto it = tileEntities_.find(getTileEntityKey(x, y, z));
     return it != tileEntities_.end() ? it->second.get() : nullptr;
 }
@@ -2305,7 +2305,7 @@ void World::setTileEntity(int x, int y, int z, std::unique_ptr<TileEntity> tileE
         chunk->addTileEntity(tileEntity.get());
     }
     
-    std::lock_guard lock(tileEntitiesMutex_);
+    std::unique_lock lock(tileEntitiesMutex_);
     tileEntities_[getTileEntityKey(x, y, z)] = std::move(tileEntity);
 }
 
@@ -2316,7 +2316,7 @@ void World::removeTileEntity(int x, int y, int z) {
         chunk->removeTileEntity(x & 15, y, z & 15);
     }
     
-    std::lock_guard lock(tileEntitiesMutex_);
+    std::unique_lock lock(tileEntitiesMutex_);
     tileEntities_.erase(getTileEntityKey(x, y, z));
 }
 
