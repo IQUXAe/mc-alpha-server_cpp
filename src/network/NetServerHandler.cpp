@@ -1046,16 +1046,29 @@ void NetServerHandler::handlePlayerInventory(Packet5PlayerInventory& pkt) {
 void NetServerHandler::handlePickupSpawn(Packet21PickupSpawn& pkt) {
     if (pkt.itemId <= 0 || pkt.count <= 0) return;
 
-    // Try to consume from server inventory (Q-key drop while holding item).
-    // For inventory GUI drops the client already sent Packet5 removing the item,
-    // so we spawn regardless — the inventory is already authoritative via Packet5.
-    for (auto& s : player_->inventory.mainInventory) {
-        if (s && s->itemID == pkt.itemId && s->stackSize > 0) {
-            s->stackSize -= pkt.count;
-            if (s->stackSize <= 0) {
-                s.reset();
+    // The client sends Packet21 when dropping an item.
+    // If the GUI is closed, Q drops the currently held item.
+    // We should first try to consume it from the held item to avoid out-of-sync deletes.
+    ItemStack* held = player_->inventory.getCurrentItem();
+    bool consumed = false;
+
+    if (held && held->itemID == pkt.itemId && held->stackSize > 0) {
+        held->stackSize -= pkt.count;
+        if (held->stackSize <= 0) {
+            player_->inventory.mainInventory[player_->inventory.currentItem].reset();
+        }
+        consumed = true;
+    }
+
+    if (!consumed) {
+        for (auto& s : player_->inventory.mainInventory) {
+            if (s && s->itemID == pkt.itemId && s->stackSize > 0) {
+                s->stackSize -= pkt.count;
+                if (s->stackSize <= 0) {
+                    s.reset();
+                }
+                break;
             }
-            break;
         }
     }
 
