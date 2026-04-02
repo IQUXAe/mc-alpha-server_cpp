@@ -20,6 +20,7 @@
 #include <atomic>
 #include <compare>
 #include <leveldb/db.h>
+#include <shared_mutex>
 
 #include <set>
 #include <tuple>
@@ -153,14 +154,14 @@ private:
     bool commitPreparedChunk(uint64_t key);
 
     std::unordered_map<uint64_t, std::unique_ptr<Chunk>> chunks_;
-    mutable std::mutex chunksMutex_;  // Protects chunks_ map from concurrent access
+    mutable std::shared_mutex chunksMutex_;  // Protects chunks_ map from concurrent access
     std::vector<std::unique_ptr<Entity>> entities_;
     std::mutex pendingEntitiesMutex_;
     std::vector<std::unique_ptr<Entity>> pendingEntities_;
     std::string worldPath_;
     std::set<NextTickListEntry> scheduledTicks;
     std::unordered_map<uint64_t, std::unique_ptr<TileEntity>> tileEntities_;
-    mutable std::mutex tileEntitiesMutex_;
+    mutable std::shared_mutex tileEntitiesMutex_;
 
     // Asynchronous saving queue
     struct SaveTask {
