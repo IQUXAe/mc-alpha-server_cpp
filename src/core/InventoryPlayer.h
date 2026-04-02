@@ -49,9 +49,9 @@ public:
         return -1;
     }
 
-    int getFirstPartialMatchingStack(int id) {
+    int getFirstPartialMatchingStack(int id, int damage) {
         for (size_t i = 0; i < mainInventory.size(); ++i) {
-            if (mainInventory[i] && mainInventory[i]->itemID == id && 
+            if (mainInventory[i] && mainInventory[i]->itemID == id && mainInventory[i]->itemDamage == damage &&
                 mainInventory[i]->stackSize < mainInventory[i]->getMaxStackSize() && 
                 mainInventory[i]->stackSize < getInventoryStackLimit()) {
                 return i;
@@ -67,25 +67,45 @@ public:
         return -1;
     }
 
-    int addItemsToInventory(int id, int count) {
-        int slot = getFirstPartialMatchingStack(id);
-        if (slot < 0) slot = getFirstEmptyStack();
-        if (slot < 0) return count;
+    int addItemsToInventory(ItemStack* stack) {
+        if (!stack || stack->stackSize <= 0) return 0;
+        int maxStack = stack->getMaxStackSize();
+        bool stackable = maxStack > 1;
 
-        if (!mainInventory[slot]) {
-            mainInventory[slot] = std::make_unique<ItemStack>(id, 0);
+        if (stackable) {
+            while (stack->stackSize > 0) {
+                int slot = getFirstPartialMatchingStack(stack->itemID, stack->itemDamage);
+                if (slot < 0) slot = getFirstEmptyStack();
+                if (slot < 0) break;
+
+                if (!mainInventory[slot]) {
+                    mainInventory[slot] = std::make_unique<ItemStack>(stack->itemID, 0, stack->itemDamage);
+                }
+
+                int limit = std::min(mainInventory[slot]->getMaxStackSize(), getInventoryStackLimit());
+                int freeSpace = limit - mainInventory[slot]->stackSize;
+                int amountToAdd = std::min(stack->stackSize, freeSpace);
+
+                if (amountToAdd > 0) {
+                    stack->stackSize -= amountToAdd;
+                    mainInventory[slot]->stackSize += amountToAdd;
+                    mainInventory[slot]->animationsToGo = 5;
+                } else {
+                    break;
+                }
+            }
+        } else {
+            // Non-stackable
+            while (stack->stackSize > 0) {
+                int slot = getFirstEmptyStack();
+                if (slot < 0) break;
+                mainInventory[slot] = std::make_unique<ItemStack>(stack->itemID, 1, stack->itemDamage);
+                mainInventory[slot]->animationsToGo = 5;
+                stack->stackSize--;
+            }
         }
 
-        int limit = std::min(mainInventory[slot]->getMaxStackSize(), getInventoryStackLimit());
-        int freeSpace = limit - mainInventory[slot]->stackSize;
-        int amountToAdd = std::min(count, freeSpace);
-
-        if (amountToAdd > 0) {
-            count -= amountToAdd;
-            mainInventory[slot]->stackSize += amountToAdd;
-            mainInventory[slot]->animationsToGo = 5;
-        }
-        return count;
+        return stack->stackSize;
     }
 
     void decrementAnimations() {
@@ -105,19 +125,10 @@ public:
 
     bool addItemStackToInventory(ItemStack* stack) {
         if (!stack || stack->stackSize <= 0) return false;
-        if (stack->itemDamage == 0) {
-            stack->stackSize = addItemsToInventory(stack->itemID, stack->stackSize);
-            if (stack->stackSize <= 0) return true;
-        }
+        if (stack->itemID <= 0 || stack->itemID >= 32000) return false;
         
-        int slot = getFirstEmptyStack();
-        if (slot >= 0) {
-            mainInventory[slot] = std::make_unique<ItemStack>(stack->itemID, stack->stackSize, stack->itemDamage);
-            mainInventory[slot]->animationsToGo = 5;
-            stack->stackSize = 0;
-            return true;
-        }
-        return false;
+        stack->stackSize = addItemsToInventory(stack);
+        return stack->stackSize == 0;
     }
 
     // IInventory methods
