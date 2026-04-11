@@ -4,6 +4,7 @@
 #include "../core/Vec3D.h"
 #include <string>
 #include <cstdint>
+#include <cmath>
 
 class World;
 class Material;
@@ -112,6 +113,14 @@ public:
 
     double getDistanceSqToEntity(const Entity& other) const {
         return getDistanceSq(other.posX, other.posY, other.posZ);
+    }
+
+    float getDistanceToEntity(const Entity* other) const {
+        if (!other) return 0.0f;
+        double dx = posX - other->posX;
+        double dy = posY - other->posY;
+        double dz = posZ - other->posZ;
+        return static_cast<float>(std::sqrt(dx * dx + dy * dy + dz * dz));
     }
 
     virtual bool isEntityAlive() const { return !isDead; }

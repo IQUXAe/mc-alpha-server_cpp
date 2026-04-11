@@ -1306,6 +1306,23 @@ bool World::isDaytime() const {
     return timeOfDay >= 0 && timeOfDay < 12000;
 }
 
+bool World::doesBlockAllowAttachment(int x, int y, int z) {
+    int id = getBlockId(x, y, z);
+    if (id == 0) return false;
+    Block* b = Block::blocksList[id];
+    return b && b->blockMaterial->isSolid() && b->blockMaterial->blocksMovement();
+}
+
+std::unique_ptr<PathEntity> World::getPathToEntity(const Entity& from, const Entity& to, float maxDistance) {
+    Pathfinder pathfinder(*this);
+    return pathfinder.createEntityPathTo(from, to.posX, to.boundingBox.minY, to.posZ, maxDistance);
+}
+
+std::unique_ptr<PathEntity> World::getPathToPosition(const Entity& from, int x, int y, int z, float maxDistance) {
+    Pathfinder pathfinder(*this);
+    return pathfinder.createEntityPathTo(from, x, y, z, maxDistance);
+}
+
 EntityPlayerMP* World::getClosestPlayer(double x, double y, double z, double maxDistance) const {
     if (!mcServer || !mcServer->configManager) return nullptr;
     EntityPlayerMP* closest = nullptr;
