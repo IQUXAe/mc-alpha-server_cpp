@@ -8,6 +8,7 @@
 #include "../core/Material.h"
 #include "../block/Block.h"
 #include "../world/World.h"
+#include "../world/path/Pathfinder.h"
 
 #include <algorithm>
 #include <cmath>
@@ -110,9 +111,10 @@ private:
     float randomYawVelocity_ = 0.0f;
     float wanderYaw_ = 0.0f;
     bool isJumping_ = false;
-    int idleTime_ = 35;
+    int idleTime_ = 20;
     int walkTime_ = 0;
     int reselectDirectionTime_ = 0;
+    std::unique_ptr<PathEntity> pathEntity_;
 };
 
 inline bool EntityAnimals::getCanSpawnHere() const {
@@ -172,45 +174,124 @@ inline void EntityAnimals::updateEntityActionState() {
     }
 
     const bool touchingLiquid = isTouchingLiquid();
+    const bool inLava = false; // func_112_q stub
     rotationPitch = 0.0f;
 
-    if (idleTime_ > 0) {
-        --idleTime_;
-        if ((std::rand() % 20) == 0) {
-            randomYawVelocity_ = (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX) - 0.5f) * 10.0f;
+    // ==========================================================
+    // EntityCreature.func_152_d_() — passive animal pathfinding
+    // Animals have no target (func_158_i returns null), so
+    // they only wander randomly using blockPathWeight.
+    // ==========================================================
+
+    // Wander: pick random position using blockPathWeight
+    if ((pathEntity_ == nullptr && (std::rand() % 80) == 0) || (std::rand() % 80) == 0) {
+        int bestX = -1, bestY = -1, bestZ = -1;
+        float bestWeight = -99999.0f;
+        bool foundCandidate = false;
+        for (int i = 0; i < 10; ++i) {
+            int cx = MathHelper::floor_double(posX + static_cast<double>(std::rand() % 13) - 6.0);
+            int cy = MathHelper::floor_double(posY + static_cast<double>(std::rand() % 7) - 3.0);
+            int cz = MathHelper::floor_double(posZ + static_cast<double>(std::rand() % 13) - 6.0);
+            float w = getBlockPathWeight(cx, cy, cz);
+            if (w > bestWeight) {
+                bestWeight = w;
+                bestX = cx; bestY = cy; bestZ = cz;
+                foundCandidate = true;
+            }
         }
-        rotationYaw += randomYawVelocity_;
-
-        if (idleTime_ == 0) {
-            chooseWanderDirection();
-            walkTime_ = 40 + (std::rand() % 80);
-            reselectDirectionTime_ = 8 + (std::rand() % 16);
-        }
-    } else {
-        if (walkTime_ <= 0) {
-            beginIdle(35 + (std::rand() % 55));
-        } else {
-            --walkTime_;
-            if (--reselectDirectionTime_ <= 0 || !canWalkToward(wanderYaw_) || collidedHorizontally) {
-                chooseWanderDirection();
-                reselectDirectionTime_ = 8 + (std::rand() % 16);
-            }
-
-            rotationYaw = updateRotation(rotationYaw, wanderYaw_, 20.0f);
-            moveForward_ = getBaseMoveSpeed();
-
-            if (shouldJumpToward(wanderYaw_) || collidedHorizontally) {
-                isJumping_ = true;
-            }
-
-            if ((std::rand() % 120) == 0) {
-                beginIdle(20 + (std::rand() % 35));
-            }
+        if (foundCandidate) {
+            pathEntity_ = worldObj->getPathToPosition(*this, bestX, bestY, bestZ, 10.0f);
         }
     }
 
-    if (touchingLiquid && (std::rand() % 5) != 0) {
-        isJumping_ = true;
+    // Follow path
+    const int currentFloorY = MathHelper::floor_double(boundingBox.minY);
+
+    if (pathEntity_ != nullptr && (std::rand() % 100) != 0) {
+        auto pos = pathEntity_->getPosition(*this);
+        const double thresholdSq = static_cast<double>(width * 2.0f);
+
+        while (pos.has_value() && pos->squareDistanceTo(posX, pos->yCoord, posZ) < thresholdSq * thresholdSq) {
+            pathEntity_->incrementPathIndex();
+            if (pathEntity_->isFinished()) {
+                pos = std::nullopt;
+                pathEntity_ = nullptr;
+            } else {
+                pos = pathEntity_->getPosition(*this);
+            }
+        }
+
+        isJumping_ = false;
+        if (pos.has_value()) {
+            double dx = pos->xCoord - posX;
+            double dz = pos->zCoord - posZ;
+            double dy = pos->yCoord - static_cast<double>(currentFloorY);
+            float targetYaw = static_cast<float>(std::atan2(dz, dx) * 180.0 / std::numbers::pi_v<double>) - 90.0f;
+            float yawDiff = targetYaw - rotationYaw;
+
+            moveForward_ = getBaseMoveSpeed();
+            while (yawDiff < -180.0f) yawDiff += 360.0f;
+            while (yawDiff >= 180.0f) yawDiff -= 360.0f;
+            if (yawDiff > 30.0f) yawDiff = 30.0f;
+            if (yawDiff < -30.0f) yawDiff = -30.0f;
+            rotationYaw += yawDiff;
+
+            if (dy > 0.0) {
+                isJumping_ = true;
+            }
+        }
+
+        if (collidedHorizontally) {
+            isJumping_ = true;
+        }
+
+        if (static_cast<float>(std::rand()) / RAND_MAX < 0.8f && (touchingLiquid || inLava)) {
+            isJumping_ = true;
+        }
+    } else {
+        // No path — fallback to EntityLiving.func_152_d_() idle behavior
+        pathEntity_ = nullptr;
+        moveStrafing_ = 0.0f;
+        moveForward_ = 0.0f;
+
+        if (idleTime_ > 0) {
+            --idleTime_;
+            if (std::rand() % 50 == 0) {
+                randomYawVelocity_ = (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX) - 0.5f) * 20.0f;
+            }
+            rotationYaw += randomYawVelocity_;
+        } else {
+            if (walkTime_ <= 0) {
+                walkTime_ = 40 + (std::rand() % 60);
+                chooseWanderDirection();
+            } else {
+                --walkTime_;
+            }
+
+            if (reselectDirectionTime_ <= 0) {
+                chooseWanderDirection();
+                reselectDirectionTime_ = 10 + (std::rand() % 15);
+            } else {
+                --reselectDirectionTime_;
+            }
+
+            rotationYaw = updateRotation(rotationYaw, wanderYaw_, 15.0f);
+            if (canWalkToward(rotationYaw)) {
+                moveForward_ = getBaseMoveSpeed() * 0.6f;
+                isJumping_ = shouldJumpToward(rotationYaw);
+            } else {
+                chooseWanderDirection();
+                moveForward_ = 0.0f;
+            }
+
+            if (walkTime_ <= 0) {
+                beginIdle(25 + (std::rand() % 35));
+            }
+        }
+
+        if (touchingLiquid || inLava) {
+            isJumping_ = static_cast<float>(std::rand()) / RAND_MAX < 0.8f;
+        }
     }
 }
 
@@ -374,7 +455,6 @@ inline bool EntityAnimals::canWalkToward(float yawDegrees) const {
     const int probeX = MathHelper::floor_double(posX - std::sin(radians) * probeDistance);
     const int probeY = MathHelper::floor_double(boundingBox.minY);
     const int probeZ = MathHelper::floor_double(posZ + std::cos(radians) * probeDistance);
-
     return canStandAt(probeX, probeY, probeZ) || canStandAt(probeX, probeY + 1, probeZ);
 }
 
@@ -388,7 +468,6 @@ inline bool EntityAnimals::shouldJumpToward(float yawDegrees) const {
     const int probeX = MathHelper::floor_double(posX - std::sin(radians) * probeDistance);
     const int probeY = MathHelper::floor_double(boundingBox.minY);
     const int probeZ = MathHelper::floor_double(posZ + std::cos(radians) * probeDistance);
-
     return worldObj->isBlockSolidNoChunkLoad(probeX, probeY, probeZ)
         && canStandAt(probeX, probeY + 1, probeZ);
 }

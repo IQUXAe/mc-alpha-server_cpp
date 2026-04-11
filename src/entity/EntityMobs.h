@@ -9,6 +9,7 @@
 #include "../core/Material.h"
 #include "../block/Block.h"
 #include "../world/World.h"
+#include "../world/path/Pathfinder.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -137,6 +138,8 @@ protected:
     int daylightBurnTicks_ = 0;
     int targetRefreshTime_ = 0;
     EntityPlayerMP* targetPlayer_ = nullptr;
+    std::unique_ptr<PathEntity> pathEntity_;
+    bool hasAttacked_ = false;
 };
 
 inline float EntityMob::getBlockPathWeight(int x, int y, int z) const {
@@ -233,11 +236,13 @@ inline void EntityMob::updateMobActionState() {
     moveStrafing_ = 0.0f;
     moveForward_ = 0.0f;
     isJumping_ = false;
+    hasAttacked_ = false;
 
     if (!worldObj) {
         return;
     }
 
+    // --- Daylight burning (EntityMobs.onLivingUpdate) ---
     if (burnsInDaylight() && worldObj->isDaytime()) {
         const int x = MathHelper::floor_double(posX);
         const int y = MathHelper::floor_double(posY);
@@ -251,75 +256,165 @@ inline void EntityMob::updateMobActionState() {
     }
 
     const bool touchingLiquid = isTouchingLiquid();
+    const bool inLava = false; // func_112_q stub
     rotationPitch = 0.0f;
 
-    if (--targetRefreshTime_ <= 0) {
-        targetRefreshTime_ = 5;
-        EntityPlayerMP* refreshedTarget = acquireTarget();
-        if (refreshedTarget) {
-            targetPlayer_ = refreshedTarget;
-        } else if (hasValidTarget()) {
-            const double maxDistance = static_cast<double>(getTargetRange()) * 1.5;
-            if (targetPlayer_->getDistanceSq(posX, posY, posZ) > maxDistance * maxDistance) {
-                targetPlayer_ = nullptr;
-            }
-        }
-    }
+    // ==========================================================
+    // EntityCreature.func_152_d_() — A* pathfinding AI
+    // ==========================================================
+    constexpr float pathRange = 16.0f;
 
-    if (hasValidTarget() && !shouldAggroPlayer(*targetPlayer_)) {
+    // --- 1. Target acquisition (EntityMobs.func_158_i) ---
+    if (targetPlayer_ == nullptr) {
+        EntityPlayerMP* candidate = acquireTarget();
+        if (candidate) {
+            targetPlayer_ = candidate;
+            pathEntity_ = worldObj->getPathToEntity(*this, *candidate, pathRange);
+        }
+    } else if (targetPlayer_->isDead || targetPlayer_->health <= 0) {
         targetPlayer_ = nullptr;
+    } else {
+        float dist = targetPlayer_->getDistanceToEntity(this);
+        // func_145_g = canEntityBeSeen (line-of-sight)
+        // func_157_a = attackTarget
+        attackTarget(*targetPlayer_, dist);
     }
 
-    if (hasValidTarget()) {
-        const double dx = targetPlayer_->posX - posX;
-        const double dy = targetPlayer_->posY - posY;
-        const double dz = targetPlayer_->posZ - posZ;
-        const float distance = MathHelper::sqrt_float(static_cast<float>(dx * dx + dy * dy + dz * dz));
-        const float targetYaw = static_cast<float>(
-            std::atan2(dz, dx) * 180.0 / std::numbers::pi_v<double>) - 90.0f;
-
-        rotationYaw = updateRotation(rotationYaw, targetYaw, 20.0f);
-        moveForward_ = getBaseMoveSpeed() * (distance > getAttackReach() + 1.0f ? 1.2f : 0.85f);
-        attackTarget(*targetPlayer_, distance);
-        if (shouldJumpToward(targetYaw) || collidedHorizontally) {
-            isJumping_ = true;
-        }
-
-        idleTime_ = 0;
-        walkTime_ = 0;
-        reselectDirectionTime_ = 0;
-    } else if (idleTime_ > 0) {
-        --idleTime_;
-        if ((std::rand() % 20) == 0) {
-            randomYawVelocity_ = (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX) - 0.5f) * 10.0f;
-        }
-        rotationYaw += randomYawVelocity_;
-
-        if (idleTime_ == 0) {
-            chooseWanderDirection();
-            walkTime_ = 20 + (std::rand() % 60);
-            reselectDirectionTime_ = 8 + (std::rand() % 16);
+    // --- 2. Path recalculation ---
+    if (hasAttacked_ || targetPlayer_ == nullptr || (pathEntity_ != nullptr && (std::rand() % 20) != 0)) {
+        // Wander mode: pick random nearby position using blockPathWeight
+        if ((pathEntity_ == nullptr && (std::rand() % 80) == 0) || (std::rand() % 80) == 0) {
+            int bestX = -1, bestY = -1, bestZ = -1;
+            float bestWeight = -99999.0f;
+            bool foundCandidate = false;
+            for (int i = 0; i < 10; ++i) {
+                int cx = MathHelper::floor_double(posX + static_cast<double>(std::rand() % 13) - 6.0);
+                int cy = MathHelper::floor_double(posY + static_cast<double>(std::rand() % 7) - 3.0);
+                int cz = MathHelper::floor_double(posZ + static_cast<double>(std::rand() % 13) - 6.0);
+                float w = getBlockPathWeight(cx, cy, cz);
+                if (w > bestWeight) {
+                    bestWeight = w;
+                    bestX = cx; bestY = cy; bestZ = cz;
+                    foundCandidate = true;
+                }
+            }
+            if (foundCandidate) {
+                pathEntity_ = worldObj->getPathToPosition(*this, bestX, bestY, bestZ, 10.0f);
+            }
         }
     } else {
-        if (walkTime_ <= 0) {
-            beginIdle(20 + (std::rand() % 40));
-        } else {
-            --walkTime_;
-            if (--reselectDirectionTime_ <= 0 || !canWalkToward(wanderYaw_) || collidedHorizontally) {
-                chooseWanderDirection();
-                reselectDirectionTime_ = 8 + (std::rand() % 16);
+        // Chase target: recalculate path
+        pathEntity_ = worldObj->getPathToEntity(*this, *targetPlayer_, pathRange);
+    }
+
+    // --- 3. Follow path (EntityCreature movement logic) ---
+    const int currentFloorY = MathHelper::floor_double(boundingBox.minY);
+
+    if (pathEntity_ != nullptr && (std::rand() % 100) != 0) {
+        auto pos = pathEntity_->getPosition(*this);
+        const double thresholdSq = static_cast<double>(width * 2.0f);
+
+        while (pos.has_value() && pos->squareDistanceTo(posX, pos->yCoord, posZ) < thresholdSq * thresholdSq) {
+            pathEntity_->incrementPathIndex();
+            if (pathEntity_->isFinished()) {
+                pos = std::nullopt;
+                pathEntity_ = nullptr;
+            } else {
+                pos = pathEntity_->getPosition(*this);
+            }
+        }
+
+        isJumping_ = false;
+        if (pos.has_value()) {
+            double dx = pos->xCoord - posX;
+            double dz = pos->zCoord - posZ;
+            double dy = pos->yCoord - static_cast<double>(currentFloorY);
+            float targetYaw = static_cast<float>(std::atan2(dz, dx) * 180.0 / std::numbers::pi_v<double>) - 90.0f;
+            float yawDiff = targetYaw - rotationYaw;
+
+            moveForward_ = getBaseMoveSpeed();
+            while (yawDiff < -180.0f) yawDiff += 360.0f;
+            while (yawDiff >= 180.0f) yawDiff -= 360.0f;
+            if (yawDiff > 30.0f) yawDiff = 30.0f;
+            if (yawDiff < -30.0f) yawDiff = -30.0f;
+            rotationYaw += yawDiff;
+
+            // Strafing while attacking (Java: field_387_ah)
+            if (hasAttacked_ && targetPlayer_ != nullptr) {
+                double tx = targetPlayer_->posX - posX;
+                double tz = targetPlayer_->posZ - posZ;
+                float oldYaw = rotationYaw;
+                rotationYaw = static_cast<float>(std::atan2(tz, tx) * 180.0 / std::numbers::pi_v<double>) - 90.0f;
+                float strafeDiff = (oldYaw - rotationYaw + 90.0f) * static_cast<float>(std::numbers::pi_v<double>) / 180.0f;
+                moveStrafing_ = -MathHelper::sin(strafeDiff) * moveForward_ * 1.0f;
+                moveForward_ = MathHelper::cos(strafeDiff) * moveForward_ * 1.0f;
             }
 
-            rotationYaw = updateRotation(rotationYaw, wanderYaw_, 20.0f);
-            moveForward_ = getBaseMoveSpeed();
-            if (shouldJumpToward(wanderYaw_) || collidedHorizontally) {
+            if (dy > 0.0) {
                 isJumping_ = true;
             }
         }
-    }
 
-    if (touchingLiquid && (std::rand() % 5) != 0) {
-        isJumping_ = true;
+        if (targetPlayer_ != nullptr) {
+            // Look at target (EntityLiving.func_147_b)
+            double tx = targetPlayer_->posX - posX;
+            double tz = targetPlayer_->posZ - posZ;
+            float lookYaw = static_cast<float>(std::atan2(tz, tx) * 180.0 / std::numbers::pi_v<double>) - 90.0f;
+            rotationYaw = updateRotation(rotationYaw, lookYaw, 30.0f);
+        }
+
+        if (collidedHorizontally) {
+            isJumping_ = true;
+        }
+
+        if (static_cast<float>(std::rand()) / RAND_MAX < 0.8f && (touchingLiquid || inLava)) {
+            isJumping_ = true;
+        }
+    } else {
+        // No path — fallback to EntityLiving.func_152_d_() idle behavior
+        pathEntity_ = nullptr;
+
+        moveStrafing_ = 0.0f;
+        moveForward_ = 0.0f;
+
+        if (idleTime_ > 0) {
+            --idleTime_;
+            if (std::rand() % 50 == 0) {
+                randomYawVelocity_ = (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX) - 0.5f) * 20.0f;
+            }
+            rotationYaw += randomYawVelocity_;
+        } else {
+            if (walkTime_ <= 0) {
+                walkTime_ = 30 + (std::rand() % 50);
+                chooseWanderDirection();
+            } else {
+                --walkTime_;
+            }
+
+            if (reselectDirectionTime_ <= 0) {
+                chooseWanderDirection();
+                reselectDirectionTime_ = 8 + (std::rand() % 12);
+            } else {
+                --reselectDirectionTime_;
+            }
+
+            rotationYaw = updateRotation(rotationYaw, wanderYaw_, 15.0f);
+            if (canWalkToward(rotationYaw)) {
+                moveForward_ = getBaseMoveSpeed() * 0.6f;
+                isJumping_ = shouldJumpToward(rotationYaw);
+            } else {
+                chooseWanderDirection();
+                moveForward_ = 0.0f;
+            }
+
+            if (walkTime_ <= 0) {
+                beginIdle(20 + (std::rand() % 30));
+            }
+        }
+
+        if (touchingLiquid || inLava) {
+            isJumping_ = static_cast<float>(std::rand()) / RAND_MAX < 0.8f;
+        }
     }
 }
 
