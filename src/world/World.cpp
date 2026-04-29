@@ -15,6 +15,7 @@
 #include "TileEntityFurnace.h"
 #include "core/NBT.h"
 #include "core/Logger.h"
+#include "core/RustBridge.h"
 #include <zlib.h>
 #include <zstd.h>
 #include <cmath>
@@ -320,76 +321,31 @@ bool World::loadLevelDat() {
     std::vector<uint8_t> compressed((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     file.close();
 
-    z_stream strm{};
-    strm.zalloc = Z_NULL;
-    strm.zfree = Z_NULL;
-    strm.opaque = Z_NULL;
-
-    if (inflateInit2(&strm, 15 + 16) != Z_OK) return false;
-    strm.next_in = compressed.data();
-    strm.avail_in = compressed.size();
+    RustBridge::LevelDatData level;
+    if (!RustBridge::decodeLevelDat(compressed, level)) return false;
     
-    std::vector<uint8_t> uncompressed(1024 * 128); // 128KB should be plenty for level.dat
-    strm.next_out = uncompressed.data();
-    strm.avail_out = uncompressed.size();
-    
-    int ret = inflate(&strm, Z_FINISH);
-    if (ret != Z_STREAM_END && ret != Z_OK) {
-        inflateEnd(&strm);
-        return false;
-    }
-    uncompressed.resize(strm.total_out);
-    inflateEnd(&strm);
-
-    ByteBuffer buf(uncompressed);
-    auto root = NBTCompound::readRoot(buf);
-    if (!root) return false;
-    
-    auto data = root->getCompound("Data");
-    if (!data) return false;
-    
-    randomSeed = data->getLong("RandomSeed");
-    spawnX = data->getInt("SpawnX");
-    spawnY = data->getInt("SpawnY");
-    spawnZ = data->getInt("SpawnZ");
-    worldTime = data->getLong("Time");
+    randomSeed = level.randomSeed;
+    spawnX = level.spawnX;
+    spawnY = level.spawnY;
+    spawnZ = level.spawnZ;
+    worldTime = level.worldTime;
     
     return true;
 }
 
 void World::saveLevelDat() {
-    NBTCompound data;
-    data.setLong("RandomSeed", randomSeed);
-    data.setInt("SpawnX", spawnX);
-    data.setInt("SpawnY", spawnY);
-    data.setInt("SpawnZ", spawnZ);
-    data.setLong("Time", worldTime);
-    data.setLong("SizeOnDisk", 0);
-    data.setInt("version", 19132);
-    data.setString("LevelName", "world");
-    
-    NBTCompound root;
-    root.setCompound("Data", std::make_shared<NBTCompound>(data));
-    
-    ByteBuffer buf;
-    root.writeRoot(buf, "");
-    
-    z_stream strm{};
-    strm.zalloc = Z_NULL;
-    strm.zfree = Z_NULL;
-    strm.opaque = Z_NULL;
+    RustBridge::LevelDatData level;
+    level.randomSeed = randomSeed;
+    level.spawnX = spawnX;
+    level.spawnY = spawnY;
+    level.spawnZ = spawnZ;
+    level.worldTime = worldTime;
+    level.sizeOnDisk = 0;
+    level.version = 19132;
+    level.levelName = "world";
 
-    if (deflateInit2(&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK) return;
-    
-    std::vector<uint8_t> compressed(buf.data.size() + 1024);
-    strm.next_in = buf.data.data();
-    strm.avail_in = buf.data.size();
-    strm.next_out = compressed.data();
-    strm.avail_out = compressed.size();
-    
-    deflate(&strm, Z_FINISH);
-    compressed.resize(strm.total_out);
-    deflateEnd(&strm);
+    std::vector<uint8_t> compressed = RustBridge::encodeLevelDat(level);
+    if (compressed.empty()) return;
     
     std::ofstream file(worldPath_ + "/level.dat", std::ios::binary);
     if (file) {
@@ -2074,18 +2030,7 @@ std::vector<uint8_t> World::compressChunkData(Chunk* chunk) {
     ByteBuffer buf;
     root.writeRoot(buf, "");
 
-    // Compress with zstd (faster decompression than gzip, same ratio)
-    size_t bound = ZSTD_compressBound(buf.data.size());
-    std::vector<uint8_t> out(bound);
-    size_t compressed = ZSTD_compress(out.data(), bound,
-                                      buf.data.data(), buf.data.size(),
-                                      1); // level 1 = fastest
-    if (ZSTD_isError(compressed)) {
-        Logger::severe("zstd compress failed: {}", ZSTD_getErrorName(compressed));
-        return {};
-    }
-    out.resize(compressed);
-    return out;
+    return RustBridge::zstdCompress(buf.data, 1);
 }
 
 void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data,
@@ -2098,33 +2043,11 @@ void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data,
     uint32_t magic;
     std::memcpy(&magic, data.data(), 4);
     if (magic == ZSTD_MAGIC) {
-        // zstd
-        unsigned long long decompSize = ZSTD_getFrameContentSize(data.data(), data.size());
-        if (decompSize == ZSTD_CONTENTSIZE_ERROR || decompSize == ZSTD_CONTENTSIZE_UNKNOWN) {
-            decompSize = 256 * 1024; // fallback 256KB
-        }
-        outBuf.resize(static_cast<size_t>(decompSize));
-        size_t result = ZSTD_decompress(outBuf.data(), outBuf.size(),
-                                        data.data(), data.size());
-        if (ZSTD_isError(result)) {
-            Logger::severe("zstd decompress failed: {}", ZSTD_getErrorName(result));
-            return;
-        }
-        outBuf.resize(result);
+        outBuf = RustBridge::zstdDecompress(data);
     } else {
-        // Legacy gzip
-        z_stream strm{};
-        if (inflateInit2(&strm, 15 + 16) != Z_OK) return;
-        strm.next_in  = const_cast<uint8_t*>(data.data());
-        strm.avail_in = static_cast<uInt>(data.size());
-        outBuf.resize(128 * 1024);
-        strm.next_out  = outBuf.data();
-        strm.avail_out = static_cast<uInt>(outBuf.size());
-        int ret = inflate(&strm, Z_FINISH);
-        if (ret != Z_STREAM_END && ret != Z_OK) { inflateEnd(&strm); return; }
-        outBuf.resize(strm.total_out);
-        inflateEnd(&strm);
+        outBuf = RustBridge::gzipDecompress(data);
     }
+    if (outBuf.empty()) return;
 
     ByteBuffer buf(std::move(outBuf));
     auto root = NBTCompound::readRoot(buf);

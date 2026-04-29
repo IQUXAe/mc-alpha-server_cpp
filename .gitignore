@@ -17,3 +17,10 @@ ops.txt
 .idea/
 *.swp
 *.DS_Store
+
+# Local helper scripts
+build-local.sh
+
+# Rust build artifacts
+rust/**/target/
+rust/**/.rustc_info.json
