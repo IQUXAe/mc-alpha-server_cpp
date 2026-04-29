@@ -3,6 +3,8 @@ project(alpha_server LANGUAGES CXX)
 
 include(CheckIPOSupported)
 
+option(ALPHA_ENABLE_RUST "Build and link the optional Rust bridge crate" OFF)
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -62,4 +64,21 @@ if(UNIX)
             -fsanitize=address,undefined
         >
     )
+endif()
+
+if(ALPHA_ENABLE_RUST)
+    set(RUST_BRIDGE_LIB "${CMAKE_CURRENT_SOURCE_DIR}/rust/alpha_bridge/target/release/libalpha_bridge.a")
+    if(NOT EXISTS "${RUST_BRIDGE_LIB}")
+        message(FATAL_ERROR "Rust bridge enabled, but ${RUST_BRIDGE_LIB} was not found. Build it first with cargo.")
+    endif()
+
+    add_library(alpha_rust_bridge STATIC IMPORTED GLOBAL)
+    set_target_properties(alpha_rust_bridge PROPERTIES
+        IMPORTED_LOCATION "${RUST_BRIDGE_LIB}"
+    )
+
+    target_compile_definitions(alpha_server PRIVATE ALPHA_ENABLE_RUST=1)
+    target_include_directories(alpha_server PRIVATE rust/alpha_bridge)
+    target_link_libraries(alpha_server PRIVATE alpha_rust_bridge gcc_s util rt dl c m)
+    message(STATUS "Rust bridge integration is enabled.")
 endif()
