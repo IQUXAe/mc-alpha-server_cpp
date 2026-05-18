@@ -29,6 +29,7 @@ class PathEntity;
 #include <random>
 
 class TileEntity;
+class PathEntity;
 
 struct NextTickListEntry {
     int x, y, z;
@@ -90,6 +91,11 @@ public:
     int getSavedLightValue(int type, int x, int y, int z);
     bool canBlockSeeSky(int x, int y, int z);
     bool isDaytime() const;
+    bool doesBlockAllowAttachment(int x, int y, int z);
+
+    // Pathfinding (Java: func_482_a, func_501_a)
+    std::unique_ptr<PathEntity> getPathToEntity(const Entity& from, const Entity& to, float maxDistance);
+    std::unique_ptr<PathEntity> getPathToPosition(const Entity& from, int x, int y, int z, float maxDistance);
 
     // Block access and modification
     uint8_t getBlockId(int x, int y, int z);

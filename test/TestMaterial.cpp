@@ -13,19 +13,18 @@ protected:
 
 TEST_F(MaterialTest, AirProperties) {
     EXPECT_FALSE(Material::air.getIsLiquid());
-    EXPECT_TRUE(Material::air.isSolid());
-    EXPECT_TRUE(Material::air.blocksMovement());
+    EXPECT_FALSE(Material::air.isSolid());
+    EXPECT_FALSE(Material::air.blocksMovement());
 }
 
-TEST_F(MaterialTest, WaterDefaultNotLiquid) {
-    // Water/lava are Material base instances until Block::initBlocks() swaps them
-    EXPECT_FALSE(Material::water.getIsLiquid());
-    EXPECT_TRUE(Material::water.isSolid());
+TEST_F(MaterialTest, WaterIsLiquid) {
+    EXPECT_TRUE(Material::water.getIsLiquid());
+    EXPECT_FALSE(Material::water.isSolid());
 }
 
-TEST_F(MaterialTest, LavaDefaultNotLiquid) {
-    EXPECT_FALSE(Material::lava.getIsLiquid());
-    EXPECT_TRUE(Material::lava.isSolid());
+TEST_F(MaterialTest, LavaIsLiquid) {
+    EXPECT_TRUE(Material::lava.getIsLiquid());
+    EXPECT_FALSE(Material::lava.isSolid());
 }
 
 TEST_F(MaterialTest, RockIsSolid) {

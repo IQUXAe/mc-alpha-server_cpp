@@ -86,6 +86,7 @@ inline bool EntityAnimals::getCanSpawnHere() const {
     return collisions.empty() && !isTouchingLiquid();
 }
 
+
 inline void EntityAnimals::onDeath() {
     const int dropId = getDropItemId();
     const int dropCount = getDropCount();

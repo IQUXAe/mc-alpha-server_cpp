@@ -6,11 +6,11 @@
 #include "../world/World.h"
 #include "../world/TileEntity.h"
 #include "../core/Logger.h"
+#include "../core/RustBridge.h"
 
 #include <fstream>
 #include <filesystem>
 #include <algorithm>
-#include <zlib.h>
 
 ServerConfigurationManager::ServerConfigurationManager(MinecraftServer* server)
     : mcServer_(server) {
@@ -129,20 +129,8 @@ void ServerConfigurationManager::sendTileEntityToNearbyPlayers(int x, int y, int
     te->writeToNBT(nbt);
     ByteBuffer rawBuf;
     nbt.writeRoot(rawBuf, "");
-
-    z_stream strm{};
-    strm.zalloc = Z_NULL; strm.zfree = Z_NULL; strm.opaque = Z_NULL;
-    if (deflateInit2(&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK)
-        return;
-
-    std::vector<uint8_t> compressed(rawBuf.data.size() + 256);
-    strm.next_in   = rawBuf.data.data();
-    strm.avail_in  = static_cast<uInt>(rawBuf.data.size());
-    strm.next_out  = compressed.data();
-    strm.avail_out = static_cast<uInt>(compressed.size());
-    deflate(&strm, Z_FINISH);
-    compressed.resize(strm.total_out);
-    deflateEnd(&strm);
+    std::vector<uint8_t> compressed = RustBridge::gzipCompress(rawBuf.data);
+    if (compressed.empty()) return;
 
     int chunkX = x >> 4;
     int chunkZ = z >> 4;

@@ -7,6 +7,7 @@
 #include "../core/Item.h"
 #include "../block/Block.h"
 #include "../world/World.h"
+#include "../world/path/Pathfinder.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -183,6 +184,8 @@ protected:
     int daylightBurnTicks_ = 0;
     int targetRefreshTime_ = 0;
     EntityPlayerMP* targetPlayer_ = nullptr;
+    std::unique_ptr<PathEntity> pathEntity_;
+    bool hasAttacked_ = false;
 };
 
 inline bool EntityMob::shouldAggroPlayer(const EntityPlayerMP&) const {
