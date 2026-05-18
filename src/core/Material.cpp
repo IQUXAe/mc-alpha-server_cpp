@@ -13,6 +13,13 @@ Material Material::plants(false, false, false, false);
 Material Material::sponge;
 Material Material::cloth;
 Material Material::fire(false, false, false, false);
+// Materials that can burn (called in initBlocks too for safety)
+struct BurnableInit { BurnableInit() {
+    Material::wood.setBurning();
+    Material::leaves.setBurning();
+    Material::cloth.setBurning();
+    Material::tnt.setBurning();
+}} _burnInit;
 Material Material::sand;
 Material Material::circuits(false, false, false, false);
 Material Material::glass;

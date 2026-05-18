@@ -102,6 +102,7 @@ public:
 
     virtual float checkHardness(EntityPlayer* player) const;
 
+    virtual bool canPlaceBlockAt(World* world, int x, int y, int z) { return true; }
     virtual void onBlockPlaced(World* world, int x, int y, int z, int side) {}
     virtual bool canBlockStay(World* world, int x, int y, int z) const { return true; }
     virtual bool isReplaceable() const { return false; }

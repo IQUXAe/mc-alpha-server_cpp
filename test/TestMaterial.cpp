@@ -34,9 +34,12 @@ TEST_F(MaterialTest, RockIsSolid) {
     EXPECT_FALSE(Material::rock.getBurning());
 }
 
-TEST_F(MaterialTest, WoodDefaultNoBurn) {
-    // Wood needs Block::initBlocks() to set burning flag
-    EXPECT_FALSE(Material::wood.getBurning());
+TEST_F(MaterialTest, WoodIsBurning) {
+    // Static init sets burning for flammable materials
+    EXPECT_TRUE(Material::wood.getBurning());
+    EXPECT_TRUE(Material::leaves.getBurning());
+    EXPECT_TRUE(Material::cloth.getBurning());
+    EXPECT_TRUE(Material::tnt.getBurning());
 }
 
 TEST_F(MaterialTest, TransparentSubclass) {

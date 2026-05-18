@@ -1,4 +1,5 @@
 #include "Block.h"
+#include "BlockFire.h"
 #include "BlockContainer.h"
 #include "BlockChest.h"
 #include "BlockFurnace.h"
@@ -123,6 +124,26 @@ public:
     }
 
     void updateTick(World* world, int x, int y, int z) override {
+        // Lava creates fire on adjacent burnable blocks (Java BlockStationary)
+        if (blockMaterial == &Material::lava) {
+            if (world->getBlockMetadata(x, y, z) == 0) { // source block or flowing
+                for (int side = 0; side < 6; ++side) {
+                    static const int dx[6] = {1,-1,0,0,0,0};
+                    static const int dy[6] = {0,0,1,-1,0,0};
+                    static const int dz[6] = {0,0,0,0,1,-1};
+                    int nx = x + dx[side], ny = y + dy[side], nz = z + dz[side];
+                    int nid = world->getBlockId(nx, ny, nz);
+                    if (nid == 0 && std::rand() % 4 == 0) {
+                        // Check if block below allows attachment or is burnable
+                        if (world->doesBlockAllowAttachment(nx, ny - 1, nz)
+                            || world->getBlockId(nx, ny - 1, nz) == 87) {
+                            world->setBlockWithNotify(nx, ny, nz, 51);
+                        }
+                    }
+                }
+            }
+        }
+
         // Very simplified fluid spreading logic
         int metadata = world->getBlockMetadata(x, y, z);
         if (metadata >= 8) return; // fully spread
@@ -968,7 +989,7 @@ void Block::initBlocks() {
     cobblestoneMossy = (new Block(48, &Material::rock))->setHardness(2.0f)->setResistance(10.0f);
     (new Block(49, &Material::rock))->setHardness(2000.0f);  // obsidian
     (new BlockTorch(50, &Material::circuits))->setHardness(0.0f)->setLightOpacity(0); // torch
-    (new Block(51, &Material::fire))->setHardness(0.0f);     // fire
+    blocksList[51] = new BlockFire(51, 0);                    // fire
     (new Block(52, &Material::rock))->setHardness(5.0f);
     (new Block(53, &Material::wood))->setHardness(2.0f);     // wood stairs
     blocksList[54] = new BlockChest(54);                     // chest

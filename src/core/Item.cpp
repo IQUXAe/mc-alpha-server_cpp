@@ -198,7 +198,44 @@ void Item::initItems() {
     shovelSteel = (new ItemSpade(256 + 0, 2));
     pickaxeSteel = (new ItemPickaxe(256 + 1, 2));
     axeSteel = (new ItemAxe(256 + 2, 2));
-    flintAndSteel = (new Item(3))->setMaxStackSize(1)->setMaxDamage(64);
+    class ItemFlintAndSteel : public Item {
+    public:
+        using Item::Item;
+        bool onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side) override {
+            if (!stack || !world) return false;
+            // Place fire on the block adjacent to the clicked face
+            static const int dx[6] = {1,-1,0,0,0,0};
+            static const int dy[6] = {0,0,1,-1,0,0};
+            static const int dz[6] = {0,0,0,0,1,-1};
+            int fx = x + dx[side], fy = y + dy[side], fz = z + dz[side];
+            int fid = world->getBlockId(fx, fy, fz);
+            if (fid != 0) return false;
+            if (!world->doesBlockAllowAttachment(fx, fy - 1, fz)
+                && world->getBlockId(fx, fy - 1, fz) != 87) { // netherrack
+                // Check if any adjacent block can burn
+                bool hasFuel = false;
+                static const int cx[6] = {1,-1,0,0,0,0};
+                static const int cy[6] = {0,0,1,-1,0,0};
+                static const int cz[6] = {0,0,0,0,1,-1};
+                for (int i = 0; i < 6; ++i) {
+                    int id = world->getBlockId(fx + cx[i], fy + cy[i], fz + cz[i]);
+                    if (id > 0 && id < 256 && world->getBlockMaterial(fx + cx[i], fy + cy[i], fz + cz[i])->getBurning()) {
+                        hasFuel = true;
+                        break;
+                    }
+                }
+                if (!hasFuel) return false;
+            }
+            world->setBlockWithNotify(fx, fy, fz, 51);
+            // Damage the item
+            stack->itemDamage++;
+            if (stack->itemDamage >= maxDamage) {
+                stack->stackSize = 0;
+            }
+            return true;
+        }
+    };
+    flintAndSteel = (new ItemFlintAndSteel(3))->setMaxStackSize(1)->setMaxDamage(64);
     appleRed = (new ItemFood(4, 4));
     bow = (new Item(5))->setMaxStackSize(1)->setMaxDamage(384);
     arrow = (new Item(6));

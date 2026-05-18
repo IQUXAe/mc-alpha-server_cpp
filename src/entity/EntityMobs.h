@@ -456,6 +456,34 @@ private:
             }
         }
 
+        // Phase 3: fire from explosion (Java Explosion logic)
+        for (int fx = cx - r; fx <= cx + r; ++fx) {
+            for (int fz = cz - r; fz <= cz + r; ++fz) {
+                for (int fy = cy - r; fy <= cy + r; ++fy) {
+                    if (std::sqrt(static_cast<float>(
+                        (fx - cx) * (fx - cx) + (fy - cy) * (fy - cy) + (fz - cz) * (fz - cz))) > radius) continue;
+                    if (worldObj->getBlockId(fx, fy, fz) != 0) continue;
+                    if ((std::rand() % 5) == 0) {
+                        if (worldObj->doesBlockAllowAttachment(fx, fy - 1, fz)) {
+                            worldObj->setBlockWithNotify(fx, fy, fz, 51);
+                        } else {
+                            for (int i = 0; i < 6; ++i) {
+                                static const int dx[6] = {1,-1,0,0,0,0};
+                                static const int dy[6] = {0,0,1,-1,0,0};
+                                static const int dz[6] = {0,0,0,0,1,-1};
+                                int id = worldObj->getBlockId(fx + dx[i], fy + dy[i], fz + dz[i]);
+                                if (id > 0 && id < 256 && Block::blocksList[id]
+                                    && Block::blocksList[id]->blockMaterial->getBurning()) {
+                                    worldObj->setBlockWithNotify(fx, fy, fz, 51);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         isDead = true;
     }
 };

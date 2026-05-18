@@ -447,6 +447,37 @@ void World::tick() {
         it = scheduledTicks.begin();
     }
 
+    // Random block ticks (Java func_4073_g) — up to 80 per loaded chunk per tick
+    if (!mcServer || !mcServer->configManager) {
+        // fallback: no players, skip
+    } else {
+        for (auto* player : mcServer->configManager->playerEntities) {
+            if (!player) continue;
+            const int cx = static_cast<int>(std::floor(player->posX / 16.0));
+            const int cz = static_cast<int>(std::floor(player->posZ / 16.0));
+            const int radius = 8;
+            for (int dx = -radius; dx <= radius; ++dx) {
+                for (int dz = -radius; dz <= radius; ++dz) {
+                    int chunkX = cx + dx;
+                    int chunkZ = cz + dz;
+                    Chunk* chunk = getLoadedChunk(chunkX, chunkZ);
+                    if (!chunk) continue;
+                    for (int i = 0; i < 80; ++i) {
+                        int bx = (chunkX << 4) + (std::rand() & 15);
+                        int by = std::rand() & 127;
+                        int bz = (chunkZ << 4) + (std::rand() & 15);
+                        int id = chunk->getBlockID(bx & 15, by, bz & 15);
+                        if (id <= 0 || id >= 256) continue;
+                        if (Block::tickOnLoad[id]) {
+                            Block::blocksList[id]->updateTick(this, bx, by, bz);
+                        }
+                    }
+                }
+            }
+            break; // Only process first player's chunks to avoid O(n²) cost
+        }
+    }
+
     // Tick entities
     // Snapshot size before loop: entities spawned during tick (e.g. via getChunk->push_back)
     // will have indices >= snapshot and are processed next tick, avoiding iterator invalidation.
