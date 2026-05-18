@@ -63,3 +63,9 @@ if(UNIX)
         >
     )
 endif()
+
+# Tests
+option(BUILD_TESTS "Build test suite" ON)
+if(BUILD_TESTS)
+    add_subdirectory(test)
+endif()

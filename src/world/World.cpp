@@ -1324,6 +1324,21 @@ EntityPlayerMP* World::getClosestPlayer(double x, double y, double z, double max
     return closest;
 }
 
+std::unique_ptr<PathEntity> World::getPathToEntity(Entity* entity, Entity* target, float maxDistance) {
+    Pathfinder pf(*this);
+    return pf.createEntityPathTo(*entity,
+        target->posX, target->posY + target->getEyeHeight(), target->posZ, maxDistance);
+}
+
+std::unique_ptr<PathEntity> World::getPathToBlock(Entity* entity, int x, int y, int z, float maxDistance) {
+    Pathfinder pf(*this);
+    return pf.createEntityPathTo(*entity, x, y, z, maxDistance);
+}
+
+bool World::canEntitySee(Entity* entity, const Vec3D& from, const Vec3D& to) {
+    return rayTraceBlocks(from, to, false) == std::nullopt;
+}
+
 int World::countHostileMobs() const {
     int count = 0;
     for (const auto& entity : entities_) {

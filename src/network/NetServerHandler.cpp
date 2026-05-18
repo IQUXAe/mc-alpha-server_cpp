@@ -360,6 +360,11 @@ void NetServerHandler::handleUseEntity(Packet7UseEntity& pkt) {
     }
 
     if (!pkt.isLeftClick) {
+        // Try entity interaction first (e.g. cow milking, pig saddling)
+        if (target->interact(player_)) {
+            return;
+        }
+
         if (auto* boat = dynamic_cast<EntityBoat*>(target)) {
             if (boat->riddenByEntity && boat->riddenByEntity != player_) {
                 if (dynamic_cast<EntityPlayerMP*>(boat->riddenByEntity)) {

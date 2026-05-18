@@ -11,6 +11,8 @@
 #include "gen/ChunkProviderGenerate.h"
 #include "biome/WorldChunkManager.h"
 #include "../core/AxisAlignedBB.h"
+// PathEntity is forward-declared; Pathfinder.h included only in World.cpp
+class PathEntity;
 #include "../core/NBT.h"
 #include "../forward.h"
 #include <thread>
@@ -115,6 +117,9 @@ public:
     Material* getBlockMaterialNoChunkLoad(int x, int y, int z);
 
     // Entity integration
+    std::unique_ptr<PathEntity> getPathToEntity(Entity* entity, Entity* target, float maxDistance);
+    std::unique_ptr<PathEntity> getPathToBlock(Entity* entity, int x, int y, int z, float maxDistance);
+    bool canEntitySee(Entity* entity, const Vec3D& from, const Vec3D& to);
     void getCollidingBoundingBoxes(Entity* entity, const AxisAlignedBB& mask, std::vector<AxisAlignedBB>& result);
     void getEntitiesWithinAABBExcludingEntity(Entity* entity, const AxisAlignedBB& mask, std::vector<Entity*>& result);
     bool isPlacementVolumeClear(const AxisAlignedBB& mask);

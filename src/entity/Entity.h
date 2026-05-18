@@ -7,6 +7,7 @@
 
 class World;
 class Material;
+class EntityPlayerMP;
 
 class Entity {
 public:
@@ -115,6 +116,9 @@ public:
     }
 
     virtual bool isEntityAlive() const { return !isDead; }
+
+    // Called when a player right-clicks this entity (Java: func_6092_a)
+    virtual bool interact(EntityPlayerMP* player) { return false; }
 
     static int32_t nextEntityId;
 

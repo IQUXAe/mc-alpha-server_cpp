@@ -6,6 +6,7 @@
 #include "../world/World.h"
 #include <cmath>
 #include <cstdlib>
+#include <numbers>
 #include <string>
 
 class EntityLiving : public Entity {
@@ -133,6 +134,99 @@ public:
         if (attackTime > 0) attackTime--;
         if (hurtResistantTime > 0) hurtResistantTime--;
     }
+
+    // Movement helpers (shared by all living entities)
+    bool isTouchingLiquid() const {
+        if (!worldObj) return false;
+        const int x = MathHelper::floor_double(posX);
+        const int y = MathHelper::floor_double(boundingBox.minY);
+        const int z = MathHelper::floor_double(posZ);
+        return worldObj->getBlockMaterialNoChunkLoad(x, y, z)->getIsLiquid()
+            || worldObj->getBlockMaterialNoChunkLoad(x, y + 1, z)->getIsLiquid();
+    }
+
+    void moveFlying(float strafe, float forward, float acceleration) {
+        float magnitude = strafe * strafe + forward * forward;
+        if (magnitude < 1.0e-4f) return;
+        magnitude = MathHelper::sqrt_float(magnitude);
+        if (magnitude < 1.0f) magnitude = 1.0f;
+        magnitude = acceleration / magnitude;
+        strafe *= magnitude;
+        forward *= magnitude;
+        const float radians = rotationYaw * static_cast<float>(std::numbers::pi_v<double> / 180.0);
+        const float sinYaw = MathHelper::sin(radians);
+        const float cosYaw = MathHelper::cos(radians);
+        motionX += strafe * cosYaw - forward * sinYaw;
+        motionZ += forward * cosYaw + strafe * sinYaw;
+    }
+
+    void moveEntityWithHeading(float strafe, float forward) {
+        const bool touchingLiquid = isTouchingLiquid();
+
+        if (isJumping_) {
+            if (touchingLiquid) {
+                motionY += 0.04;
+            } else if (onGround) {
+                motionY = 0.42;
+            }
+        }
+
+        if (touchingLiquid) {
+            const double startY = posY;
+            moveFlying(strafe, forward, 0.02f);
+            moveEntity(motionX, motionY, motionZ);
+            motionX *= 0.8;
+            motionY *= 0.8;
+            motionZ *= 0.8;
+            motionY -= 0.02;
+            if ((onGround || posY <= startY) && isJumping_) {
+                motionY = 0.3;
+            }
+            return;
+        }
+
+        float friction = 0.91f;
+        if (onGround) {
+            friction = 0.546f;
+        }
+
+        const float accelerationScale = 0.16277136f / (friction * friction * friction);
+        moveFlying(strafe, forward, onGround ? 0.1f * accelerationScale : 0.02f);
+
+        // Ladder / wall-climbing (func_144_E)
+        if (isOnLadder()) {
+            fallDistance = 0.0f;
+            if (motionY < -0.15) {
+                motionY = -0.15;
+            }
+        }
+
+        moveEntity(motionX, motionY, motionZ);
+
+        if (collidedVertically && isOnLadder()) {
+            motionY = 0.2;
+        }
+
+        motionY -= 0.08;
+        motionY *= 0.98;
+        motionX *= friction;
+        motionZ *= friction;
+    }
+
+    // Check if on a ladder (func_144_E)
+    virtual bool isOnLadder() const {
+        if (!worldObj) return false;
+        const int x = MathHelper::floor_double(posX);
+        const int y = MathHelper::floor_double(boundingBox.minY);
+        const int z = MathHelper::floor_double(posZ);
+        const uint8_t b0 = worldObj->getBlockId(x, y, z);
+        const uint8_t b1 = worldObj->getBlockId(x, y + 1, z);
+        // Block 65 = ladder
+        return b0 == 65 || b1 == 65;
+    }
+
+protected:
+    bool isJumping_ = false;
 };
 
 class EntityPlayer : public EntityLiving {

@@ -98,6 +98,7 @@ public:
     virtual std::string readUTF() {
         int16_t len = readShort();
         if (len < 0) throw std::runtime_error("Negative UTF length");
+        if (len == 0) return {};
         ensureReadable(static_cast<size_t>(len));
         std::string s(reinterpret_cast<const char*>(&data[readPos]), static_cast<size_t>(len));
         readPos += static_cast<size_t>(len);
@@ -105,12 +106,14 @@ public:
     }
 
     virtual void readBytes(uint8_t* buf, size_t len) {
+        if (len == 0) return;
         ensureReadable(len);
-        std::copy(&data[readPos], &data[readPos + len], buf);
+        std::copy_n(&data[readPos], len, buf);
         readPos += len;
     }
 
     virtual std::vector<uint8_t> readBytes(size_t len) {
+        if (len == 0) return {};
         ensureReadable(len);
         std::vector<uint8_t> result(data.begin() + readPos, data.begin() + readPos + len);
         readPos += len;
