@@ -46,6 +46,8 @@ if(UNIX)
     target_link_options(alpha_server PRIVATE -rdynamic)
     target_compile_options(alpha_server PRIVATE
         -Wall -Wextra -Wpedantic -Wno-unused-parameter
+        -Werror=return-type
+        -Werror=uninitialized
 
         $<$<CONFIG:Release>:
             -O3
@@ -69,7 +71,21 @@ endif()
 # Tests
 option(BUILD_TESTS "Build test suite" ON)
 if(BUILD_TESTS)
+    enable_testing()
+
+    # CTest will discover tests from gtest_discover_tests in test/
     add_subdirectory(test)
+
+    # Smoke test: verify the server binary can be launched
+    if(TARGET alpha_server)
+        add_test(NAME server_smoke
+            COMMAND sh -c "timeout 3 \"$<TARGET_FILE:alpha_server>\" || test \$? -eq 124"
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        )
+        set_tests_properties(server_smoke PROPERTIES
+            TIMEOUT 10
+        )
+    endif()
 endif()
 
 if(ALPHA_ENABLE_RUST)

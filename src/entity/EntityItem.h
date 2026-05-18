@@ -36,7 +36,6 @@ public:
         float var1 = 0.98f;
         if (onGround) {
             var1 = 0.6f * 0.98f; // default block slipperiness
-            // TODO: read actual block slipperiness from block below
         }
 
         motionX *= var1;
