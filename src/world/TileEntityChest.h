@@ -18,9 +18,9 @@ public:
         inventory_.fill(nullptr);
     }
 
-    ~TileEntityChest() override {
+    ~TileEntityChest() override { // ALLOW_DELETE: owned ItemStack ptrs
         for (auto* stack : inventory_) {
-            delete stack;
+            delete stack; // ALLOW_DELETE
         }
     }
 
@@ -53,7 +53,7 @@ public:
     void setInventorySlotContents(int slot, ItemStack* stack) override {
         if (slot < 0 || slot >= CHEST_SIZE) return;
         
-        delete inventory_[slot];
+        delete inventory_[slot]; // ALLOW_DELETE
         inventory_[slot] = stack;
         
         if (stack && stack->stackSize > getInventoryStackLimit()) {
@@ -71,7 +71,7 @@ public:
         TileEntity::readFromNBT(nbt);
         
         // Clear existing inventory
-        for (auto* stack : inventory_) {
+        for (auto* stack : inventory_) { // ALLOW_DELETE
             delete stack;
         }
         inventory_.fill(nullptr);

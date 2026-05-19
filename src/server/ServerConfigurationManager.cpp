@@ -58,7 +58,7 @@ EntityPlayerMP* ServerConfigurationManager::login(NetLoginHandler* handler, cons
         }
     }
 
-    auto* player = new EntityPlayerMP(mcServer_, mcServer_->worldMngr.get(), username);
+    auto* player = new EntityPlayerMP(mcServer_, mcServer_->worldMngr.get(), username); // ALLOW_NEW
     // Set spawn position
     player->setPosition(mcServer_->worldMngr->spawnX + 0.5, mcServer_->worldMngr->spawnY, mcServer_->worldMngr->spawnZ + 0.5);
     return player;

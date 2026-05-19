@@ -46,7 +46,7 @@ public:
     EntityPlayerMP(MinecraftServer* server, World* world, const std::string& name)
         : mcServer(server), inventory(this) {
         this->worldObj = world;
-        this->itemInWorldManager = new ItemInWorldManager(world);
+        this->itemInWorldManager = new ItemInWorldManager(world); // ALLOW_NEW
         this->itemInWorldManager->setPlayer(this);
         this->username = name;
         height = 1.8f;
@@ -54,8 +54,8 @@ public:
         stepHeight = 0.5f;
     }
 
-    ~EntityPlayerMP() {
-        delete itemInWorldManager;
+    ~EntityPlayerMP() { // ALLOW_DELETE: owned raw ptr
+        delete itemInWorldManager; // ALLOW_DELETE
     }
 
     void tick() override;
@@ -152,7 +152,7 @@ public:
             std::ofstream file(filepath, std::ios::binary);
             if (!file.is_open()) return false;
             
-            file.write(reinterpret_cast<const char*>(buf.data.data()), buf.data.size());
+            file.write(reinterpret_cast<const char*>(buf.data.data()), buf.data.size()); // NOLINT: file I/O
             return true;
         } catch (...) {
             return false;
@@ -169,7 +169,7 @@ public:
             file.seekg(0, std::ios::beg);
             
             std::vector<uint8_t> data(size);
-            file.read(reinterpret_cast<char*>(data.data()), size);
+            file.read(reinterpret_cast<char*>(data.data()), size); // NOLINT: file I/O
             
             ByteBuffer buf(data);
             auto nbt = NBTCompound::readRoot(buf);

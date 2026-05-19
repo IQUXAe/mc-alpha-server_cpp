@@ -269,8 +269,8 @@ const int8_t WorldGenBigTree::otherCoordPairs[6] = {2, 0, 0, 1, 2, 1};
 
 WorldGenBigTree::~WorldGenBigTree() {
     if (leafNodes) {
-        for (int i = 0; i < leafNodeCount; ++i) delete[] leafNodes[i];
-        delete[] leafNodes;
+        for (int i = 0; i < leafNodeCount; ++i) delete[] leafNodes[i]; // ALLOW_DELETE
+        delete[] leafNodes; // ALLOW_DELETE
     }
 }
 
@@ -434,8 +434,8 @@ void WorldGenBigTree::generateLeafNodeList() {
         leafNodes[i] = new int[4];
         std::memcpy(leafNodes[i], temp[i], 4 * sizeof(int));
     }
-    for (int i = 0; i < branchCount * heightLimit; ++i) delete[] temp[i];
-    delete[] temp;
+    for (int i = 0; i < branchCount * heightLimit; ++i) delete[] temp[i]; // ALLOW_DELETE
+    delete[] temp; // ALLOW_DELETE
 }
 
 void WorldGenBigTree::generateLeaves() {

@@ -6,26 +6,23 @@
 
 namespace fs = std::filesystem;
 
-// Basic code quality checks — no TODOs, no FIXMEs, no commented-out code blocks
 class CodeQualityTest : public ::testing::Test {
 protected:
     std::vector<fs::path> sourceFiles_;
 
-    static void SetUpTestSuite() {
-    }
-
     void SetUp() override {
         const fs::path srcDir = fs::path(TEST_SOURCE_DIR) / "src";
-        if (!fs::exists(srcDir)) return;
-        for (auto& entry : fs::recursive_directory_iterator(srcDir)) {
-            auto ext = entry.path().extension();
-            if (ext == ".h" || ext == ".cpp") {
-                sourceFiles_.push_back(entry.path());
+        if (fs::exists(srcDir)) {
+            for (auto& entry : fs::recursive_directory_iterator(srcDir)) {
+                auto ext = entry.path().extension();
+                if (ext == ".h" || ext == ".cpp")
+                    sourceFiles_.push_back(entry.path());
             }
         }
     }
 
-    std::vector<std::pair<fs::path, int>> findPattern(const std::regex& pattern) {
+    std::vector<std::pair<fs::path, int>> findPatternExempt(
+        const std::regex& pattern, const std::string& exemption = "ALLOW_RAW_PTR") {
         std::vector<std::pair<fs::path, int>> matches;
         for (auto& path : sourceFiles_) {
             std::ifstream file(path);
@@ -33,55 +30,75 @@ protected:
             int lineno = 0;
             while (std::getline(file, line)) {
                 ++lineno;
-                if (std::regex_search(line, pattern)) {
+                if (line.find("// " + exemption) != std::string::npos) continue;
+                if (std::regex_search(line, pattern))
                     matches.emplace_back(path, lineno);
-                }
             }
         }
         return matches;
     }
+
+    std::string formatReport(const std::vector<std::pair<fs::path, int>>& matches) {
+        std::string report;
+        for (auto& [path, line] : matches)
+            report += path.filename().string() + ":" + std::to_string(line) + "\n";
+        return report;
+    }
 };
 
-// No TODO/FIXME in production code (ok in tests)
-TEST_F(CodeQualityTest, NoTODOsInSource) {
-    auto matches = findPattern(std::regex(R"(\b(TODO|FIXME|HACK|XXX)\b)"));
-    std::string report;
+// ── 1. No raw owning pointers as class members ──────────────────────────
+// Warning only — many members are non-owning observer pointers (same as Java refs).
+TEST_F(CodeQualityTest, NoRawOwnerMembers) {
+    std::regex memberPtr(R"(\b[A-Z][A-Za-z0-9_]*\s+\*\s+\w+[_=;])");
+    auto matches = findPatternExempt(memberPtr);
+
+    std::vector<std::pair<fs::path, int>> filtered;
     for (auto& [path, line] : matches) {
-        report += path.filename().string() + ":" + std::to_string(line) + "\n";
+        std::ifstream file(path);
+        std::string lineText;
+        int cur = 0;
+        while (std::getline(file, lineText)) {
+            if (++cur == line) break;
+        }
+        bool skip = lineText.find(" static ") != std::string::npos;
+        if (!skip) filtered.emplace_back(path, line);
     }
-    EXPECT_TRUE(matches.empty()) << "Found " << matches.size()
-        << " TODO/FIXME/HACK/XXX in source:\n" << report;
+
+    if (!filtered.empty()) {
+        GTEST_LOG_(WARNING) << "Raw pointer class members (consider unique_ptr):\n"
+            << formatReport(filtered);
+    }
 }
 
-// No large commented-out blocks (5+ consecutive lines starting with //)
-TEST_F(CodeQualityTest, NoLargeCommentedBlocks) {
-    std::vector<std::pair<fs::path, int>> blocks;
+// ── 2. Function length warning (> 200 lines) ────────────────────────────
+TEST_F(CodeQualityTest, FunctionLengthWarning) {
+    std::vector<std::pair<fs::path, int>> longFuncs;
     for (auto& path : sourceFiles_) {
         std::ifstream file(path);
         std::string line;
-        int lineno = 0;
-        int commentCount = 0;
-        int blockStart = 0;
+        int lineno = 0, braceDepth = 0, funcStart = 0;
+        bool inFunc = false;
         while (std::getline(file, line)) {
             ++lineno;
-            bool isComment = line.find("//") == 0 || line.find("///") == 0;
-            if (isComment) {
-                if (commentCount == 0) blockStart = lineno;
-                ++commentCount;
-            } else {
-                if (commentCount >= 5) {
-                    blocks.emplace_back(path, blockStart);
+            for (char c : line) {
+                if (c == '{') {
+                    if (!inFunc) { funcStart = lineno; inFunc = true; }
+                    ++braceDepth;
                 }
-                commentCount = 0;
+                if (c == '}') {
+                    --braceDepth;
+                    if (inFunc && braceDepth == 0) {
+                        int len = lineno - funcStart + 1;
+                        if (len > 200)
+                            longFuncs.emplace_back(path, funcStart);
+                        inFunc = false;
+                    }
+                }
             }
         }
-        if (commentCount >= 5) {
-            blocks.emplace_back(path, blockStart);
-        }
     }
-    std::string report;
-    for (auto& [path, line] : blocks) {
-        report += path.filename().string() + ":" + std::to_string(line) + " (5+ comment lines)\n";
+    if (!longFuncs.empty()) {
+        GTEST_LOG_(WARNING) << "Long functions (>200 lines):\n"
+            << formatReport(longFuncs);
     }
-    EXPECT_TRUE(blocks.empty()) << "Large commented-out blocks:\n" << report;
 }

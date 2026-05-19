@@ -27,7 +27,7 @@ std::vector<uint8_t> gzipCompressFallback(const std::vector<uint8_t>& input, int
         return {};
     }
 
-    strm.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(input.data()));
+    strm.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(input.data())); // NOLINT: zlib C API
     strm.avail_in = static_cast<uInt>(input.size());
 
     std::vector<uint8_t> output;
@@ -56,7 +56,7 @@ std::vector<uint8_t> gzipDecompressFallback(const std::vector<uint8_t>& input) {
     strm.zalloc = Z_NULL;
     strm.zfree = Z_NULL;
     strm.opaque = Z_NULL;
-    strm.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(input.data()));
+    strm.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(input.data())); // NOLINT: zlib C API
     strm.avail_in = static_cast<uInt>(input.size());
 
     if (inflateInit2(&strm, 15 + 16) != Z_OK) {

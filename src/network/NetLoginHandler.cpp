@@ -233,7 +233,7 @@ void NetLoginHandler::doLogin(Packet1Login& pkt) {
     if (player) {
         Logger::info("{} logged in with entity id {}", getUserAndIPString(), player->entityId);
 
-        auto serverHandler = new NetServerHandler(mcServer_, std::move(netManager), player);
+        auto serverHandler = new NetServerHandler(mcServer_, std::move(netManager), player); // ALLOW_NEW
 
         // Send login response
         serverHandler->sendPacket(std::make_unique<Packet1Login>(

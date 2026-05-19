@@ -100,7 +100,7 @@ public:
         if (len < 0) throw std::runtime_error("Negative UTF length");
         if (len == 0) return {};
         ensureReadable(static_cast<size_t>(len));
-        std::string s(reinterpret_cast<const char*>(&data[readPos]), static_cast<size_t>(len));
+        std::string s(reinterpret_cast<const char*>(&data[readPos]), static_cast<size_t>(len)); // NOLINT: byte buffer access
         readPos += static_cast<size_t>(len);
         return s;
     }

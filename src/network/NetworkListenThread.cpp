@@ -29,7 +29,7 @@ NetworkListenThread::NetworkListenThread(MinecraftServer* server, const std::str
         }
     }
 
-    if (::bind(serverSocketFd_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
+    if (::bind(serverSocketFd_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) { // NOLINT: POSIX API
         ::close(serverSocketFd_);
         throw std::runtime_error("Failed to bind to port " + std::to_string(port));
     }
@@ -109,7 +109,7 @@ void NetworkListenThread::acceptLoop(std::stop_token stopToken) {
     while (isRunning && !stopToken.stop_requested()) {
         struct sockaddr_in clientAddr{};
         socklen_t addrLen = sizeof(clientAddr);
-        int clientFd = ::accept(serverSocketFd_, reinterpret_cast<struct sockaddr*>(&clientAddr), &addrLen);
+        int clientFd = ::accept(serverSocketFd_, reinterpret_cast<struct sockaddr*>(&clientAddr), &addrLen); // NOLINT: POSIX API
 
         if (clientFd < 0) {
             if (!isRunning || stopToken.stop_requested()) break;

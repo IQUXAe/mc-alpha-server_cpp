@@ -349,7 +349,7 @@ void World::saveLevelDat() {
     
     std::ofstream file(worldPath_ + "/level.dat", std::ios::binary);
     if (file) {
-        file.write(reinterpret_cast<const char*>(compressed.data()), compressed.size());
+        file.write(reinterpret_cast<const char*>(compressed.data()), compressed.size()); // NOLINT: file I/O
     }
 }
 
@@ -366,7 +366,7 @@ World::~World() {
     chunkBuildThread_.request_stop();
     chunkBuildThread_.join();
 
-    delete db_;
+    delete db_; // ALLOW_DELETE
     db_ = nullptr;
 }
 
@@ -838,7 +838,7 @@ void World::chunkWorker(std::stop_token st) {
         bool loadedFromStorage = false;
         if (db_) {
             std::string val;
-            leveldb::Slice keySlice(reinterpret_cast<const char*>(&key), sizeof(uint64_t));
+            leveldb::Slice keySlice(reinterpret_cast<const char*>(&key), sizeof(uint64_t)); // NOLINT: leveldb API
             const auto status = db_->Get(leveldb::ReadOptions(), keySlice, &val);
             if (status.ok()) {
                 auto chunk = std::make_unique<Chunk>(this, chunkX, chunkZ);
@@ -1026,7 +1026,7 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
     // Try loading from LevelDB
     if (db_) {
         std::string val;
-        leveldb::Slice keySlice(reinterpret_cast<const char*>(&key), sizeof(uint64_t));
+        leveldb::Slice keySlice(reinterpret_cast<const char*>(&key), sizeof(uint64_t)); // NOLINT: leveldb API
         leveldb::Status status = db_->Get(leveldb::ReadOptions(), keySlice, &val);
         if (status.ok()) {
             auto chunk = std::make_unique<Chunk>(this, chunkX, chunkZ);
@@ -1845,8 +1845,8 @@ void World::saveWorker(std::stop_token st) {
             lock.unlock();
 
             if (db_) {
-                leveldb::Slice keySlice(reinterpret_cast<const char*>(&task.key), sizeof(uint64_t));
-                leveldb::Slice valSlice(reinterpret_cast<const char*>(task.data.data()), task.data.size());
+        leveldb::Slice keySlice(reinterpret_cast<const char*>(&task.key), sizeof(uint64_t)); // NOLINT: leveldb API
+        leveldb::Slice valSlice(reinterpret_cast<const char*>(task.data.data()), task.data.size()); // NOLINT: leveldb API
                 auto status = db_->Put(leveldb::WriteOptions(), keySlice, valSlice);
                 if (!status.ok())
                     Logger::severe("LevelDB save failed: {}", status.ToString());
@@ -2332,8 +2332,8 @@ void World::saveChunkImmediate(Chunk* chunk) {
     auto data = compressChunkData(chunk);
     
     if (!data.empty()) {
-        leveldb::Slice keySlice(reinterpret_cast<const char*>(&key), sizeof(uint64_t));
-        leveldb::Slice valSlice(reinterpret_cast<const char*>(data.data()), data.size());
+        leveldb::Slice keySlice(reinterpret_cast<const char*>(&key), sizeof(uint64_t)); // NOLINT: leveldb API
+        leveldb::Slice valSlice(reinterpret_cast<const char*>(data.data()), data.size()); // NOLINT: leveldb API
         auto status = db_->Put(leveldb::WriteOptions(), keySlice, valSlice);
         
         if (status.ok()) {

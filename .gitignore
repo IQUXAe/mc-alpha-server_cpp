@@ -24,3 +24,6 @@ build-local.sh
 # Rust build artifacts
 rust/**/target/
 rust/**/.rustc_info.json
+build/
+build_release/
+Testing/

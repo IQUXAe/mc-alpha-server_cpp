@@ -5,6 +5,14 @@ include(CheckIPOSupported)
 
 option(ALPHA_ENABLE_RUST "Build and link the optional Rust bridge crate" OFF)
 
+# Optional clang-tidy static analysis (compile-time code quality checks)
+option(CLANG_TIDY "Run clang-tidy during compilation" OFF)
+if(CLANG_TIDY)
+    find_program(CLANG_TIDY_BIN clang-tidy REQUIRED)
+    set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_BIN}")
+    message(STATUS "clang-tidy enabled: ${CLANG_TIDY_BIN}")
+endif()
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

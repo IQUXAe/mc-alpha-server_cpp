@@ -124,7 +124,7 @@ std::unique_ptr<Packet> Packet::readPacket(int fd) {
             int16_t len = readShort();
             if (len < 0) throw std::runtime_error("Negative UTF length");
             std::string s(static_cast<size_t>(len), '\0');
-            if (len > 0 && !readFully(fd_, reinterpret_cast<uint8_t*>(s.data()), static_cast<size_t>(len)))
+            if (len > 0 && !readFully(fd_, reinterpret_cast<uint8_t*>(s.data()), static_cast<size_t>(len))) // NOLINT: needed for byte-level read
                 throw std::runtime_error("Connection lost");
             return s;
         }

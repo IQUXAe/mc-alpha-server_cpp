@@ -1,0 +1,23 @@
+Checks: >
+  -*,
+  bugprone-assignment-in-if-condition,
+  bugprone-infinite-loop,
+  bugprone-macro-parentheses,
+  bugprone-standalone-empty,
+  bugprone-unused-return-value,
+  cppcoreguidelines-avoid-goto,
+  cppcoreguidelines-no-malloc,
+  cppcoreguidelines-pro-type-cstyle-cast,
+  cppcoreguidelines-pro-type-reinterpret-cast,
+  cppcoreguidelines-pro-type-vararg,
+  readability-function-size,
+  readability-simplify-boolean-expr,
+
+CheckOptions:
+  readability-function-size.LineThreshold: 200
+
+WarningsAsErrors: >
+  cppcoreguidelines-avoid-goto,
+  cppcoreguidelines-no-malloc,
+  cppcoreguidelines-pro-type-cstyle-cast,
+  cppcoreguidelines-pro-type-reinterpret-cast,

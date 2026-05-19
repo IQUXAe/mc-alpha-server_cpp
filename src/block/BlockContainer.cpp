@@ -16,7 +16,7 @@ void BlockContainer::onBlockAdded(World* world, int x, int y, int z) {
         char** syms = backtrace_symbols(frames, n);
         for (int i = 1; i < std::min(n, 6); ++i)
             Logger::info("  [bt] {}", syms ? syms[i] : "?");
-        free(syms);
+        free(syms); // NOLINT: backtrace_symbols requires free()
         world->setTileEntity(x, y, z, std::move(tileEntity));
     } else {
         Logger::severe("Failed to create TileEntity at ({}, {}, {})", x, y, z);
