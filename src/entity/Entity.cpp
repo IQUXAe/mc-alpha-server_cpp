@@ -6,7 +6,7 @@
 #include <vector>
 #include <algorithm>
 
-int32_t Entity::nextEntityId = 1;
+std::atomic<int32_t> Entity::nextEntityId{1};
 
 void Entity::moveEntity(double dx, double dy, double dz) {
     if (noClip) {

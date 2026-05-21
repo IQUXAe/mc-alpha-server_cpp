@@ -5,6 +5,7 @@
 #include <string>
 #include <cstdint>
 #include <cmath>
+#include <atomic>
 
 class World;
 class Material;
@@ -46,7 +47,7 @@ public:
 
     World* worldObj = nullptr;
 
-    Entity() : entityId(nextEntityId++) {}
+    Entity() : entityId(nextEntityId.fetch_add(1)) {}
     virtual ~Entity() = default;
 
     virtual void tick() {
@@ -129,7 +130,7 @@ public:
     // Called when a player right-clicks this entity (Java: func_6092_a)
     virtual bool interact(EntityPlayerMP* player) { return false; }
 
-    static int32_t nextEntityId;
+    static std::atomic<int32_t> nextEntityId;
 
 protected:
     void updateEnvironmentalState();
