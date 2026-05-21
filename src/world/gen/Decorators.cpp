@@ -243,7 +243,7 @@ bool WorldGenTrees::generate(World* world, JavaRandom& rand, int x, int y, int z
                     for (int var14 = z - var11; var14 <= z + var11; ++var14) {
                         int var15 = var14 - z;
                         if ((std::abs(var13) != var11 || std::abs(var15) != var11 || (rand.nextInt(2) != 0 && var10 != 0)) &&
-                            world->getBlockId(var12, var16, var14) == 0) {
+                            !Block::allowsAttachmentArr[world->getBlockId(var12, var16, var14)]) {
                             world->setBlock(var12, var16, var14, 18); // leaves
                         }
                     }

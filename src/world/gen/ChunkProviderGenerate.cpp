@@ -384,7 +384,7 @@ void ChunkProviderGenerate::populate(int chunkX, int chunkZ) {
     }
 
     // --- Trees ---
-    double var11d = 0.5;
+    double var11d = 0.25;
     int var13t = (int)((field_713_c.func_647_a((double)var4 * var11d, (double)var5 * var11d) / 8.0 + rand.nextDouble() * 4.0 + 4.0) / 3.0);
     int var14t = 0;
     if (rand.nextInt(10) == 0) {
@@ -413,9 +413,12 @@ void ChunkProviderGenerate::populate(int chunkX, int chunkZ) {
         int tz = var5 + rand.nextInt(16) + 8;
         int ty = worldObj->getHeightValue(tx, tz);
         if (useBigTree) {
-            WorldGenBigTree().generate(worldObj, rand, tx, ty, tz);
+            WorldGenBigTree bigTree;
+            bigTree.func_420_a(1.0, 1.0, 1.0);
+            bigTree.generate(worldObj, rand, tx, ty, tz);
         } else {
-            WorldGenTrees().generate(worldObj, rand, tx, ty, tz);
+            WorldGenTrees tree;
+            tree.generate(worldObj, rand, tx, ty, tz);
         }
     }
 

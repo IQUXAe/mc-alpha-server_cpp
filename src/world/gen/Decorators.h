@@ -67,7 +67,7 @@ private:
     double leafDensity = 1.0;
     int trunkSize = 1;
     int heightLimitLimit = 12;
-    int leafDistanceLimit = 4;
+    int leafDistanceLimit = 5;
     int** leafNodes = nullptr;
     int leafNodeCount = 0;
 
