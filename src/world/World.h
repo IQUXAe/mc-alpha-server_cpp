@@ -1,3 +1,21 @@
+/*
+ * Server compatible with Minecraft Alpha 1.2.6 written on C++
+ * Copyright (C) 2026  IQUXAe
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #pragma once
 
 #include <unordered_map>
@@ -30,6 +48,7 @@ class PathEntity;
 
 class TileEntity;
 class PathEntity;
+class ChunkLoader;
 
 struct NextTickListEntry {
     int x, y, z;
@@ -216,6 +235,8 @@ private:
     std::jthread chunkBuildThread_;
 
     leveldb::DB* db_ = nullptr;
+    bool useLegacyStorage_ = false;
+    std::unique_ptr<ChunkLoader> chunkLoader_;
 
     inline uint64_t getChunkKey(int chunkX, int chunkZ) const {
         return (static_cast<uint64_t>(static_cast<uint32_t>(chunkX)) << 32) |
@@ -223,11 +244,12 @@ private:
     }
 
     inline uint64_t getTileEntityKey(int x, int y, int z) const {
-        // Pack as: x(32 bits) | y(16 bits) | z(16 bits)
-        // y is clamped to [0,255], x/z use full int32 range via reinterpret as uint32
-        // To avoid collision on negative z, encode z offset by 32768 into uint16
-        return (static_cast<uint64_t>(static_cast<uint32_t>(x)) << 32) |
-               (static_cast<uint64_t>(static_cast<uint8_t>(y)) << 16) |
-                static_cast<uint16_t>(static_cast<int16_t>(z & 0xFFFF));
+        // Pack as: x(28 bits) | y(8 bits) | z(28 bits)
+        // Clamps y to 0-255, and uses 28 bits for x and z coordinates, which is collision-free
+        // for coordinates within [-134,217,728, 134,217,727].
+        uint64_t ux = static_cast<uint64_t>(x) & 0xFFFFFFF;
+        uint64_t uy = static_cast<uint64_t>(y) & 0xFF;
+        uint64_t uz = static_cast<uint64_t>(z) & 0xFFFFFFF;
+        return (ux << 36) | (uy << 28) | uz;
     }
 };

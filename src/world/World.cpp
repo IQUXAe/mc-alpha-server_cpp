@@ -1,4 +1,23 @@
+/*
+ * Server compatible with Minecraft Alpha 1.2.6 written on C++
+ * Copyright (C) 2026  IQUXAe
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include "World.h"
+#include "ChunkLoader.h"
 #include "../block/Block.h"
 #include "../entity/Entity.h"
 #include "../entity/EntityAnimals.h"
@@ -173,15 +192,210 @@ World::World(MinecraftServer* server, const std::string& savePath, int64_t seed)
     // Create world directory
     std::filesystem::create_directories(worldPath_);
 
-    // Initialize LevelDB
-    leveldb::Options options;
-    options.create_if_missing = true;
-    leveldb::Status status = leveldb::DB::Open(options, worldPath_ + "/db", &db_);
-    if (!status.ok()) {
-        Logger::severe("Failed to open LevelDB: {}", status.ToString());
+    // Get properties
+    bool useLegacyStorage = false;
+    bool convertLegacyWorld = false;
+    if (server && server->propertyManager) {
+        useLegacyStorage = server->propertyManager->getBooleanProperty("use-legacy-storage", false);
+        convertLegacyWorld = server->propertyManager->getBooleanProperty("convert-legacy-world", false);
+    }
+
+    useLegacyStorage_ = useLegacyStorage;
+
+    if (useLegacyStorage_) {
+        // Check if modern LevelDB database exists (the inverse case)
+        bool hasModernDb = false;
+        std::filesystem::path dbPath = std::filesystem::path(worldPath_) / "db";
+        if (std::filesystem::exists(dbPath) && std::filesystem::is_directory(dbPath)) {
+            for (const auto& entry : std::filesystem::directory_iterator(dbPath)) {
+                if (entry.is_regular_file()) {
+                    hasModernDb = true;
+                    break;
+                }
+            }
+        }
+        if (hasModernDb) {
+            Logger::warning("****************************************************************");
+            Logger::warning("WARNING: Modern LevelDB files (new world type) detected on disk!");
+            Logger::warning("However, 'use-legacy-storage=true' is configured in server.properties.");
+            Logger::warning("The server will run on legacy Gzip chunk files and ignore the LevelDB database.");
+            Logger::warning("To run on the modern LevelDB world, set 'use-legacy-storage=false' in server.properties.");
+            Logger::warning("****************************************************************");
+        }
+
+        // Skip LevelDB, initialize ChunkLoader
+        chunkLoader_ = std::make_unique<ChunkLoader>(worldPath_, true);
         db_ = nullptr;
+        Logger::warning("****************************************************************");
+        Logger::warning("WARNING: Server is running in LEGACY Gzip world storage mode!");
+        Logger::warning("Newly generated and modified chunks will be saved in legacy format.");
+        Logger::warning("Direct Gzip legacy world storage initialized at {}", worldPath_);
+        Logger::warning("****************************************************************");
     } else {
-        Logger::info("LevelDB world storage initialized at {}/db", worldPath_);
+        // Scan for existing legacy chunks to print a warning if they won't be used
+        bool hasLegacyChunks = false;
+        if (std::filesystem::exists(worldPath_)) {
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(worldPath_)) {
+                if (entry.is_regular_file()) {
+                    std::string name = entry.path().filename().string();
+                    if (name.starts_with("c.") && name.ends_with(".dat")) {
+                        hasLegacyChunks = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (hasLegacyChunks && !convertLegacyWorld) {
+            Logger::warning("****************************************************************");
+            Logger::warning("WARNING: Legacy Gzip chunk files (old world type) detected on disk!");
+            Logger::warning("However, server properties are configured to use the new world type (LevelDB)");
+            Logger::warning("as both 'use-legacy-storage' and 'convert-legacy-world' are set to false.");
+            Logger::warning("These legacy chunks will NOT be loaded or converted, and a new modern");
+            Logger::warning("LevelDB world will be generated/used instead.");
+            Logger::warning("To run on these chunks directly, set 'use-legacy-storage=true' in server.properties.");
+            Logger::warning("To convert them to LevelDB, set 'convert-legacy-world=true' in server.properties.");
+            Logger::warning("****************************************************************");
+        }
+
+        // Initialize LevelDB
+        leveldb::Options options;
+        options.create_if_missing = true;
+        leveldb::Status status = leveldb::DB::Open(options, worldPath_ + "/db", &db_);
+        if (!status.ok()) {
+            Logger::severe("Failed to open LevelDB: {}", status.ToString());
+            db_ = nullptr;
+        } else {
+            Logger::info("LevelDB world storage initialized at {}/db", worldPath_);
+        }
+
+        // On-the-fly legacy world migration
+        if (convertLegacyWorld && db_) {
+        auto fromBase36 = [](std::string_view s) -> int {
+            if (s.empty()) return 0;
+            bool neg = s[0] == '-';
+            if (neg) s.remove_prefix(1);
+                int val = 0;
+                for (char c : s) {
+                    val *= 36;
+                    if (c >= '0' && c <= '9') val += (c - '0');
+                    else if (c >= 'a' && c <= 'z') val += (c - 'a' + 10);
+                    else if (c >= 'A' && c <= 'Z') val += (c - 'A' + 10);
+                }
+                return neg ? -val : val;
+            };
+
+            std::vector<std::filesystem::path> filesToConvert;
+            if (std::filesystem::exists(worldPath_)) {
+                for (const auto& entry : std::filesystem::recursive_directory_iterator(worldPath_)) {
+                    if (entry.is_regular_file()) {
+                        std::string name = entry.path().filename().string();
+                        if (name.starts_with("c.") && name.ends_with(".dat")) {
+                            filesToConvert.push_back(entry.path());
+                        }
+                    }
+                }
+            }
+
+            if (!filesToConvert.empty()) {
+                Logger::info("Found {} legacy chunk files. Performing backup...", filesToConvert.size());
+                
+                auto now = std::chrono::system_clock::now();
+                auto time_t_now = std::chrono::system_clock::to_time_t(now);
+                std::tm tm_now;
+                localtime_r(&time_t_now, &tm_now);
+                char timeBuf[64];
+                std::strftime(timeBuf, sizeof(timeBuf), "%Y%m%d_%H%M%S", &tm_now);
+                std::string backupDir = worldPath_ + "_backup_" + timeBuf;
+                
+                bool backupOk = false;
+                try {
+                    std::filesystem::create_directories(backupDir);
+                    for (const auto& entry : std::filesystem::directory_iterator(worldPath_)) {
+                        if (entry.path().filename() != "db" && entry.path() != backupDir) {
+                            std::filesystem::copy(entry.path(), std::filesystem::path(backupDir) / entry.path().filename(), 
+                                                  std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing);
+                        }
+                    }
+                    Logger::info("Backup completed at: {}", backupDir);
+                    backupOk = true;
+                } catch (const std::exception& e) {
+                    Logger::severe("Backup failed: {}. Aborting migration to prevent data loss.", e.what());
+                }
+                
+                if (backupOk) {
+                    int convertedCount = 0;
+                    for (const auto& filePath : filesToConvert) {
+                        std::string filename = filePath.filename().string();
+                        std::vector<std::string> parts;
+                        size_t start = 0;
+                        while (true) {
+                            size_t dot = filename.find('.', start);
+                            if (dot == std::string::npos) {
+                                parts.push_back(filename.substr(start));
+                                break;
+                            }
+                            parts.push_back(filename.substr(start, dot - start));
+                            start = dot + 1;
+                        }
+                        if (parts.size() == 4 && parts[0] == "c" && parts[3] == "dat") {
+                            int cx = fromBase36(parts[1]);
+                            int cz = fromBase36(parts[2]);
+                            
+                            std::ifstream in(filePath, std::ios::binary);
+                            if (in.is_open()) {
+                                std::vector<uint8_t> compressedData((std::istreambuf_iterator<char>(in)),
+                                                                    std::istreambuf_iterator<char>());
+                                in.close();
+                                
+                                auto chunk = std::make_unique<Chunk>(this, cx, cz);
+                                decompressChunkData(chunk.get(), compressedData);
+                                
+                                auto modernData = compressChunkData(chunk.get());
+                                
+                                uint64_t key = getChunkKey(cx, cz);
+                                leveldb::Slice keySlice(reinterpret_cast<const char*>(&key), sizeof(uint64_t));
+                                leveldb::Slice valSlice(reinterpret_cast<const char*>(modernData.data()), modernData.size());
+                                auto status = db_->Put(leveldb::WriteOptions(), keySlice, valSlice);
+                                if (status.ok()) {
+                                    convertedCount++;
+                                } else {
+                                    Logger::severe("Failed to convert legacy chunk ({}, {}): {}", cx, cz, status.ToString());
+                                }
+                            }
+                        }
+                    }
+                    Logger::info("Successfully converted {} legacy chunks.", convertedCount);
+                    
+                    // Clean up Gzip files
+                    for (const auto& filePath : filesToConvert) {
+                        try {
+                            std::filesystem::remove(filePath);
+                        } catch (...) {}
+                    }
+                    
+                    // Clean up empty directories
+                    std::vector<std::filesystem::path> dirsToClean;
+                    for (const auto& entry : std::filesystem::recursive_directory_iterator(worldPath_)) {
+                        if (entry.is_directory() && entry.path().filename() != "db") {
+                            dirsToClean.push_back(entry.path());
+                        }
+                    }
+                    std::sort(dirsToClean.begin(), dirsToClean.end(), [](const auto& a, const auto& b) {
+                        return a.string().size() > b.string().size();
+                    });
+                    
+                    for (const auto& dir : dirsToClean) {
+                        try {
+                            if (std::filesystem::is_empty(dir)) {
+                                std::filesystem::remove(dir);
+                            }
+                        } catch (...) {}
+                    }
+                    Logger::info("Cleaned up legacy chunk files and directories.");
+                }
+            }
+        }
     }
 
     // Load level.dat or initialize new world data
@@ -254,7 +468,7 @@ void World::saveWorld(bool flushToDisk) {
         }
     }
 
-    if (flushToDisk && db_) {
+    if (flushToDisk && (db_ || useLegacyStorage_)) {
         waitForPendingSaves();
 
         int savedCount = 0;
@@ -836,7 +1050,22 @@ void World::chunkWorker(std::stop_token st) {
         PreparedChunk prepared;
 
         bool loadedFromStorage = false;
-        if (db_) {
+        if (useLegacyStorage_ && chunkLoader_) {
+            std::filesystem::path chunkFile = chunkLoader_->getChunkFile(chunkX, chunkZ);
+            if (std::filesystem::exists(chunkFile)) {
+                std::ifstream in(chunkFile, std::ios::binary);
+                if (in.is_open()) {
+                    std::vector<uint8_t> data((std::istreambuf_iterator<char>(in)),
+                                                   std::istreambuf_iterator<char>());
+                    in.close();
+                    
+                    auto chunk = std::make_unique<Chunk>(this, chunkX, chunkZ);
+                    decompressChunkData(chunk.get(), data, &prepared.tileEntities);
+                    prepared.chunk = std::move(chunk);
+                    loadedFromStorage = true;
+                }
+            }
+        } else if (db_) {
             std::string val;
             leveldb::Slice keySlice(reinterpret_cast<const char*>(&key), sizeof(uint64_t)); // NOLINT: leveldb API
             const auto status = db_->Get(leveldb::ReadOptions(), keySlice, &val);
@@ -1023,8 +1252,40 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
         if (it != chunks_.end()) return it->second.get();
     }
 
-    // Try loading from LevelDB
-    if (db_) {
+    // Try loading from Legacy Gzip storage
+    if (useLegacyStorage_ && chunkLoader_) {
+        std::filesystem::path chunkFile = chunkLoader_->getChunkFile(chunkX, chunkZ);
+        if (std::filesystem::exists(chunkFile)) {
+            std::ifstream in(chunkFile, std::ios::binary);
+            if (in.is_open()) {
+                std::vector<uint8_t> data((std::istreambuf_iterator<char>(in)),
+                                               std::istreambuf_iterator<char>());
+                in.close();
+                
+                auto chunk = std::make_unique<Chunk>(this, chunkX, chunkZ);
+                decompressChunkData(chunk.get(), data);
+                Chunk* ptr = chunk.get();
+                {
+                    std::unique_lock lock(chunksMutex_);
+                    chunks_[key] = std::move(chunk);
+                }
+                // Spawn EntityItems that were frozen while chunk was unloaded
+                for (const auto& ed : ptr->pendingItems) {
+                    auto item = std::make_unique<EntityItem>(ed.itemID, ed.count, ed.metadata);
+                    item->setPosition(ed.posX, ed.posY, ed.posZ);
+                    item->age         = ed.age;
+                    item->pickupDelay = ed.pickupDelay;
+                    spawnEntityInWorld(std::move(item));
+                }
+                ptr->pendingItems.clear();
+                restorePendingAnimals(this, ptr);
+                restorePendingMonsters(this, ptr);
+                restorePendingBoats(this, ptr);
+                scheduleTickOnLoadForChunk(this, ptr);
+                return ptr;
+            }
+        }
+    } else if (db_) {
         std::string val;
         leveldb::Slice keySlice(reinterpret_cast<const char*>(&key), sizeof(uint64_t)); // NOLINT: leveldb API
         leveldb::Status status = db_->Get(leveldb::ReadOptions(), keySlice, &val);
@@ -1844,9 +2105,25 @@ void World::saveWorker(std::stop_token st) {
             ++activeSaveTasks_;
             lock.unlock();
 
-            if (db_) {
-        leveldb::Slice keySlice(reinterpret_cast<const char*>(&task.key), sizeof(uint64_t)); // NOLINT: leveldb API
-        leveldb::Slice valSlice(reinterpret_cast<const char*>(task.data.data()), task.data.size()); // NOLINT: leveldb API
+            if (useLegacyStorage_ && chunkLoader_) {
+                const int cx = static_cast<int32_t>(task.key >> 32);
+                const int cz = static_cast<int32_t>(task.key & 0xFFFFFFFFu);
+                std::filesystem::path chunkFile = chunkLoader_->getChunkFile(cx, cz);
+                try {
+                    std::filesystem::create_directories(chunkFile.parent_path());
+                    std::ofstream out(chunkFile, std::ios::binary);
+                    if (out.is_open()) {
+                        out.write(reinterpret_cast<const char*>(task.data.data()), task.data.size());
+                        out.close();
+                    } else {
+                        Logger::severe("Legacy save failed: could not open file {}", chunkFile.string());
+                    }
+                } catch (const std::exception& e) {
+                    Logger::severe("Legacy save failed: {}", e.what());
+                }
+            } else if (db_) {
+                leveldb::Slice keySlice(reinterpret_cast<const char*>(&task.key), sizeof(uint64_t)); // NOLINT: leveldb API
+                leveldb::Slice valSlice(reinterpret_cast<const char*>(task.data.data()), task.data.size()); // NOLINT: leveldb API
                 auto status = db_->Put(leveldb::WriteOptions(), keySlice, valSlice);
                 if (!status.ok())
                     Logger::severe("LevelDB save failed: {}", status.ToString());
@@ -2076,6 +2353,9 @@ std::vector<uint8_t> World::compressChunkData(Chunk* chunk) {
     ByteBuffer buf;
     root.writeRoot(buf, "");
 
+    if (useLegacyStorage_) {
+        return RustBridge::gzipCompress(buf.data, 6);
+    }
     return RustBridge::zstdCompress(buf.data, 1);
 }
 
@@ -2326,20 +2606,39 @@ void World::markTileEntityChanged(int x, int y, int z, TileEntity* te) {
 }
 
 void World::saveChunkImmediate(Chunk* chunk) {
-    if (!chunk || !db_) return;
+    if (!chunk) return;
+    if (!useLegacyStorage_ && !db_) return;
+    if (useLegacyStorage_ && !chunkLoader_) return;
     
     uint64_t key = getChunkKey(chunk->xPosition, chunk->zPosition);
     auto data = compressChunkData(chunk);
     
     if (!data.empty()) {
-        leveldb::Slice keySlice(reinterpret_cast<const char*>(&key), sizeof(uint64_t)); // NOLINT: leveldb API
-        leveldb::Slice valSlice(reinterpret_cast<const char*>(data.data()), data.size()); // NOLINT: leveldb API
-        auto status = db_->Put(leveldb::WriteOptions(), keySlice, valSlice);
-        
-        if (status.ok()) {
-            chunk->isModified = false;
-        } else {
-            Logger::severe("Failed to immediately save chunk: {}", status.ToString());
+        if (useLegacyStorage_) {
+            std::filesystem::path chunkFile = chunkLoader_->getChunkFile(chunk->xPosition, chunk->zPosition);
+            try {
+                std::filesystem::create_directories(chunkFile.parent_path());
+                std::ofstream out(chunkFile, std::ios::binary);
+                if (out.is_open()) {
+                    out.write(reinterpret_cast<const char*>(data.data()), data.size());
+                    out.close();
+                    chunk->isModified = false;
+                } else {
+                    Logger::severe("Immediate legacy save failed: could not open file {}", chunkFile.string());
+                }
+            } catch (const std::exception& e) {
+                Logger::severe("Immediate legacy save failed: {}", e.what());
+            }
+        } else if (db_) {
+            leveldb::Slice keySlice(reinterpret_cast<const char*>(&key), sizeof(uint64_t)); // NOLINT: leveldb API
+            leveldb::Slice valSlice(reinterpret_cast<const char*>(data.data()), data.size()); // NOLINT: leveldb API
+            auto status = db_->Put(leveldb::WriteOptions(), keySlice, valSlice);
+            
+            if (status.ok()) {
+                chunk->isModified = false;
+            } else {
+                Logger::severe("Failed to immediately save chunk: {}", status.ToString());
+            }
         }
     }
 }
