@@ -94,8 +94,11 @@ public:
 
     void shutdown(const std::string& reason) {
         if (!isRunning_.exchange(false)) return;
+        {
+            std::lock_guard lock(readMutex_);
+            terminationReason_ = reason;
+        }
         isTerminating_ = true;
-        terminationReason_ = reason;
         serverShutdownDeadline_.reset();
         if (socketFd_ >= 0) {
             ::shutdown(socketFd_, SHUT_RDWR);
