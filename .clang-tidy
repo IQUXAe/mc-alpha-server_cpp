@@ -1,23 +1,65 @@
 Checks: >
   -*,
-  bugprone-assignment-in-if-condition,
-  bugprone-infinite-loop,
-  bugprone-macro-parentheses,
-  bugprone-standalone-empty,
-  bugprone-unused-return-value,
-  cppcoreguidelines-avoid-goto,
-  cppcoreguidelines-no-malloc,
-  cppcoreguidelines-pro-type-cstyle-cast,
-  cppcoreguidelines-pro-type-reinterpret-cast,
-  cppcoreguidelines-pro-type-vararg,
-  readability-function-size,
-  readability-simplify-boolean-expr,
+
+  # — Bug detection —
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-implicit-widening-of-multiplication-result,
+
+  # — Performance —
+  performance-*,
+  -performance-enum-size,
+
+  # — Modern C++ (C++23) —
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  -modernize-avoid-c-arrays,
+  -modernize-pass-by-value,
+  -modernize-use-std-print,
+
+  # — Readability / style —
+  readability-*,
+  -readability-magic-numbers,
+  -readability-function-cognitive-complexity,
+  -readability-identifier-length,
+  -readability-uppercase-literal-suffix,
+  -readability-implicit-bool-conversion,
+  -readability-isolate-declaration,
+
+  # — Core guidelines —
+  cppcoreguidelines-*,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-type-union-access,
+  -cppcoreguidelines-pro-type-const-cast,
+  -cppcoreguidelines-owning-memory,
+
+  # — Concurrency —
+  concurrency-*,
+
+  # — Clang static analyzer —
+  clang-analyzer-*,
 
 CheckOptions:
-  readability-function-size.LineThreshold: 200
+  readability-function-size.LineThreshold:     200
+  readability-function-size.StatementThreshold: 200
+  readability-function-size.BranchThreshold:    50
+  readability-function-size.ParameterThreshold: 8
+
+  # Naming: matches actual project convention
+  readability-identifier-naming.ClassCase:          CamelCase
+  readability-identifier-naming.StructCase:         CamelCase
+  readability-identifier-naming.EnumCase:           CamelCase
+  readability-identifier-naming.FunctionCase:       camelBack
+  readability-identifier-naming.VariableCase:       camelBack
+  readability-identifier-naming.MemberCase:         camelBack
+  readability-identifier-naming.MemberSuffix:       _
+  readability-identifier-naming.EnumConstantCase:   UPPER_CASE
 
 WarningsAsErrors: >
-  cppcoreguidelines-avoid-goto,
-  cppcoreguidelines-no-malloc,
-  cppcoreguidelines-pro-type-cstyle-cast,
-  cppcoreguidelines-pro-type-reinterpret-cast,
+  bugprone-*,
+  cppcoreguidelines-*,
+  performance-*,
+  clang-analyzer-*,
