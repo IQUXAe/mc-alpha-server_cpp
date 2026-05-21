@@ -248,13 +248,14 @@ public:
         return tool && tool->canHarvestBlock(block->blockID);
     }
 
-    void writeToNBT(std::shared_ptr<NBTCompound> nbtList) {
+    void writeToNBT(std::shared_ptr<NBTList> nbtList) {
+        nbtList->tagType = NBTTagType::TAG_Compound;
         for (size_t i = 0; i < mainInventory.size(); ++i) {
             if (mainInventory[i]) {
                 auto tag = std::make_shared<NBTCompound>();
                 tag->setByte("Slot", static_cast<int8_t>(i));
                 mainInventory[i]->writeToNBT(tag);
-                nbtList->setCompound("item_" + std::to_string(i), tag);
+                nbtList->tags.push_back(tag);
             }
         }
         for (size_t i = 0; i < armorInventory.size(); ++i) {
@@ -262,7 +263,7 @@ public:
                 auto tag = std::make_shared<NBTCompound>();
                 tag->setByte("Slot", static_cast<int8_t>(i + 100));
                 armorInventory[i]->writeToNBT(tag);
-                nbtList->setCompound("item_" + std::to_string(i + 100), tag);
+                nbtList->tags.push_back(tag);
             }
         }
         for (size_t i = 0; i < craftingInventory.size(); ++i) {
@@ -270,31 +271,30 @@ public:
                 auto tag = std::make_shared<NBTCompound>();
                 tag->setByte("Slot", static_cast<int8_t>(i + 80));
                 craftingInventory[i]->writeToNBT(tag);
-                nbtList->setCompound("item_" + std::to_string(i + 80), tag);
+                nbtList->tags.push_back(tag);
             }
         }
     }
 
-    void readFromNBT(std::shared_ptr<NBTCompound> nbtList) {
+    void readFromNBT(std::shared_ptr<NBTList> nbtList) {
         mainInventory.clear();  mainInventory.resize(36);
         armorInventory.clear();  armorInventory.resize(4);
         craftingInventory.clear(); craftingInventory.resize(4);
 
-        for (const auto& [key, tag] : nbtList->tags) {
-            if (key.find("item_") == 0) {
-                auto itemTag = std::dynamic_pointer_cast<NBTCompound>(tag);
-                if (!itemTag) continue;
-                
-                int slot = itemTag->getByte("Slot") & 0xFF;
-                auto stack = std::make_unique<ItemStack>(itemTag);
-                
-                if (slot >= 0 && slot < 36) {
-                    mainInventory[slot] = std::move(stack);
-                } else if (slot >= 80 && slot < 84) {
-                    craftingInventory[slot - 80] = std::move(stack);
-                } else if (slot >= 100 && slot < 104) {
-                    armorInventory[slot - 100] = std::move(stack);
-                }
+        if (!nbtList) return;
+        for (const auto& tag : nbtList->tags) {
+            auto itemTag = std::dynamic_pointer_cast<NBTCompound>(tag);
+            if (!itemTag) continue;
+            
+            int slot = itemTag->getByte("Slot") & 0xFF;
+            auto stack = std::make_unique<ItemStack>(itemTag);
+            
+            if (slot >= 0 && slot < 36) {
+                mainInventory[slot] = std::move(stack);
+            } else if (slot >= 80 && slot < 84) {
+                craftingInventory[slot - 80] = std::move(stack);
+            } else if (slot >= 100 && slot < 104) {
+                armorInventory[slot - 100] = std::move(stack);
             }
         }
     }

@@ -132,6 +132,7 @@ public:
     void setString(const std::string& name, std::string v) { tags[name] = std::make_shared<NBTString>(std::move(v)); }
     void setByteArray(const std::string& name, std::vector<uint8_t> v) { tags[name] = std::make_shared<NBTByteArray>(std::move(v)); }
     void setCompound(const std::string& name, std::shared_ptr<NBTCompound> v) { tags[name] = v; }
+    void setList(const std::string& name, std::shared_ptr<NBTList> v) { tags[name] = v; }
     void setBoolean(const std::string& name, bool v) { tags[name] = std::make_shared<NBTByte>(v ? 1 : 0); }
 
     int8_t getByte(const std::string& name) const {
@@ -214,6 +215,14 @@ public:
         return nullptr;
     }
 
+    std::shared_ptr<NBTList> getList(const std::string& name) const {
+        auto it = tags.find(name);
+        if (it != tags.end()) {
+            return std::dynamic_pointer_cast<NBTList>(it->second);
+        }
+        return nullptr;
+    }
+
     // Java NBTTagCompound.writeTagContents: for each entry writes type + name (writeUTF) + contents, then TAG_End
     void writeContents(ByteBuffer& buf) const override {
         for (auto const& [name, tag] : tags) {
@@ -243,8 +252,11 @@ public:
             if (type == static_cast<uint8_t>(NBTTagType::TAG_End)) break;
             
             int16_t nameLen = buf.readShort();
+            if (nameLen < 0 || static_cast<size_t>(nameLen) > buf.remaining()) {
+                throw std::runtime_error("NBT read: invalid tag name length");
+            }
             std::string name(nameLen, '\0');
-            for (int i = 0; i < nameLen; ++i) name[i] = (char)buf.readUByte();
+            for (int i = 0; i < nameLen; ++i) name[i] = static_cast<char>(buf.readUByte());
             
             tags[name] = readTag(buf, static_cast<NBTTagType>(type));
         }
@@ -255,6 +267,9 @@ public:
         if (type != static_cast<uint8_t>(NBTTagType::TAG_Compound)) return nullptr;
         
         int16_t nameLen = buf.readShort();
+        if (nameLen < 0 || static_cast<size_t>(nameLen) > buf.remaining()) {
+            throw std::runtime_error("NBT readRoot: invalid root name length");
+        }
         buf.readPos += nameLen; // Skip root name
 
         auto comp = std::make_shared<NBTCompound>();
@@ -278,18 +293,21 @@ inline std::shared_ptr<NBTTag> NBTCompound::readTag(ByteBuffer& buf, NBTTagType 
         return std::make_shared<NBTDouble>(buf.readDouble());
     } else if (type == NBTTagType::TAG_ByteArray) {
         int32_t len = buf.readInt();
-        std::vector<uint8_t> data(len);
-        buf.readBytes(data.data(), len);
+        if (len < 0) throw std::runtime_error("NBT readTag: negative byte array length");
+        std::vector<uint8_t> data(static_cast<size_t>(len));
+        buf.readBytes(data.data(), static_cast<size_t>(len));
         return std::make_shared<NBTByteArray>(std::move(data));
     } else if (type == NBTTagType::TAG_String) {
         int16_t len = buf.readShort();
-        std::string s(len, '\0');
-        for (int i = 0; i < len; ++i) s[i] = (char)buf.readUByte();
+        if (len < 0) throw std::runtime_error("NBT readTag: negative string length");
+        std::string s(static_cast<size_t>(len), '\0');
+        for (int i = 0; i < len; ++i) s[i] = static_cast<char>(buf.readUByte());
         return std::make_shared<NBTString>(std::move(s));
     } else if (type == NBTTagType::TAG_List) {
         auto list = std::make_shared<NBTList>();
         list->tagType = static_cast<NBTTagType>(buf.readUByte());
         int32_t count = buf.readInt();
+        if (count < 0) throw std::runtime_error("NBT readTag: negative list count");
         for (int32_t i = 0; i < count; ++i) {
             list->tags.push_back(readTag(buf, list->tagType));
         }
@@ -299,5 +317,5 @@ inline std::shared_ptr<NBTTag> NBTCompound::readTag(ByteBuffer& buf, NBTTagType 
         comp->read(buf);
         return comp;
     }
-    return nullptr;
+    throw std::runtime_error("NBT readTag: unknown tag type " + std::to_string(static_cast<int>(type)));
 }

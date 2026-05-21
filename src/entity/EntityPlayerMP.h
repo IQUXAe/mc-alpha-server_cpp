@@ -112,9 +112,9 @@ public:
         nbt->setInt("HeldItemId", savedHeldItemId);
         
         // Inventory
-        auto invTag = std::make_shared<NBTCompound>();
+        auto invTag = std::make_shared<NBTList>();
         inventory.writeToNBT(invTag);
-        nbt->setCompound("Inventory", invTag);
+        nbt->setList("Inventory", invTag);
     }
 
     void readFromNBT(std::shared_ptr<NBTCompound> nbt) {
@@ -134,9 +134,11 @@ public:
         savedHeldItemId = nbt->getInt("HeldItemId");
         
         // Inventory
-        auto invTag = nbt->getCompound("Inventory");
-        if (invTag) {
-            inventory.readFromNBT(invTag);
+        auto invIt = nbt->tags.find("Inventory");
+        if (invIt != nbt->tags.end()) {
+            if (auto listTag = std::dynamic_pointer_cast<NBTList>(invIt->second)) {
+                inventory.readFromNBT(listTag);
+            }
         }
     }
 
