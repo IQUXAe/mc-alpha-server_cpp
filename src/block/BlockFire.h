@@ -25,6 +25,8 @@ public:
         setBurnRate(35, 30, 60); // cloth (wool)
     }
 
+    bool allowsAttachment() const override { return false; }
+
     std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World*, int, int, int) override {
         return std::nullopt;
     }

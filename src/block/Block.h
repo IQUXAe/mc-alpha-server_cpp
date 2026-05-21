@@ -21,6 +21,7 @@ public:
     static bool isBlockContainer[256];
     static int lightOpacity[256];
     static int lightValue[256];
+    static bool allowsAttachmentArr[256]; // Java: field_540_p
 
     // Pre-defined blocks
     static Block* stone;
@@ -106,4 +107,5 @@ public:
     virtual void onBlockPlaced(World* world, int x, int y, int z, int side) {}
     virtual bool canBlockStay(World* world, int x, int y, int z) const { return true; }
     virtual bool isReplaceable() const { return false; }
+    virtual bool allowsAttachment() const { return true; }
 };

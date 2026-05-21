@@ -18,6 +18,8 @@ public:
     // Break sign if supporting block is removed
     void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override;
 
+    bool allowsAttachment() const override { return false; }
+
 protected:
     std::unique_ptr<TileEntity> createTileEntity() override;
 

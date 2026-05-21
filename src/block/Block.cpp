@@ -107,6 +107,7 @@ private:
 class BlockFluid : public Block {
 public:
     BlockFluid(int id, Material* material) : Block(id, material) {}
+    bool allowsAttachment() const override { return false; }
 
     bool canCollideCheck(int metadata, bool includeLiquids) const override {
         if (metadata >= 8) {
@@ -204,6 +205,7 @@ public:
         setTickOnLoad(true);
         setBlockBounds(0.3f, 0.0f, 0.3f, 0.7f, 0.6f, 0.7f);
     }
+    bool allowsAttachment() const override { return false; }
     bool canBlockStay(World* world, int x, int y, int z) const override {
         int below = world->getBlockId(x, y - 1, z);
         return (world->getBlockLightValue(x, y, z) >= 8 || world->canBlockSeeSky(x, y, z))
@@ -260,6 +262,7 @@ public:
 class BlockMushroom : public Block {
 public:
     BlockMushroom(int id, Material* mat) : Block(id, mat) {}
+    bool allowsAttachment() const override { return false; }
     bool canBlockStay(World* world, int x, int y, int z) const override {
         int below = world->getBlockId(x, y - 1, z);
         return below > 0 && Block::blocksList[below] != nullptr;
@@ -277,9 +280,10 @@ public:
 class BlockTorch : public Block {
 public:
     BlockTorch(int id, Material* mat) : Block(id, mat) {}
+    bool allowsAttachment() const override { return false; }
 
     // Java: doesBlockAllowAttachment = block is solid and opaque
-    static bool allowsAttachment(World* world, int x, int y, int z) {
+    static bool doesBlockAllowAttachment(World* world, int x, int y, int z) {
         int id = world->getBlockId(x, y, z);
         if (id == 0) return false;
         Block* b = Block::blocksList[id];
@@ -290,10 +294,10 @@ public:
     // side: 1=bottom(floor), 2=north(+z), 3=south(-z), 4=west(+x), 5=east(-x)
     void onBlockPlaced(World* world, int x, int y, int z, int side) override {
         uint8_t meta = 5; // default: floor
-        if (side == 2 && allowsAttachment(world, x, y, z + 1)) meta = 4;
-        else if (side == 3 && allowsAttachment(world, x, y, z - 1)) meta = 3;
-        else if (side == 4 && allowsAttachment(world, x + 1, y, z)) meta = 2;
-        else if (side == 5 && allowsAttachment(world, x - 1, y, z)) meta = 1;
+        if (side == 2 && doesBlockAllowAttachment(world, x, y, z + 1)) meta = 4;
+        else if (side == 3 && doesBlockAllowAttachment(world, x, y, z - 1)) meta = 3;
+        else if (side == 4 && doesBlockAllowAttachment(world, x + 1, y, z)) meta = 2;
+        else if (side == 5 && doesBlockAllowAttachment(world, x - 1, y, z)) meta = 1;
         world->setBlockAndMetadata(x, y, z, blockID, meta);
         // markBlockNeedsUpdate is called by handlePlace after onBlockPlaced returns
     }
@@ -305,30 +309,30 @@ public:
         // so we must NOT send markBlockNeedsUpdate here to avoid the flicker.
         if (world->getBlockMetadata(x, y, z) != 0) return;
         uint8_t meta = 0;
-        if      (allowsAttachment(world, x - 1, y, z)) meta = 1;
-        else if (allowsAttachment(world, x + 1, y, z)) meta = 2;
-        else if (allowsAttachment(world, x, y, z - 1)) meta = 3;
-        else if (allowsAttachment(world, x, y, z + 1)) meta = 4;
-        else if (allowsAttachment(world, x, y - 1, z)) meta = 5;
+        if      (doesBlockAllowAttachment(world, x - 1, y, z)) meta = 1;
+        else if (doesBlockAllowAttachment(world, x + 1, y, z)) meta = 2;
+        else if (doesBlockAllowAttachment(world, x, y, z - 1)) meta = 3;
+        else if (doesBlockAllowAttachment(world, x, y, z + 1)) meta = 4;
+        else if (doesBlockAllowAttachment(world, x, y - 1, z)) meta = 5;
         if (meta != 0)
             world->setBlockAndMetadata(x, y, z, blockID, meta);
         // No markBlockNeedsUpdate — setBlockWithNotify calls it after us with final metadata
     }
 
     bool canBlockStay(World* world, int x, int y, int z) const override {
-        return allowsAttachment(world, x-1, y, z) || allowsAttachment(world, x+1, y, z)
-            || allowsAttachment(world, x, y, z-1) || allowsAttachment(world, x, y, z+1)
-            || allowsAttachment(world, x, y-1, z);
+        return doesBlockAllowAttachment(world, x-1, y, z) || doesBlockAllowAttachment(world, x+1, y, z)
+            || doesBlockAllowAttachment(world, x, y, z-1) || doesBlockAllowAttachment(world, x, y, z+1)
+            || doesBlockAllowAttachment(world, x, y-1, z);
     }
 
     void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
         uint8_t meta = world->getBlockMetadata(x, y, z);
         bool detach = false;
-        if (meta == 1 && !allowsAttachment(world, x - 1, y, z)) detach = true;
-        if (meta == 2 && !allowsAttachment(world, x + 1, y, z)) detach = true;
-        if (meta == 3 && !allowsAttachment(world, x, y, z - 1)) detach = true;
-        if (meta == 4 && !allowsAttachment(world, x, y, z + 1)) detach = true;
-        if (meta == 5 && !allowsAttachment(world, x, y - 1, z)) detach = true;
+        if (meta == 1 && !doesBlockAllowAttachment(world, x - 1, y, z)) detach = true;
+        if (meta == 2 && !doesBlockAllowAttachment(world, x + 1, y, z)) detach = true;
+        if (meta == 3 && !doesBlockAllowAttachment(world, x, y, z - 1)) detach = true;
+        if (meta == 4 && !doesBlockAllowAttachment(world, x, y, z + 1)) detach = true;
+        if (meta == 5 && !doesBlockAllowAttachment(world, x, y - 1, z)) detach = true;
         if (detach) {
             dropBlockAsItem(world, x, y, z, meta);
             world->setBlockWithNotify(x, y, z, 0);
@@ -344,6 +348,7 @@ public:
     BlockCactus(int id, Material* mat) : Block(id, mat) {
         setBlockBounds(0.0625f, 0.0f, 0.0625f, 0.9375f, 1.0f, 0.9375f);
     }
+    bool allowsAttachment() const override { return false; }
     void onBlockAdded(World* world, int x, int y, int z) override {
         scheduleBlockTick(world, this, x, y, z);
     }
@@ -401,6 +406,7 @@ public:
 class BlockReed : public Block {
 public:
     BlockReed(int id, Material* mat) : Block(id, mat) {}
+    bool allowsAttachment() const override { return false; }
     void onBlockAdded(World* world, int x, int y, int z) override {
         scheduleBlockTick(world, this, x, y, z);
     }
@@ -461,6 +467,7 @@ bool Block::tickOnLoad[256] = {false};
 bool Block::isBlockContainer[256] = {false};
 int Block::lightOpacity[256] = {0};
 int Block::lightValue[256] = {0};
+bool Block::allowsAttachmentArr[256] = {false};
 
 Block* Block::stone = nullptr;
 Block* Block::grass = nullptr;
@@ -533,6 +540,7 @@ public:
 class BlockLeaves : public Block {
 public:
     BlockLeaves(int id, Material* material) : Block(id, material) { setTickOnLoad(true); }
+    bool allowsAttachment() const override { return false; }
     void onBlockAdded(World* world, int x, int y, int z) override {
         scheduleBlockTick(world, this, x, y, z);
     }
@@ -673,6 +681,7 @@ public:
         setTickOnLoad(true);
         setBlockBounds(0.1f, 0.0f, 0.1f, 0.9f, 0.8f, 0.9f);
     }
+    bool allowsAttachment() const override { return false; }
 
     void onBlockAdded(World* world, int x, int y, int z) override {
         scheduleBlockTick(world, this, x, y, z);
@@ -742,6 +751,7 @@ public:
 class BlockCrops : public Block {
 public:
     BlockCrops(int id, Material* mat) : Block(id, mat) {}
+    bool allowsAttachment() const override { return false; }
 
     void onBlockAdded(World* world, int x, int y, int z) override {
         scheduleBlockTick(world, this, x, y, z);
@@ -854,6 +864,7 @@ public:
         setBlockBounds(0.0f, 0.0f, 0.0f, 1.0f, 15.0f / 16.0f, 1.0f);
         setLightOpacity(255);
     }
+    bool allowsAttachment() const override { return false; }
 
     void onBlockAdded(World* world, int x, int y, int z) override {
         scheduleBlockTick(world, this, x, y, z);
@@ -1036,6 +1047,12 @@ void Block::initBlocks() {
     (new Block(91, &Material::pumpkin))->setHardness(1.0f);  // jack-o-lantern
 
     // TileEntities are registered via REGISTER_TILE_ENTITY macros in their headers
+
+    // Java: field_540_p — populate allowsAttachment array
+    // Default: true (matching Java Block.allowsAttachment() default)
+    for (int i = 0; i < 256; ++i) {
+        allowsAttachmentArr[i] = (blocksList[i] != nullptr && blocksList[i]->allowsAttachment());
+    }
 
     std::cout << "[INFO] Registered all standard blocks." << std::endl;
 }
