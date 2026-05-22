@@ -215,9 +215,9 @@ impl WorldGenBigTree {
         let mut i = 0;
         let end = diff[max_axis] + step;
         while i != end {
-            pos[max_axis] = ((from[max_axis] + i) as f64 + 0.5) as i32;
-            pos[ax1] = (from[ax1] as f64 + (i as f64) * r1 + 0.5) as i32;
-            pos[ax2] = (from[ax2] as f64 + (i as f64) * r2 + 0.5) as i32;
+            pos[max_axis] = ((from[max_axis] + i) as f64 + 0.5).floor() as i32;
+            pos[ax1] = (from[ax1] as f64 + (i as f64) * r1 + 0.5).floor() as i32;
+            pos[ax2] = (from[ax2] as f64 + (i as f64) * r2 + 0.5).floor() as i32;
             (accessor.set_block_id)(pos[0], pos[1], pos[2], block_id);
             i += step;
         }
