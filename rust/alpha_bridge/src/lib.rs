@@ -437,3 +437,128 @@ pub extern "C" fn alpha_zlib_decompress(
     AlphaBuffer::from_vec(output)
 }
 
+pub mod random;
+pub mod noise;
+pub mod biome;
+pub mod density;
+
+use crate::random::JavaRandom;
+use crate::noise::{NoiseGeneratorOctaves, NoiseGeneratorOctaves2};
+
+#[no_mangle]
+pub unsafe extern "C" fn alpha_noise_octaves_create(seed: i64, octaves: c_int) -> *mut NoiseGeneratorOctaves {
+    let mut rand = JavaRandom::new(seed);
+    let gen = NoiseGeneratorOctaves::new(&mut rand, octaves as usize);
+    Box::into_raw(Box::new(gen))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alpha_noise_octaves_create_all(
+    seed: i64,
+    out_705: *mut *mut NoiseGeneratorOctaves,
+    out_704: *mut *mut NoiseGeneratorOctaves,
+    out_703: *mut *mut NoiseGeneratorOctaves,
+    out_702: *mut *mut NoiseGeneratorOctaves,
+    out_701: *mut *mut NoiseGeneratorOctaves,
+    out_715: *mut *mut NoiseGeneratorOctaves,
+    out_714: *mut *mut NoiseGeneratorOctaves,
+    out_713: *mut *mut NoiseGeneratorOctaves,
+) {
+    let mut rand = JavaRandom::new(seed);
+    *out_705 = Box::into_raw(Box::new(NoiseGeneratorOctaves::new(&mut rand, 16)));
+    *out_704 = Box::into_raw(Box::new(NoiseGeneratorOctaves::new(&mut rand, 16)));
+    *out_703 = Box::into_raw(Box::new(NoiseGeneratorOctaves::new(&mut rand, 8)));
+    *out_702 = Box::into_raw(Box::new(NoiseGeneratorOctaves::new(&mut rand, 4)));
+    *out_701 = Box::into_raw(Box::new(NoiseGeneratorOctaves::new(&mut rand, 4)));
+    *out_715 = Box::into_raw(Box::new(NoiseGeneratorOctaves::new(&mut rand, 10)));
+    *out_714 = Box::into_raw(Box::new(NoiseGeneratorOctaves::new(&mut rand, 16)));
+    *out_713 = Box::into_raw(Box::new(NoiseGeneratorOctaves::new(&mut rand, 8)));
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alpha_noise_octaves_free(ptr: *mut NoiseGeneratorOctaves) {
+    if !ptr.is_null() {
+        let _ = Box::from_raw(ptr);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alpha_noise_octaves_func_648_a(
+    ptr: *mut NoiseGeneratorOctaves,
+    out_buf: *mut f64,
+    out_len: size_t,
+    x: f64,
+    y: f64,
+    z: f64,
+    x_size: c_int,
+    y_size: c_int,
+    z_size: c_int,
+    x_scale: f64,
+    y_scale: f64,
+    z_scale: f64,
+) {
+    let gen = &*ptr;
+    let slice = slice::from_raw_parts_mut(out_buf, out_len);
+    gen.func_648_a(slice, x, y, z, x_size as usize, y_size as usize, z_size as usize, x_scale, y_scale, z_scale);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alpha_noise_octaves_func_4103_a(
+    ptr: *mut NoiseGeneratorOctaves,
+    out_buf: *mut f64,
+    out_len: size_t,
+    x: c_int,
+    z: c_int,
+    x_size: c_int,
+    z_size: c_int,
+    x_scale: f64,
+    z_scale: f64,
+) {
+    let gen = &*ptr;
+    let slice = slice::from_raw_parts_mut(out_buf, out_len);
+    gen.func_4103_a(slice, x, z, x_size as usize, z_size as usize, x_scale, z_scale);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alpha_noise_octaves_func_647_a(
+    ptr: *mut NoiseGeneratorOctaves,
+    x: f64,
+    z: f64,
+) -> f64 {
+    let gen = &*ptr;
+    gen.func_647_a(x, z)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alpha_noise_octaves2_create(seed: i64, octaves: c_int) -> *mut NoiseGeneratorOctaves2 {
+    let mut rand = JavaRandom::new(seed);
+    let gen = NoiseGeneratorOctaves2::new(&mut rand, octaves as usize);
+    Box::into_raw(Box::new(gen))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alpha_noise_octaves2_free(ptr: *mut NoiseGeneratorOctaves2) {
+    if !ptr.is_null() {
+        let _ = Box::from_raw(ptr);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alpha_noise_octaves2_func_4101_a(
+    ptr: *mut NoiseGeneratorOctaves2,
+    out_buf: *mut f64,
+    out_len: size_t,
+    x: f64,
+    y: f64,
+    x_size: c_int,
+    y_size: c_int,
+    x_scale: f64,
+    y_scale: f64,
+    amplitude: f64,
+) {
+    let gen = &*ptr;
+    let slice = slice::from_raw_parts_mut(out_buf, out_len);
+    gen.func_4101_a(slice, x, y, x_size as usize, y_size as usize, x_scale, y_scale, amplitude);
+}
+
+
