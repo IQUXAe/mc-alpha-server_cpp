@@ -27,6 +27,8 @@ AlphaBuffer alpha_gzip_compress(const uint8_t* input, size_t input_len, int leve
 AlphaBuffer alpha_gzip_decompress(const uint8_t* input, size_t input_len);
 AlphaBuffer alpha_zstd_compress(const uint8_t* input, size_t input_len, int level);
 AlphaBuffer alpha_zstd_decompress(const uint8_t* input, size_t input_len);
+AlphaBuffer alpha_zlib_compress(const uint8_t* input, size_t input_len, int level);
+AlphaBuffer alpha_zlib_decompress(const uint8_t* input, size_t input_len);
 AlphaBuffer alpha_level_dat_encode(const AlphaLevelDat* level);
 int alpha_level_dat_decode(const uint8_t* input, size_t input_len, AlphaLevelDat* out_level);
 void alpha_level_dat_free(AlphaLevelDat* level);

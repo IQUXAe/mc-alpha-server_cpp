@@ -1,4 +1,4 @@
-use flate2::read::{GzDecoder, GzEncoder};
+use flate2::read::{GzDecoder, GzEncoder, ZlibDecoder, ZlibEncoder};
 use flate2::Compression;
 use libc::{c_char, c_int, c_uchar, size_t};
 use std::io::Read;
@@ -393,3 +393,47 @@ pub extern "C" fn alpha_level_dat_free(level: *mut AlphaLevelDat) {
         level.level_name = ptr::null();
     }
 }
+
+#[no_mangle]
+pub extern "C" fn alpha_zlib_compress(
+    input: *const c_uchar,
+    input_len: size_t,
+    level: c_int,
+) -> AlphaBuffer {
+    let Some(bytes) = copy_input(input, input_len) else {
+        return AlphaBuffer::empty();
+    };
+
+    let compression = if level < 0 {
+        Compression::default()
+    } else {
+        Compression::new(level.clamp(0, 9) as u32)
+    };
+
+    let mut encoder = ZlibEncoder::new(bytes.as_slice(), compression);
+    let mut output = Vec::new();
+    if encoder.read_to_end(&mut output).is_err() {
+        return AlphaBuffer::empty();
+    }
+
+    AlphaBuffer::from_vec(output)
+}
+
+#[no_mangle]
+pub extern "C" fn alpha_zlib_decompress(
+    input: *const c_uchar,
+    input_len: size_t,
+) -> AlphaBuffer {
+    let Some(bytes) = copy_input(input, input_len) else {
+        return AlphaBuffer::empty();
+    };
+
+    let mut decoder = ZlibDecoder::new(bytes.as_slice());
+    let mut output = Vec::new();
+    if decoder.read_to_end(&mut output).is_err() {
+        return AlphaBuffer::empty();
+    }
+
+    AlphaBuffer::from_vec(output)
+}
+
