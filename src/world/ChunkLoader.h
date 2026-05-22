@@ -22,10 +22,10 @@
 #include "World.h"
 #include "TileEntity.h"
 #include "../core/NBT.h"
+#include "../core/RustBridge.h"
 #include <string>
 #include <fstream>
 #include <filesystem>
-#include <zlib.h>
 #include <iostream>
 
 // ChunkLoader handles saving and loading chunks to/from disk
@@ -248,63 +248,12 @@ public:
 
     // Compress data with GZip
     std::vector<uint8_t> compressGZip(const std::vector<uint8_t>& data) {
-        z_stream stream{};
-        stream.zalloc = Z_NULL;
-        stream.zfree = Z_NULL;
-        stream.opaque = Z_NULL;
-        
-        // Use gzip format (windowBits = 15 + 16)
-        if (deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 
-                        15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
-            throw std::runtime_error("Failed to initialize deflate");
-        }
-        
-        stream.avail_in = static_cast<uInt>(data.size());
-        stream.next_in = const_cast<Bytef*>(data.data());
-        
-        std::vector<uint8_t> compressed;
-        compressed.resize(deflateBound(&stream, data.size()));
-        
-        stream.avail_out = static_cast<uInt>(compressed.size());
-        stream.next_out = compressed.data();
-        
-        deflate(&stream, Z_FINISH);
-        compressed.resize(stream.total_out);
-        
-        deflateEnd(&stream);
-        return compressed;
+        return RustBridge::gzipCompress(data, -1);
     }
 
     // Decompress GZip data
     std::vector<uint8_t> decompressGZip(const std::vector<uint8_t>& compressed) {
-        z_stream stream{};
-        stream.zalloc = Z_NULL;
-        stream.zfree = Z_NULL;
-        stream.opaque = Z_NULL;
-        
-        // Use gzip format (windowBits = 15 + 16)
-        if (inflateInit2(&stream, 15 + 16) != Z_OK) {
-            throw std::runtime_error("Failed to initialize inflate");
-        }
-        
-        stream.avail_in = static_cast<uInt>(compressed.size());
-        stream.next_in = const_cast<Bytef*>(compressed.data());
-        
-        std::vector<uint8_t> decompressed;
-        decompressed.resize(1024 * 1024); // 1MB initial buffer
-        
-        stream.avail_out = static_cast<uInt>(decompressed.size());
-        stream.next_out = decompressed.data();
-        
-        int ret = inflate(&stream, Z_FINISH);
-        if (ret != Z_STREAM_END) {
-            inflateEnd(&stream);
-            throw std::runtime_error("Failed to decompress data");
-        }
-        
-        decompressed.resize(stream.total_out);
-        inflateEnd(&stream);
-        return decompressed;
+        return RustBridge::gzipDecompress(compressed);
     }
 
 private:

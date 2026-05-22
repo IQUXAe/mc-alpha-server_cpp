@@ -1,6 +1,7 @@
 #include "Chunk.h"
 #include "World.h"
 #include "TileEntity.h"
+#include "../core/RustBridge.h"
 #include "../block/Block.h"
 #include <stdexcept>
 #include <algorithm>
@@ -226,8 +227,6 @@ void Chunk::generateSkylightMap() {
     }
 }
 
-#include <zlib.h>
-
 std::vector<uint8_t> Chunk::getChunkData() const {
     std::vector<uint8_t> rawData(CHUNK_VOLUME * 5 / 2, 0);
 
@@ -236,17 +235,7 @@ std::vector<uint8_t> Chunk::getChunkData() const {
     std::ranges::copy(blocklight.data,  rawData.begin() + CHUNK_VOLUME + CHUNK_VOLUME / 2);
     std::ranges::copy(skylight.data,    rawData.begin() + CHUNK_VOLUME + CHUNK_VOLUME);
 
-    std::vector<uint8_t> compressed(compressBound(rawData.size()));
-    z_stream strm{};
-    deflateInit(&strm, 1);
-    strm.avail_in  = static_cast<uInt>(rawData.size());
-    strm.next_in   = const_cast<Bytef*>(rawData.data());
-    strm.avail_out = static_cast<uInt>(compressed.size());
-    strm.next_out  = compressed.data();
-    deflate(&strm, Z_FINISH);
-    compressed.resize(strm.total_out);
-    deflateEnd(&strm);
-    return compressed;
+    return RustBridge::zlibCompress(rawData, 1);
 }
 
 void Chunk::addTileEntity(TileEntity* te) {

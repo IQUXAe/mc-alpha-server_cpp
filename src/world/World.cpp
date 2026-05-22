@@ -35,8 +35,6 @@
 #include "core/NBT.h"
 #include "core/Logger.h"
 #include "core/RustBridge.h"
-#include <zlib.h>
-#include <zstd.h>
 #include <cmath>
 #include <algorithm>
 #include <cstring>
