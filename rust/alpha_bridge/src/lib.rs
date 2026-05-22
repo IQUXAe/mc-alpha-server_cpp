@@ -441,6 +441,9 @@ pub mod random;
 pub mod noise;
 pub mod biome;
 pub mod density;
+pub mod caves;
+pub mod decorators;
+
 
 use crate::random::JavaRandom;
 use crate::noise::{NoiseGeneratorOctaves, NoiseGeneratorOctaves2};
@@ -561,4 +564,30 @@ pub unsafe extern "C" fn alpha_noise_octaves2_func_4101_a(
     gen.func_4101_a(slice, x, y, x_size as usize, y_size as usize, x_scale, y_scale, amplitude);
 }
 
+use crate::decorators::WorldAccessor;
 
+#[no_mangle]
+pub unsafe extern "C" fn alpha_generate_tree(
+    accessor: WorldAccessor,
+    seed: i64,
+    x: i32,
+    y: i32,
+    z: i32,
+) -> bool {
+    let mut rand = JavaRandom::new(seed);
+    crate::decorators::trees::WorldGenTrees::new().generate(&accessor, &mut rand, x, y, z)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alpha_generate_big_tree(
+    accessor: WorldAccessor,
+    seed: i64,
+    x: i32,
+    y: i32,
+    z: i32,
+) -> bool {
+    let mut rand = JavaRandom::new(seed);
+    let mut big_tree = crate::decorators::trees::WorldGenBigTree::new();
+    big_tree.func_420_a(1.0, 1.0, 1.0);
+    big_tree.generate(&accessor, &mut rand, x, y, z)
+}

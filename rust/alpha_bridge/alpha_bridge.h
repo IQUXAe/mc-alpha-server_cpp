@@ -165,6 +165,51 @@ void alpha_density_generate_field(
     NoiseGeneratorOctaves* field_704_l
 );
 
+// Cave & Decorator Functions
+typedef struct WorldAccessor {
+    uint8_t (*get_block_id)(int32_t x, int32_t y, int32_t z);
+    void (*set_block_id)(int32_t x, int32_t y, int32_t z, uint8_t id);
+    uint8_t (*get_block_meta)(int32_t x, int32_t y, int32_t z);
+    void (*set_block_meta)(int32_t x, int32_t y, int32_t z, uint8_t meta);
+    bool (*allows_attachment)(int32_t x, int32_t y, int32_t z);
+    bool (*is_block_solid)(int32_t x, int32_t y, int32_t z);
+    int32_t (*get_height_value)(int32_t x, int32_t z);
+} WorldAccessor;
+
+void alpha_caves_generate(
+    int64_t world_seed,
+    int32_t chunk_x,
+    int32_t chunk_z,
+    uint8_t* blocks,
+    size_t blocks_len
+);
+
+void alpha_decorate_chunk(
+    WorldAccessor accessor,
+    int64_t seed,
+    int32_t chunk_x,
+    int32_t chunk_z,
+    int32_t biome_type_raw,
+    NoiseGeneratorOctaves* noise_gen_713,
+    const double* temperatures
+);
+
+bool alpha_generate_tree(
+    WorldAccessor accessor,
+    int64_t seed,
+    int32_t x,
+    int32_t y,
+    int32_t z
+);
+
+bool alpha_generate_big_tree(
+    WorldAccessor accessor,
+    int64_t seed,
+    int32_t x,
+    int32_t y,
+    int32_t z
+);
+
 #ifdef __cplusplus
 }
 #endif
