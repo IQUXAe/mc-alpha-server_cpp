@@ -1086,7 +1086,6 @@ void Block::initBlocks() {
     const std::vector<int> nonAttachingBlocks = {
         6,   // sapling
         8, 9, 10, 11, // water/lava
-        18,  // leaves
         20,  // glass
         27, 28, // rails
         30,  // web
@@ -1134,10 +1133,12 @@ void Block::initBlocks() {
     // its default lightOpacity should be 0, matching Java's constructor logic.
     for (int i = 0; i < 256; ++i) {
         if (blocksList[i] != nullptr) {
-            // Blocks that had setLightOpacity called in C++ Block.cpp:
+            // Blocks that had setLightOpacity called in C++ Block.cpp, or non-attaching blocks
+            // that explicitly have lightOpacity = 255 in Java (like slabs, stairs, farmland):
             bool hasExplicit = (i == 6 || i == 8 || i == 9 || i == 10 || i == 11 || i == 18 || i == 20 ||
                                 i == 30 || i == 31 || i == 32 || i == 37 || i == 38 || i == 39 || i == 40 ||
-                                i == 50 || i == 55 || i == 59 || i == 63 || i == 68 || i == 79 || i == 81 || i == 83);
+                                i == 44 || i == 50 || i == 53 || i == 55 || i == 59 || i == 60 || i == 63 ||
+                                i == 67 || i == 68 || i == 79 || i == 81 || i == 83);
             if (!hasExplicit && !allowsAttachmentArr[i]) {
                 lightOpacity[i] = 0;
             }
