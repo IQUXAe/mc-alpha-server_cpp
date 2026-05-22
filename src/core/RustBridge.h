@@ -25,6 +25,9 @@ std::vector<uint8_t> gzipDecompress(const std::vector<uint8_t>& input);
 std::vector<uint8_t> zstdCompress(const std::vector<uint8_t>& input, int level = 1);
 std::vector<uint8_t> zstdDecompress(const std::vector<uint8_t>& input);
 
+std::vector<uint8_t> zlibCompress(const std::vector<uint8_t>& input, int level = -1);
+std::vector<uint8_t> zlibDecompress(const std::vector<uint8_t>& input);
+
 std::vector<uint8_t> encodeLevelDat(const LevelDatData& level);
 bool decodeLevelDat(const std::vector<uint8_t>& input, LevelDatData& outLevel);
 
