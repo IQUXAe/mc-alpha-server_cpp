@@ -1082,6 +1082,68 @@ void Block::initBlocks() {
         allowsAttachmentArr[i] = (blocksList[i] != nullptr && blocksList[i]->allowsAttachment());
     }
 
+    // Force allowsAttachmentArr to false for blocks that return false in Java
+    const std::vector<int> nonAttachingBlocks = {
+        6,   // sapling
+        8, 9, 10, 11, // water/lava
+        18,  // leaves
+        20,  // glass
+        27, 28, // rails
+        30,  // web
+        31,  // tall grass
+        32,  // dead bush
+        37, 38, 39, 40, // flowers/mushrooms
+        44,  // slab
+        50,  // torch
+        51,  // fire
+        52,  // mob spawner
+        53,  // wood stairs
+        55,  // redstone wire
+        59,  // crops
+        60,  // farmland
+        63,  // sign post
+        64,  // wood door
+        65,  // ladder
+        66,  // rail
+        67,  // cobblestone stairs
+        68,  // wall sign
+        69,  // lever
+        70,  // stone pressure plate
+        71,  // iron door
+        72,  // wood pressure plate
+        75, 76, // redstone torches
+        77,  // button
+        78,  // snow
+        79,  // ice
+        81,  // cactus
+        83,  // reed
+        85,  // fence
+        90   // portal
+    };
+
+    for (int id : nonAttachingBlocks) {
+        allowsAttachmentArr[id] = false;
+    }
+
+    // Explicitly set lightOpacity for Ice (79) to 3 to match Java
+    if (blocksList[79] != nullptr) {
+        lightOpacity[79] = 3;
+    }
+
+    // Adjust lightOpacity: if a block doesn't allow attachment and wasn't explicitly set,
+    // its default lightOpacity should be 0, matching Java's constructor logic.
+    for (int i = 0; i < 256; ++i) {
+        if (blocksList[i] != nullptr) {
+            // Blocks that had setLightOpacity called in C++ Block.cpp:
+            bool hasExplicit = (i == 6 || i == 8 || i == 9 || i == 10 || i == 11 || i == 18 || i == 20 ||
+                                i == 30 || i == 31 || i == 32 || i == 37 || i == 38 || i == 39 || i == 40 ||
+                                i == 50 || i == 55 || i == 59 || i == 63 || i == 68 || i == 79 || i == 81 || i == 83);
+            if (!hasExplicit && !allowsAttachmentArr[i]) {
+                lightOpacity[i] = 0;
+            }
+        }
+    }
+
     std::cout << "[INFO] Registered all standard blocks." << std::endl;
 }
 
