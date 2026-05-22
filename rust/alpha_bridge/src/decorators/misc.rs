@@ -341,11 +341,90 @@ impl WorldGenDungeons {
                     }
                 }
             }
+            // Place chests (up to 2 attempts)
+            for _ in 0..2 {
+                for _ in 0..3 {
+                    let cx = x + rand.next_int_bound(half_x * 2 + 1) - half_x;
+                    let cz = z + rand.next_int_bound(half_z * 2 + 1) - half_z;
+                    if (accessor.get_block_id)(cx, y, cz) == 0 {
+                        let mut solid_count = 0;
+                        if (accessor.is_block_solid)(cx - 1, y, cz) { solid_count += 1; }
+                        if (accessor.is_block_solid)(cx + 1, y, cz) { solid_count += 1; }
+                        if (accessor.is_block_solid)(cx, y, cz - 1) { solid_count += 1; }
+                        if (accessor.is_block_solid)(cx, y, cz + 1) { solid_count += 1; }
+                        
+                        if solid_count == 1 {
+                            (accessor.set_block_id)(cx, y, cz, 54); // chest block
+                            
+                            // Simulate chest item slot generation (8 attempts)
+                            for _ in 0..8 {
+                                let item = func_434_a(rand);
+                                if item.is_some() {
+                                    rand.next_int_bound(27); // slot index
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+
             // Place spawner
             (accessor.set_block_id)(x, y, z, 52); // mob spawner
+            func_433_b(rand); // Choose spawner mob type
             true
         } else {
             false
         }
     }
 }
+
+fn func_434_a(rand: &mut JavaRandom) -> Option<()> {
+    let var2 = rand.next_int_bound(11);
+    if var2 == 0 {
+        Some(())
+    } else if var2 == 1 {
+        rand.next_int_bound(4); // quantity
+        Some(())
+    } else if var2 == 2 {
+        Some(())
+    } else if var2 == 3 {
+        rand.next_int_bound(4); // quantity
+        Some(())
+    } else if var2 == 4 {
+        rand.next_int_bound(4); // quantity
+        Some(())
+    } else if var2 == 5 {
+        rand.next_int_bound(4); // quantity
+        Some(())
+    } else if var2 == 6 {
+        Some(())
+    } else if var2 == 7 {
+        if rand.next_int_bound(100) == 0 {
+            Some(())
+        } else {
+            None
+        }
+    } else if var2 == 8 {
+        if rand.next_int_bound(2) == 0 {
+            rand.next_int_bound(4); // quantity
+            Some(())
+        } else {
+            None
+        }
+    } else if var2 == 9 {
+        if rand.next_int_bound(10) == 0 {
+            rand.next_int_bound(2); // record index offset
+            Some(())
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+fn func_433_b(rand: &mut JavaRandom) {
+    rand.next_int_bound(4);
+}
+
