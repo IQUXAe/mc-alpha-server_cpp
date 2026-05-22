@@ -1,8 +1,10 @@
 #include "ChunkProviderGenerate.h"
 #include "block/Block.h"
-#include "Decorators.h"
 #include "core/Logger.h"
 #include <cmath>
+#include <thread>
+
+static thread_local World* current_world = nullptr;
 
 ChunkProviderGenerate::ChunkProviderGenerate(World* world, int64_t seed, WorldChunkManager* managerOverride)
     : worldObj(world), rand(seed),
@@ -224,9 +226,8 @@ void ChunkProviderGenerate::generateChunk(Chunk& chunk, bool generateLighting) {
     generateTerrain(chunkX, chunkZ, blocks, biomesForGeneration, temps);
     replaceBlocksForBiome(chunkX, chunkZ, blocks, biomesForGeneration);
 
-    // Cave generation
-    MapGenCaves caveGen;
-    caveGen.func_667_a(this, worldObj, chunkX, chunkZ, blocks);
+    // Cave generation (Rust FFI)
+    alpha_caves_generate(worldObj->randomSeed, chunkX, chunkZ, blocks.data(), blocks.size());
 
     // IMPORTANT: Update heightmap AFTER terrain generation and cave carving
     chunk.generateHeightMap();
@@ -250,233 +251,37 @@ void ChunkProviderGenerate::populate(int chunkX, int chunkZ) {
     // Get biome for this chunk region (center of chunk +16, +16)
     MobSpawnerBase var6 = chunkManager->func_4067_a(var4 + 16, var5 + 16);
 
-    // Exact Java Random seed sequence
-    rand.setSeed(worldObj->randomSeed);
-    int64_t var7 = rand.nextLong() / 2LL * 2LL + 1LL;
-    int64_t var9 = rand.nextLong() / 2LL * 2LL + 1LL;
-    rand.setSeed(((int64_t)chunkX * var7 + (int64_t)chunkZ * var9) ^ worldObj->randomSeed);
-
-    // --- Water lakes ---
-    if (rand.nextInt(4) == 0) {
-        int var13 = var4 + rand.nextInt(16) + 8;
-        int var14 = rand.nextInt(128);
-        int var15 = var5 + rand.nextInt(16) + 8;
-        WorldGenLakes(8).generate(worldObj, rand, var13, var14, var15); // waterMoving
-    }
-
-    // --- Lava lakes ---
-    if (rand.nextInt(8) == 0) {
-        int var13 = var4 + rand.nextInt(16) + 8;
-        int var14 = rand.nextInt(rand.nextInt(120) + 8);
-        int var15 = var5 + rand.nextInt(16) + 8;
-        if (var14 < 64 || rand.nextInt(10) == 0) {
-            WorldGenLakes(10).generate(worldObj, rand, var13, var14, var15); // lavaMoving
-        }
-    }
-
-    // --- Dungeons (8 attempts) ---
-    for (int i = 0; i < 8; ++i) {
-        int dx = var4 + rand.nextInt(16) + 8;
-        int dy = rand.nextInt(128);
-        int dz = var5 + rand.nextInt(16) + 8;
-        WorldGenDungeons().generate(worldObj, rand, dx, dy, dz);
-    }
-
-    // --- Clay (10 veins) ---
-    for (int i = 0; i < 10; ++i) {
-        int cx = var4 + rand.nextInt(16);
-        int cy = rand.nextInt(128);
-        int cz = var5 + rand.nextInt(16);
-        WorldGenClay(32).generate(worldObj, rand, cx, cy, cz);
-    }
-
-    // --- Dirt veins (20) ---
-    for (int i = 0; i < 20; ++i) {
-        int mx = var4 + rand.nextInt(16);
-        int my = rand.nextInt(128);
-        int mz = var5 + rand.nextInt(16);
-        WorldGenMinable(3, 32).generate(worldObj, rand, mx, my, mz); // dirt
-    }
-
-    // --- Gravel veins (10) ---
-    for (int i = 0; i < 10; ++i) {
-        int mx = var4 + rand.nextInt(16);
-        int my = rand.nextInt(128);
-        int mz = var5 + rand.nextInt(16);
-        WorldGenMinable(13, 32).generate(worldObj, rand, mx, my, mz); // gravel
-    }
-
-    // --- Coal ore (20) ---
-    for (int i = 0; i < 20; ++i) {
-        int mx = var4 + rand.nextInt(16);
-        int my = rand.nextInt(128);
-        int mz = var5 + rand.nextInt(16);
-        WorldGenMinable(16, 16).generate(worldObj, rand, mx, my, mz);
-    }
-
-    // --- Iron ore (20, max y=64) ---
-    for (int i = 0; i < 20; ++i) {
-        int mx = var4 + rand.nextInt(16);
-        int my = rand.nextInt(64);
-        int mz = var5 + rand.nextInt(16);
-        WorldGenMinable(15, 8).generate(worldObj, rand, mx, my, mz);
-    }
-
-    // --- Gold ore (2, max y=32) ---
-    for (int i = 0; i < 2; ++i) {
-        int mx = var4 + rand.nextInt(16);
-        int my = rand.nextInt(32);
-        int mz = var5 + rand.nextInt(16);
-        WorldGenMinable(14, 8).generate(worldObj, rand, mx, my, mz);
-    }
-
-    // --- Redstone ore (8, max y=16) ---
-    for (int i = 0; i < 8; ++i) {
-        int mx = var4 + rand.nextInt(16);
-        int my = rand.nextInt(16);
-        int mz = var5 + rand.nextInt(16);
-        WorldGenMinable(73, 7).generate(worldObj, rand, mx, my, mz);
-    }
-
-    // --- Diamond ore (1, max y=16) ---
-    for (int i = 0; i < 1; ++i) {
-        int mx = var4 + rand.nextInt(16);
-        int my = rand.nextInt(16);
-        int mz = var5 + rand.nextInt(16);
-        WorldGenMinable(56, 7).generate(worldObj, rand, mx, my, mz);
-    }
-
-    // --- Trees ---
-    double var11d = 0.25;
-    int var13t = (int)((alpha_noise_octaves_func_647_a(field_713_c, (double)var4 * var11d, (double)var5 * var11d) / 8.0 + rand.nextDouble() * 4.0 + 4.0) / 3.0);
-    int var14t = 0;
-    if (rand.nextInt(10) == 0) {
-        ++var14t;
-    }
-
-    if (var6 == MobSpawnerBase::forest) var14t += var13t + 5;
-    if (var6 == MobSpawnerBase::rainforest) var14t += var13t + 5;
-    if (var6 == MobSpawnerBase::seasonalForest) var14t += var13t + 2;
-    if (var6 == MobSpawnerBase::taiga) var14t += var13t + 5;
-    if (var6 == MobSpawnerBase::desert) var14t -= 20;
-    if (var6 == MobSpawnerBase::tundra) var14t -= 20;
-    if (var6 == MobSpawnerBase::plains) var14t -= 20;
-
-    // Tree type selection
-    bool useBigTree = false;
-    if (rand.nextInt(10) == 0) {
-        useBigTree = true;
-    }
-    if (var6 == MobSpawnerBase::rainforest && rand.nextInt(3) == 0) {
-        useBigTree = true;
-    }
-
-    for (int i = 0; i < var14t; ++i) {
-        int tx = var4 + rand.nextInt(16) + 8;
-        int tz = var5 + rand.nextInt(16) + 8;
-        int ty = worldObj->getHeightValue(tx, tz);
-        if (useBigTree) {
-            WorldGenBigTree bigTree;
-            bigTree.func_420_a(1.0, 1.0, 1.0);
-            bigTree.generate(worldObj, rand, tx, ty, tz);
-        } else {
-            WorldGenTrees tree;
-            tree.generate(worldObj, rand, tx, ty, tz);
-        }
-    }
-
-    // --- Yellow flowers (2 attempts) ---
-    for (int i = 0; i < 2; ++i) {
-        int fx = var4 + rand.nextInt(16) + 8;
-        int fy = rand.nextInt(128);
-        int fz = var5 + rand.nextInt(16) + 8;
-        WorldGenFlowers(37).generate(worldObj, rand, fx, fy, fz);
-    }
-
-    // --- Red flower (50% chance) ---
-    if (rand.nextInt(2) == 0) {
-        int fx = var4 + rand.nextInt(16) + 8;
-        int fy = rand.nextInt(128);
-        int fz = var5 + rand.nextInt(16) + 8;
-        WorldGenFlowers(38).generate(worldObj, rand, fx, fy, fz);
-    }
-
-    // --- Brown mushroom (25% chance) ---
-    if (rand.nextInt(4) == 0) {
-        int fx = var4 + rand.nextInt(16) + 8;
-        int fy = rand.nextInt(128);
-        int fz = var5 + rand.nextInt(16) + 8;
-        WorldGenFlowers(39).generate(worldObj, rand, fx, fy, fz);
-    }
-
-    // --- Red mushroom (12.5% chance) ---
-    if (rand.nextInt(8) == 0) {
-        int fx = var4 + rand.nextInt(16) + 8;
-        int fy = rand.nextInt(128);
-        int fz = var5 + rand.nextInt(16) + 8;
-        WorldGenFlowers(40).generate(worldObj, rand, fx, fy, fz);
-    }
-
-    // --- Reed / Sugar cane (10 attempts) ---
-    for (int i = 0; i < 10; ++i) {
-        int rx = var4 + rand.nextInt(16) + 8;
-        int ry = rand.nextInt(128);
-        int rz = var5 + rand.nextInt(16) + 8;
-        WorldGenReed().generate(worldObj, rand, rx, ry, rz);
-    }
-
-    // --- Pumpkin (1/32 chance) ---
-    if (rand.nextInt(32) == 0) {
-        int px = var4 + rand.nextInt(16) + 8;
-        int py = rand.nextInt(128);
-        int pz = var5 + rand.nextInt(16) + 8;
-        WorldGenPumpkin().generate(worldObj, rand, px, py, pz);
-    }
-
-    // --- Cactus (desert only, 10 per chunk) ---
-    int cactusCount = 0;
-    if (var6 == MobSpawnerBase::desert) {
-        cactusCount += 10;
-    }
-    for (int i = 0; i < cactusCount; ++i) {
-        int cx = var4 + rand.nextInt(16) + 8;
-        int cy = rand.nextInt(128);
-        int cz = var5 + rand.nextInt(16) + 8;
-        WorldGenCactus().generate(worldObj, rand, cx, cy, cz);
-    }
-
-    // --- Underground water springs (50) ---
-    for (int i = 0; i < 50; ++i) {
-        int sx = var4 + rand.nextInt(16) + 8;
-        int sy = rand.nextInt(rand.nextInt(120) + 8);
-        int sz = var5 + rand.nextInt(16) + 8;
-        WorldGenLiquids(9).generate(worldObj, rand, sx, sy, sz); // waterStill
-    }
-
-    // --- Underground lava springs (20) ---
-    for (int i = 0; i < 20; ++i) {
-        int sx = var4 + rand.nextInt(16) + 8;
-        int sy = rand.nextInt(rand.nextInt(rand.nextInt(112) + 8) + 8);
-        int sz = var5 + rand.nextInt(16) + 8;
-        WorldGenLiquids(11).generate(worldObj, rand, sx, sy, sz); // lavaStill
-    }
-
-    // --- Snow ---
+    // Get temperatures for snow layer
     field_4222_w = chunkManager->getTemperatures(field_4222_w, var4 + 8, var5 + 8, 16, 16);
 
-    for (int var17 = var4 + 8; var17 < var4 + 8 + 16; ++var17) {
-        for (int var18 = var5 + 8; var18 < var5 + 8 + 16; ++var18) {
-            int var19 = var17 - (var4 + 8);
-            int var20 = var18 - (var5 + 8);
-            int var21 = worldObj->getHeightValue(var17, var18);
-            double var22 = field_4222_w[var19 * 16 + var20] - (double)(var21 - 64) / 64.0 * 0.3;
+    current_world = worldObj;
 
-            if (var22 < 0.5 && var21 > 0 && var21 < 128 &&
-                worldObj->getBlockId(var17, var21, var18) == 0 &&
-                worldObj->isBlockSolid(var17, var21 - 1, var18) &&
-                worldObj->getBlockId(var17, var21 - 1, var18) != 79) { // not ice
-                worldObj->setBlock(var17, var21, var18, 78); // snow layer
-            }
+    WorldAccessor accessor {
+        .get_block_id = [](int32_t x, int32_t y, int32_t z) -> uint8_t {
+            return current_world->getBlockId(x, y, z);
+        },
+        .set_block_id = [](int32_t x, int32_t y, int32_t z, uint8_t id) {
+            current_world->setBlock(x, y, z, id);
+        },
+        .get_block_meta = [](int32_t x, int32_t y, int32_t z) -> uint8_t {
+            return current_world->getBlockMetadata(x, y, z);
+        },
+        .set_block_meta = [](int32_t x, int32_t y, int32_t z, uint8_t meta) {
+            current_world->setBlockMetadata(x, y, z, meta);
+        },
+        .allows_attachment = [](int32_t x, int32_t y, int32_t z) -> bool {
+            int id = current_world->getBlockId(x, y, z);
+            return id >= 0 && id < 256 && Block::allowsAttachmentArr[id];
+        },
+        .is_block_solid = [](int32_t x, int32_t y, int32_t z) -> bool {
+            return current_world->isBlockSolid(x, y, z);
+        },
+        .get_height_value = [](int32_t x, int32_t z) -> int32_t {
+            return current_world->getHeightValue(x, z);
         }
-    }
+    };
+
+    alpha_decorate_chunk(accessor, worldObj->randomSeed, chunkX, chunkZ, static_cast<int32_t>(var6.type), field_713_c, field_4222_w.data());
+
+    current_world = nullptr;
 }
