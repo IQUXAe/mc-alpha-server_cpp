@@ -2,7 +2,7 @@
 
 #include "world/Chunk.h"
 #include "world/World.h"
-#include "world/noise/AlphaNoise.h"
+#include "../../../rust/alpha_bridge/alpha_bridge.h"
 #include "world/biome/WorldChunkManager.h"
 #include "world/biome/MobSpawnerBase.h"
 #include "core/JavaRandom.h"
@@ -12,25 +12,21 @@ class ChunkProviderGenerate {
 private:
     World* worldObj;  // Must be first for correct initialization order
     JavaRandom rand;
-    NoiseGeneratorOctaves field_705_k;
-    NoiseGeneratorOctaves field_704_l;
-    NoiseGeneratorOctaves field_703_m;
-    NoiseGeneratorOctaves field_702_n;
-    NoiseGeneratorOctaves field_701_o;
-    NoiseGeneratorOctaves field_715_a;
-    NoiseGeneratorOctaves field_714_b;
-    NoiseGeneratorOctaves field_713_c;
+    
+    // Noise Generator pointers from Rust
+    NoiseGeneratorOctaves* field_705_k;
+    NoiseGeneratorOctaves* field_704_l;
+    NoiseGeneratorOctaves* field_703_m;
+    NoiseGeneratorOctaves* field_702_n;
+    NoiseGeneratorOctaves* field_701_o;
+    NoiseGeneratorOctaves* field_715_a;
+    NoiseGeneratorOctaves* field_714_b;
+    NoiseGeneratorOctaves* field_713_c;
 
     std::vector<double> field_4224_q;
     std::vector<double> field_698_r;
     std::vector<double> field_697_s;
     std::vector<double> field_696_t;
-
-    std::vector<double> field_4229_d;
-    std::vector<double> field_4228_e;
-    std::vector<double> field_4227_f;
-    std::vector<double> field_4226_g;
-    std::vector<double> field_4225_h;
 
     std::vector<MobSpawnerBase> biomesForGeneration;
     std::vector<double> field_4222_w;
@@ -46,6 +42,7 @@ private:
 
 public:
     ChunkProviderGenerate(World* world, int64_t seed, WorldChunkManager* managerOverride = nullptr);
+    ~ChunkProviderGenerate();
     void generateChunk(Chunk& chunk, bool generateLighting = true);
     void provideChunk(int chunkX, int chunkZ);  // Generate terrain for pre-created chunk
     void populate(int chunkX, int chunkZ);

@@ -6,17 +6,33 @@
 
 ChunkProviderGenerate::ChunkProviderGenerate(World* world, int64_t seed, WorldChunkManager* managerOverride)
     : worldObj(world), rand(seed),
-      field_705_k(rand, 16),
-      field_704_l(rand, 16),
-      field_703_m(rand, 8),
-      field_702_n(rand, 4),
-      field_701_o(rand, 4),
-      field_715_a(rand, 10),
-      field_714_b(rand, 16),
-      field_713_c(rand, 8),
       chunkManager(managerOverride ? managerOverride : world->func_4077_a()) {
+    
+    alpha_noise_octaves_create_all(
+        seed,
+        &field_705_k,
+        &field_704_l,
+        &field_703_m,
+        &field_702_n,
+        &field_701_o,
+        &field_715_a,
+        &field_714_b,
+        &field_713_c
+    );
+    
     // Initialize noise arrays
     field_4224_q.reserve(17 * 17 * 17);
+}
+
+ChunkProviderGenerate::~ChunkProviderGenerate() {
+    alpha_noise_octaves_free(field_705_k);
+    alpha_noise_octaves_free(field_704_l);
+    alpha_noise_octaves_free(field_703_m);
+    alpha_noise_octaves_free(field_702_n);
+    alpha_noise_octaves_free(field_701_o);
+    alpha_noise_octaves_free(field_715_a);
+    alpha_noise_octaves_free(field_714_b);
+    alpha_noise_octaves_free(field_713_c);
 }
 
 // Exact port of Java's func_4058_a (density field generation)
@@ -26,79 +42,23 @@ void ChunkProviderGenerate::func_4058_a(int var2, int var3, int var4, int var5, 
         field_4224_q.resize(var5 * var6 * var7);
     }
 
-    double var8 = 684.412;
-    double var10 = 684.412;
-
-    field_4226_g = field_715_a.func_4103_a(field_4226_g, var2, var4, var5, var7, 1.121, 1.121, 0.5);
-    field_4225_h = field_714_b.func_4103_a(field_4225_h, var2, var4, var5, var7, 200.0, 200.0, 0.5);
-    field_4229_d = field_703_m.func_648_a(field_4229_d, (double)var2, (double)var3, (double)var4, var5, var6, var7, var8 / 80.0, var10 / 160.0, var8 / 80.0);
-    field_4228_e = field_705_k.func_648_a(field_4228_e, (double)var2, (double)var3, (double)var4, var5, var6, var7, var8, var10, var8);
-    field_4227_f = field_704_l.func_648_a(field_4227_f, (double)var2, (double)var3, (double)var4, var5, var6, var7, var8, var10, var8);
-
-    int var14 = 0;
-    int var15 = 0;
-    int var16 = 16 / var5;
-
-    for (int var17 = 0; var17 < var5; ++var17) {
-        int var18 = var17 * var16 + var16 / 2;
-        for (int var19 = 0; var19 < var7; ++var19) {
-            int var20 = var19 * var16 + var16 / 2;
-            double var21 = temperatures[var18 * 16 + var20];
-            double var23 = humidities[var18 * 16 + var20] * var21;
-            double var25 = 1.0 - var23;
-            var25 *= var25;
-            var25 *= var25;
-            var25 = 1.0 - var25;
-            double var27 = (field_4226_g[var15] + 256.0) / 512.0;
-            var27 *= var25;
-            if (var27 > 1.0) var27 = 1.0;
-
-            double var29 = field_4225_h[var15] / 8000.0;
-            if (var29 < 0.0) var29 = -var29 * 0.3;
-
-            var29 = var29 * 3.0 - 2.0;
-            if (var29 < 0.0) {
-                var29 /= 2.0;
-                if (var29 < -1.0) var29 = -1.0;
-                var29 /= 1.4;
-                var29 /= 2.0;
-                var27 = 0.0;
-            } else {
-                if (var29 > 1.0) var29 = 1.0;
-                var29 /= 8.0;
-            }
-
-            if (var27 < 0.0) var27 = 0.0;
-
-            var27 += 0.5;
-            var29 = var29 * (double)var6 / 16.0;
-            double var31 = (double)var6 / 2.0 + var29 * 4.0;
-            ++var15;
-
-            for (int var33 = 0; var33 < var6; ++var33) {
-                double var34 = 0.0;
-                double var36 = ((double)var33 - var31) * 12.0 / var27;
-                if (var36 < 0.0) var36 *= 4.0;
-
-                double var38 = field_4228_e[var14] / 512.0;
-                double var40 = field_4227_f[var14] / 512.0;
-                double var42 = (field_4229_d[var14] / 10.0 + 1.0) / 2.0;
-
-                if (var42 < 0.0) var34 = var38;
-                else if (var42 > 1.0) var34 = var40;
-                else var34 = var38 + (var40 - var38) * var42;
-
-                var34 -= var36;
-                if (var33 > var6 - 4) {
-                    double var44 = (double)((float)(var33 - (var6 - 4)) / 3.0f);
-                    var34 = var34 * (1.0 - var44) + -10.0 * var44;
-                }
-
-                field_4224_q[var14] = var34;
-                ++var14;
-            }
-        }
-    }
+    alpha_density_generate_field(
+        field_4224_q.data(),
+        field_4224_q.size(),
+        var2,
+        var3,
+        var4,
+        var5,
+        var6,
+        var7,
+        temperatures.data(),
+        humidities.data(),
+        field_715_a,
+        field_714_b,
+        field_703_m,
+        field_705_k,
+        field_704_l
+    );
 }
 
 // Exact port of Java's generateTerrain
@@ -180,12 +140,15 @@ void ChunkProviderGenerate::replaceBlocksForBiome(int chunkX, int chunkZ, std::v
     int var5 = 64;
     double var6 = 1.0 / 32.0;
 
-    // Java signature: func_648_a(double[] d, double x, double y, double z, int w, int h, int d, ...)
-    // field_698_r: x=chunkX*16, z=chunkZ*16 (horizontal noise)
-    field_698_r = field_702_n.func_648_a(field_698_r, chunkX * 16, chunkZ * 16, 0, 16, 16, 1, var6, var6, 1.0);
+    field_698_r.resize(256);
+    alpha_noise_octaves_func_648_a(field_702_n, field_698_r.data(), field_698_r.size(), chunkX * 16, chunkZ * 16, 0, 16, 16, 1, var6, var6, 1.0);
+    
     // field_697_s: x=chunkZ*16, z=chunkX*16 (SWAPPED! Java uses var2, var1 order here)
-    field_697_s = field_702_n.func_648_a(field_697_s, chunkZ * 16, 109.0134, chunkX * 16, 16, 1, 16, var6, 1.0, var6);
-    field_696_t = field_701_o.func_648_a(field_696_t, chunkX * 16, chunkZ * 16, 0, 16, 16, 1, var6 * 2.0, var6 * 2.0, var6 * 2.0);
+    field_697_s.resize(256);
+    alpha_noise_octaves_func_648_a(field_702_n, field_697_s.data(), field_697_s.size(), chunkZ * 16, 109.0134, chunkX * 16, 16, 1, 16, var6, 1.0, var6);
+    
+    field_696_t.resize(256);
+    alpha_noise_octaves_func_648_a(field_701_o, field_696_t.data(), field_696_t.size(), chunkX * 16, chunkZ * 16, 0, 16, 16, 1, var6 * 2.0, var6 * 2.0, var6 * 2.0);
 
     for (int var8 = 0; var8 < 16; ++var8) {
         for (int var9 = 0; var9 < 16; ++var9) {
@@ -385,7 +348,7 @@ void ChunkProviderGenerate::populate(int chunkX, int chunkZ) {
 
     // --- Trees ---
     double var11d = 0.25;
-    int var13t = (int)((field_713_c.func_647_a((double)var4 * var11d, (double)var5 * var11d) / 8.0 + rand.nextDouble() * 4.0 + 4.0) / 3.0);
+    int var13t = (int)((alpha_noise_octaves_func_647_a(field_713_c, (double)var4 * var11d, (double)var5 * var11d) / 8.0 + rand.nextDouble() * 4.0 + 4.0) / 3.0);
     int var14t = 0;
     if (rand.nextInt(10) == 0) {
         ++var14t;
