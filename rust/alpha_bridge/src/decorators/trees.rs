@@ -111,7 +111,7 @@ impl WorldGenBigTree {
             scale_width: 1.0,
             leaf_density: 1.0,
             height_limit_limit: 12,
-            leaf_distance_limit: 5,
+            leaf_distance_limit: 4,
             leaf_nodes: Vec::new(),
         }
     }
@@ -234,7 +234,7 @@ impl WorldGenBigTree {
         for i in -int_radius..=int_radius {
             pos[ax1] = center[ax1] + i;
             for j in -int_radius..=int_radius {
-                let dist = (((i as f64) + 0.5).powi(2) + ((j as f64) + 0.5).powi(2)).sqrt();
+                let dist = (((i.abs() as f64) + 0.5).powi(2) + ((j.abs() as f64) + 0.5).powi(2)).sqrt();
                 if dist > radius as f64 {
                     continue;
                 }
@@ -289,7 +289,7 @@ impl WorldGenBigTree {
 
             for _ in 0..branch_count {
                 let branch_dist = self.scale_width * (layer_rad as f64) * ((self.tree_rand.next_float() as f64) + 0.328);
-                let angle = (self.tree_rand.next_float() as f64) * 2.0 * std::f64::consts::PI;
+                let angle = (self.tree_rand.next_float() as f64) * 2.0 * 3.14159_f64;
                 let bx = (branch_dist * angle.sin() + (self.base_pos[0] as f64) + 0.5) as i32;
                 let bz = (branch_dist * angle.cos() + (self.base_pos[2] as f64) + 0.5) as i32;
                 let b_from = [bx, top_y, bz];
