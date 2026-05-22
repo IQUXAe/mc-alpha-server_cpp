@@ -11,7 +11,8 @@
 #include "../world/TileEntityChest.h"
 #include "../world/TileEntityFurnace.h"
 #include "../world/TileEntitySign.h"
-#include "../world/gen/Decorators.h"
+#include "../../rust/alpha_bridge/alpha_bridge.h"
+static thread_local World* current_world = nullptr;
 #include "../entity/EntityItem.h"
 #include "../entity/EntityFallingSand.h"
 #include "../entity/EntityPlayerMP.h"
@@ -722,18 +723,45 @@ public:
             return;
         }
 
-        JavaRandom treeRand(static_cast<int64_t>(world->rand()));
+        int64_t treeSeed = static_cast<int64_t>(world->rand());
         world->setBlockWithNotify(x, y, z, 0);
+
+        current_world = world;
+
+        WorldAccessor accessor {
+            .get_block_id = [](int32_t x, int32_t y, int32_t z) -> uint8_t {
+                return current_world->getBlockId(x, y, z);
+            },
+            .set_block_id = [](int32_t x, int32_t y, int32_t z, uint8_t id) {
+                current_world->setBlock(x, y, z, id);
+            },
+            .get_block_meta = [](int32_t x, int32_t y, int32_t z) -> uint8_t {
+                return current_world->getBlockMetadata(x, y, z);
+            },
+            .set_block_meta = [](int32_t x, int32_t y, int32_t z, uint8_t meta) {
+                current_world->setBlockMetadata(x, y, z, meta);
+            },
+            .allows_attachment = [](int32_t x, int32_t y, int32_t z) -> bool {
+                int id = current_world->getBlockId(x, y, z);
+                return id >= 0 && id < 256 && Block::allowsAttachmentArr[id];
+            },
+            .is_block_solid = [](int32_t x, int32_t y, int32_t z) -> bool {
+                return current_world->isBlockSolid(x, y, z);
+            },
+            .get_height_value = [](int32_t x, int32_t z) -> int32_t {
+                return current_world->getHeightValue(x, z);
+            }
+        };
 
         bool generated = false;
         if (randomChance(world, 10)) {
-            WorldGenBigTree bigTree;
-            generated = bigTree.generate(world, treeRand, x, y, z);
+            generated = alpha_generate_big_tree(accessor, treeSeed, x, y, z);
         }
         if (!generated) {
-            WorldGenTrees tree;
-            generated = tree.generate(world, treeRand, x, y, z);
+            generated = alpha_generate_tree(accessor, treeSeed, x, y, z);
         }
+
+        current_world = nullptr;
 
         if (!generated) {
             world->setBlockWithNotify(x, y, z, blockID);
