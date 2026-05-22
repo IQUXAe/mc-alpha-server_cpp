@@ -258,26 +258,59 @@ void ChunkProviderGenerate::populate(int chunkX, int chunkZ) {
 
     WorldAccessor accessor {
         .get_block_id = [](int32_t x, int32_t y, int32_t z) -> uint8_t {
-            return current_world->getBlockId(x, y, z);
+            if (y < 0 || y >= 128) return 0;
+            Chunk* chunk = current_world->getLoadedChunkFromBlockCoords(x, z);
+            if (!chunk) return 0;
+            return chunk->getBlockID(x & 15, y, z & 15);
         },
         .set_block_id = [](int32_t x, int32_t y, int32_t z, uint8_t id) {
-            current_world->setBlock(x, y, z, id);
+            if (y < 0 || y >= 128) return;
+            Chunk* chunk = current_world->getLoadedChunkFromBlockCoords(x, z);
+            if (!chunk) return;
+            
+            uint8_t oldId = chunk->getBlockID(x & 15, y, z & 15);
+            bool placed = chunk->setBlockIDWithMetadata(x & 15, y, z & 15, id, 0);
+            if (placed) {
+                current_world->markBlockNeedsUpdate(x, y, z);
+                if (oldId > 0 && Block::blocksList[oldId])
+                    Block::blocksList[oldId]->onBlockRemoval(current_world, x, y, z);
+                if (id > 0 && Block::blocksList[id])
+                    Block::blocksList[id]->onBlockAdded(current_world, x, y, z);
+                current_world->notifyBlocksOfNeighborChange(x, y, z, id);
+            }
         },
         .get_block_meta = [](int32_t x, int32_t y, int32_t z) -> uint8_t {
-            return current_world->getBlockMetadata(x, y, z);
+            if (y < 0 || y >= 128) return 0;
+            Chunk* chunk = current_world->getLoadedChunkFromBlockCoords(x, z);
+            if (!chunk) return 0;
+            return chunk->getBlockMetadata(x & 15, y, z & 15);
         },
         .set_block_meta = [](int32_t x, int32_t y, int32_t z, uint8_t meta) {
-            current_world->setBlockMetadata(x, y, z, meta);
+            if (y < 0 || y >= 128) return;
+            Chunk* chunk = current_world->getLoadedChunkFromBlockCoords(x, z);
+            if (!chunk) return;
+            
+            uint8_t id = chunk->getBlockID(x & 15, y, z & 15);
+            chunk->setBlockMetadata(x & 15, y, z & 15, meta);
+            chunk->isModified = true;
+            
+            current_world->markBlockNeedsUpdate(x, y, z);
+            current_world->notifyBlocksOfNeighborChange(x, y, z, id);
         },
         .allows_attachment = [](int32_t x, int32_t y, int32_t z) -> bool {
-            int id = current_world->getBlockId(x, y, z);
+            if (y < 0 || y >= 128) return false;
+            Chunk* chunk = current_world->getLoadedChunkFromBlockCoords(x, z);
+            if (!chunk) return false;
+            int id = chunk->getBlockID(x & 15, y, z & 15);
             return id >= 0 && id < 256 && Block::allowsAttachmentArr[id];
         },
         .is_block_solid = [](int32_t x, int32_t y, int32_t z) -> bool {
-            return current_world->isBlockSolid(x, y, z);
+            return current_world->isBlockSolidNoChunkLoad(x, y, z);
         },
         .get_height_value = [](int32_t x, int32_t z) -> int32_t {
-            return current_world->getHeightValue(x, z);
+            Chunk* chunk = current_world->getLoadedChunkFromBlockCoords(x, z);
+            if (!chunk) return 0;
+            return chunk->getHeightValue(x & 15, z & 15);
         }
     };
 
