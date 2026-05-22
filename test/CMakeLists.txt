@@ -13,16 +13,15 @@ file(GLOB TEST_FILES "*.cpp")
 
 add_executable(test_alpha_server ${TEST_FILES} ${TEST_SOURCES})
 
-target_include_directories(test_alpha_server PRIVATE ../src ${ZSTD_INCLUDE_DIRS})
+target_include_directories(test_alpha_server PRIVATE ../src ../rust/alpha_bridge)
 target_compile_definitions(test_alpha_server PRIVATE
     TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 target_link_libraries(test_alpha_server PRIVATE
     GTest::gtest_main
-    ZLIB::ZLIB
     Threads::Threads
     ${LEVELDB_LIBRARY}
-    ${ZSTD_LINK_LIB}
+    alpha_rust_bridge gcc_s util rt dl c m
 )
 
 target_compile_options(test_alpha_server PRIVATE

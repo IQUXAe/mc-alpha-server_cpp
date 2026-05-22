@@ -3,7 +3,7 @@ project(alpha_server LANGUAGES CXX)
 
 include(CheckIPOSupported)
 
-option(ALPHA_ENABLE_RUST "Build and link the optional Rust bridge crate" OFF)
+# Rust bridge integration is mandatory and always compiled
 
 # Optional clang-tidy static analysis (compile-time code quality checks)
 option(CLANG_TIDY "Run clang-tidy during compilation" OFF)
@@ -22,19 +22,8 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 find_library(LEVELDB_LIBRARY NAMES leveldb REQUIRED)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(ZSTD REQUIRED libzstd)
-
-# Prefer static zstd to avoid runtime dependency
-find_library(ZSTD_STATIC_LIB NAMES libzstd.a zstd)
-if(ZSTD_STATIC_LIB)
-    set(ZSTD_LINK_LIB ${ZSTD_STATIC_LIB})
-else()
-    set(ZSTD_LINK_LIB ${ZSTD_LIBRARIES})
-endif()
 
 file(GLOB_RECURSE SOURCES "src/*.cpp")
 file(GLOB_RECURSE HEADERS "src/*.h")
@@ -42,8 +31,8 @@ list(FILTER SOURCES EXCLUDE REGEX ".*main\\.cpp$")
 
 add_executable(alpha_server ${SOURCES} src/main.cpp ${HEADERS})
 
-target_link_libraries(alpha_server PRIVATE ZLIB::ZLIB Threads::Threads ${LEVELDB_LIBRARY} ${ZSTD_LINK_LIB})
-target_include_directories(alpha_server PRIVATE src ${ZSTD_INCLUDE_DIRS})
+target_link_libraries(alpha_server PRIVATE Threads::Threads ${LEVELDB_LIBRARY})
+target_include_directories(alpha_server PRIVATE src)
 
 check_ipo_supported(RESULT IPO_SUPPORTED OUTPUT IPO_ERROR)
 if(IPO_SUPPORTED)
@@ -96,19 +85,23 @@ if(BUILD_TESTS)
     endif()
 endif()
 
-if(ALPHA_ENABLE_RUST)
-    set(RUST_BRIDGE_LIB "${CMAKE_CURRENT_SOURCE_DIR}/rust/alpha_bridge/target/release/libalpha_bridge.a")
-    if(NOT EXISTS "${RUST_BRIDGE_LIB}")
-        message(FATAL_ERROR "Rust bridge enabled, but ${RUST_BRIDGE_LIB} was not found. Build it first with cargo.")
-    endif()
+set(RUST_BRIDGE_LIB "${CMAKE_CURRENT_SOURCE_DIR}/rust/alpha_bridge/target/release/libalpha_bridge.a")
 
-    add_library(alpha_rust_bridge STATIC IMPORTED GLOBAL)
-    set_target_properties(alpha_rust_bridge PROPERTIES
-        IMPORTED_LOCATION "${RUST_BRIDGE_LIB}"
-    )
+# Custom target to compile Rust crate via Cargo automatically
+add_custom_target(build_rust_bridge
+    COMMAND cargo build --release
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/rust/alpha_bridge"
+    BYPRODUCTS "${RUST_BRIDGE_LIB}"
+    COMMENT "Compiling alpha_bridge Rust crate..."
+)
 
-    target_compile_definitions(alpha_server PRIVATE ALPHA_ENABLE_RUST=1)
-    target_include_directories(alpha_server PRIVATE rust/alpha_bridge)
-    target_link_libraries(alpha_server PRIVATE alpha_rust_bridge gcc_s util rt dl c m)
-    message(STATUS "Rust bridge integration is enabled.")
-endif()
+add_library(alpha_rust_bridge STATIC IMPORTED GLOBAL)
+set_target_properties(alpha_rust_bridge PROPERTIES
+    IMPORTED_LOCATION "${RUST_BRIDGE_LIB}"
+)
+add_dependencies(alpha_rust_bridge build_rust_bridge)
+
+target_compile_definitions(alpha_server PRIVATE ALPHA_ENABLE_RUST=1)
+target_include_directories(alpha_server PRIVATE rust/alpha_bridge)
+target_link_libraries(alpha_server PRIVATE alpha_rust_bridge gcc_s util rt dl c m)
+message(STATUS "Rust bridge integration is enabled and automated.")
