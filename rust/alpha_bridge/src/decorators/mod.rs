@@ -147,7 +147,7 @@ pub unsafe extern "C" fn alpha_decorate_chunk(
     }
 
     // --- Trees ---
-    let var11d = 0.25;
+    let var11d = 0.5;
     let noise_val = if !noise_gen_713.is_null() {
         (*noise_gen_713).func_647_a((var4 as f64) * var11d, (var5 as f64) * var11d)
     } else {
@@ -182,16 +182,28 @@ pub unsafe extern "C" fn alpha_decorate_chunk(
         use_big_tree = true;
     }
 
+    let mut big_tree_gen = if use_big_tree {
+        let mut bt = WorldGenBigTree::new();
+        bt.func_420_a(1.0, 1.0, 1.0);
+        Some(bt)
+    } else {
+        None
+    };
+    let mut normal_tree_gen = if !use_big_tree {
+        Some(WorldGenTrees::new())
+    } else {
+        None
+    };
+
     for _ in 0..var14t {
         let tx = var4 + rand.next_int_bound(16) + 8;
         let tz = var5 + rand.next_int_bound(16) + 8;
         let ty = (accessor.get_height_value)(tx, tz);
-        if use_big_tree {
-            let mut big_tree = WorldGenBigTree::new();
+        if let Some(ref mut big_tree) = big_tree_gen {
             big_tree.func_420_a(1.0, 1.0, 1.0);
             big_tree.generate(&accessor, &mut rand, tx, ty, tz);
-        } else {
-            WorldGenTrees::new().generate(&accessor, &mut rand, tx, ty, tz);
+        } else if let Some(ref mut normal_tree) = normal_tree_gen {
+            normal_tree.generate(&accessor, &mut rand, tx, ty, tz);
         }
     }
 
