@@ -629,6 +629,17 @@ void NetServerHandler::handleCommand(const std::string& msg) {
         entity->motionX = entity->motionY = entity->motionZ = 0.0;
         mcServer_->worldMngr->spawnEntityInWorld(std::move(entity));
         sendPacket(std::make_unique<Packet3Chat>("Gave " + std::to_string(count) + "x " + std::to_string(itemId)));
+    } else if (cmd == "tp") {
+        // /tp <x> <y> <z>
+        if (args.size() < 4) {
+            sendPacket(std::make_unique<Packet3Chat>("Usage: /tp <x> <y> <z>"));
+            return;
+        }
+        double tx = std::stod(args[1]);
+        double ty = std::stod(args[2]);
+        double tz = std::stod(args[3]);
+        teleport(tx, ty, tz, player_->rotationYaw, player_->rotationPitch);
+        sendPacket(std::make_unique<Packet3Chat>("Teleported to " + std::to_string(tx) + ", " + std::to_string(ty) + ", " + std::to_string(tz)));
     } else {
         sendPacket(std::make_unique<Packet3Chat>("Unknown command: " + cmd));
     }
