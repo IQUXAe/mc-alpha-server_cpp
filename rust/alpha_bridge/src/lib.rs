@@ -443,6 +443,9 @@ pub mod biome;
 pub mod density;
 pub mod caves;
 pub mod decorators;
+pub mod nbt;
+pub mod chunk_loader;
+pub mod network;
 
 
 use crate::random::JavaRandom;

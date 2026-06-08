@@ -210,6 +210,137 @@ bool alpha_generate_big_tree(
     int32_t z
 );
 
+// Opaque types for NBT
+typedef struct NbtCompound NbtCompound;
+typedef struct NbtList NbtList;
+
+// NBT FFI Functions
+NbtCompound* alpha_nbt_compound_create();
+void alpha_nbt_compound_free(NbtCompound* ptr);
+void alpha_nbt_compound_set_byte(NbtCompound* comp, const char* name, int8_t val);
+void alpha_nbt_compound_set_short(NbtCompound* comp, const char* name, int16_t val);
+void alpha_nbt_compound_set_int(NbtCompound* comp, const char* name, int32_t val);
+void alpha_nbt_compound_set_long(NbtCompound* comp, const char* name, int64_t val);
+void alpha_nbt_compound_set_float(NbtCompound* comp, const char* name, float val);
+void alpha_nbt_compound_set_double(NbtCompound* comp, const char* name, double val);
+void alpha_nbt_compound_set_string(NbtCompound* comp, const char* name, const char* val);
+void alpha_nbt_compound_set_byte_array(NbtCompound* comp, const char* name, const uint8_t* val_ptr, size_t val_len);
+void alpha_nbt_compound_set_compound(NbtCompound* comp, const char* name, NbtCompound* child);
+void alpha_nbt_compound_set_list(NbtCompound* comp, const char* name, NbtList* child);
+
+uint8_t alpha_nbt_compound_get_tag_type(const NbtCompound* comp, const char* name);
+int8_t alpha_nbt_compound_get_byte(const NbtCompound* comp, const char* name);
+int16_t alpha_nbt_compound_get_short(const NbtCompound* comp, const char* name);
+int32_t alpha_nbt_compound_get_int(const NbtCompound* comp, const char* name);
+int64_t alpha_nbt_compound_get_long(const NbtCompound* comp, const char* name);
+float alpha_nbt_compound_get_float(const NbtCompound* comp, const char* name);
+double alpha_nbt_compound_get_double(const NbtCompound* comp, const char* name);
+AlphaBuffer alpha_nbt_compound_get_string(const NbtCompound* comp, const char* name);
+AlphaBuffer alpha_nbt_compound_get_byte_array(const NbtCompound* comp, const char* name);
+NbtCompound* alpha_nbt_compound_get_compound(const NbtCompound* comp, const char* name);
+NbtList* alpha_nbt_compound_get_list(const NbtCompound* comp, const char* name);
+AlphaBuffer alpha_nbt_compound_get_keys(const NbtCompound* comp);
+
+NbtList* alpha_nbt_list_create(uint8_t tag_type);
+void alpha_nbt_list_free(NbtList* ptr);
+uint8_t alpha_nbt_list_get_type(const NbtList* list);
+size_t alpha_nbt_list_get_size(const NbtList* list);
+
+void alpha_nbt_list_add_byte(NbtList* list, int8_t val);
+void alpha_nbt_list_add_short(NbtList* list, int16_t val);
+void alpha_nbt_list_add_int(NbtList* list, int32_t val);
+void alpha_nbt_list_add_long(NbtList* list, int64_t val);
+void alpha_nbt_list_add_float(NbtList* list, float val);
+void alpha_nbt_list_add_double(NbtList* list, double val);
+void alpha_nbt_list_add_string(NbtList* list, const char* val);
+void alpha_nbt_list_add_byte_array(NbtList* list, const uint8_t* val_ptr, size_t val_len);
+void alpha_nbt_list_add_compound(NbtList* list, NbtCompound* child);
+void alpha_nbt_list_add_list(NbtList* list, NbtList* child);
+
+int8_t alpha_nbt_list_get_byte(const NbtList* list, size_t idx);
+int16_t alpha_nbt_list_get_short(const NbtList* list, size_t idx);
+int32_t alpha_nbt_list_get_int(const NbtList* list, size_t idx);
+int64_t alpha_nbt_list_get_long(const NbtList* list, size_t idx);
+float alpha_nbt_list_get_float(const NbtList* list, size_t idx);
+double alpha_nbt_list_get_double(const NbtList* list, size_t idx);
+AlphaBuffer alpha_nbt_list_get_string(const NbtList* list, size_t idx);
+AlphaBuffer alpha_nbt_list_get_byte_array(const NbtList* list, size_t idx);
+NbtCompound* alpha_nbt_list_get_compound(const NbtList* list, size_t idx);
+NbtList* alpha_nbt_list_get_list(const NbtList* list, size_t idx);
+
+AlphaBuffer alpha_nbt_compound_serialize_root(const NbtCompound* comp, const char* name);
+NbtCompound* alpha_nbt_compound_deserialize_root(const uint8_t* data, size_t len, char** out_name, size_t* out_bytes_read);
+void alpha_nbt_free_name(char* name);
+
+// ChunkLoader FFI
+typedef struct AlphaChunkData {
+    int32_t x_pos;
+    int32_t z_pos;
+    int64_t last_update;
+    uint8_t* blocks;
+    size_t blocks_len;
+    uint8_t* data;
+    size_t data_len;
+    uint8_t* sky_light;
+    size_t sky_light_len;
+    uint8_t* block_light;
+    size_t block_light_len;
+    uint8_t* height_map;
+    size_t height_map_len;
+    bool terrain_populated;
+    NbtCompound** tile_entities;
+    size_t tile_entities_count;
+    NbtCompound** items;
+    size_t items_count;
+    NbtCompound** animals;
+    size_t animals_count;
+    NbtCompound** monsters;
+    size_t monsters_count;
+    NbtCompound** boats;
+    size_t boats_count;
+} AlphaChunkData;
+
+void alpha_chunk_data_free(AlphaChunkData* data);
+bool alpha_chunk_loader_save(
+    const char* world_dir,
+    bool create_dirs,
+    const AlphaChunkData* chunk_data
+);
+AlphaChunkData* alpha_chunk_loader_load(
+    const char* world_dir,
+    int chunk_x,
+    int chunk_z
+);
+
+// RustNetworkManager FFI
+typedef struct RustNetworkManager RustNetworkManager;
+
+RustNetworkManager* rust_network_manager_create(int socket_fd);
+void rust_network_manager_destroy(RustNetworkManager* manager);
+void rust_network_manager_send(
+    RustNetworkManager* manager,
+    const uint8_t* data,
+    size_t len,
+    bool is_chunk_data
+);
+bool rust_network_manager_poll(
+    RustNetworkManager* manager,
+    uint8_t* out_packet_id,
+    uint8_t** out_payload,
+    size_t* out_payload_len
+);
+void rust_network_manager_free_buffer(uint8_t* ptr, size_t len);
+void rust_network_manager_shutdown(RustNetworkManager* manager, const char* reason);
+bool rust_network_manager_is_running(RustNetworkManager* manager);
+bool rust_network_manager_is_terminating(RustNetworkManager* manager);
+void rust_network_manager_get_termination_reason(
+    RustNetworkManager* manager,
+    char* out_buf,
+    size_t max_len
+);
+size_t rust_network_manager_get_send_queue_length(RustNetworkManager* manager);
+void rust_network_manager_server_shutdown(RustNetworkManager* manager);
+
 #ifdef __cplusplus
 }
 #endif
