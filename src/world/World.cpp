@@ -1252,36 +1252,26 @@ Chunk* World::getChunk(int chunkX, int chunkZ, bool generate) {
 
     // Try loading from Legacy Gzip storage
     if (useLegacyStorage_ && chunkLoader_) {
-        std::filesystem::path chunkFile = chunkLoader_->getChunkFile(chunkX, chunkZ);
-        if (std::filesystem::exists(chunkFile)) {
-            std::ifstream in(chunkFile, std::ios::binary);
-            if (in.is_open()) {
-                std::vector<uint8_t> data((std::istreambuf_iterator<char>(in)),
-                                               std::istreambuf_iterator<char>());
-                in.close();
-                
-                auto chunk = std::make_unique<Chunk>(this, chunkX, chunkZ);
-                decompressChunkData(chunk.get(), data);
-                Chunk* ptr = chunk.get();
-                {
-                    std::unique_lock lock(chunksMutex_);
-                    chunks_[key] = std::move(chunk);
-                }
-                // Spawn EntityItems that were frozen while chunk was unloaded
-                for (const auto& ed : ptr->pendingItems) {
-                    auto item = std::make_unique<EntityItem>(ed.itemID, ed.count, ed.metadata);
-                    item->setPosition(ed.posX, ed.posY, ed.posZ);
-                    item->age         = ed.age;
-                    item->pickupDelay = ed.pickupDelay;
-                    spawnEntityInWorld(std::move(item));
-                }
-                ptr->pendingItems.clear();
-                restorePendingAnimals(this, ptr);
-                restorePendingMonsters(this, ptr);
-                restorePendingBoats(this, ptr);
-                scheduleTickOnLoadForChunk(this, ptr);
-                return ptr;
+        Chunk* loaded = chunkLoader_->loadChunk(this, chunkX, chunkZ);
+        if (loaded) {
+            {
+                std::unique_lock lock(chunksMutex_);
+                chunks_[key] = std::unique_ptr<Chunk>(loaded);
             }
+            // Spawn EntityItems that were frozen while chunk was unloaded
+            for (const auto& ed : loaded->pendingItems) {
+                auto item = std::make_unique<EntityItem>(ed.itemID, ed.count, ed.metadata);
+                item->setPosition(ed.posX, ed.posY, ed.posZ);
+                item->age         = ed.age;
+                item->pickupDelay = ed.pickupDelay;
+                spawnEntityInWorld(std::move(item));
+            }
+            loaded->pendingItems.clear();
+            restorePendingAnimals(this, loaded);
+            restorePendingMonsters(this, loaded);
+            restorePendingBoats(this, loaded);
+            scheduleTickOnLoadForChunk(this, loaded);
+            return loaded;
         }
     } else if (db_) {
         std::string val;
@@ -2608,26 +2598,13 @@ void World::saveChunkImmediate(Chunk* chunk) {
     if (!useLegacyStorage_ && !db_) return;
     if (useLegacyStorage_ && !chunkLoader_) return;
     
-    uint64_t key = getChunkKey(chunk->xPosition, chunk->zPosition);
-    auto data = compressChunkData(chunk);
-    
-    if (!data.empty()) {
-        if (useLegacyStorage_) {
-            std::filesystem::path chunkFile = chunkLoader_->getChunkFile(chunk->xPosition, chunk->zPosition);
-            try {
-                std::filesystem::create_directories(chunkFile.parent_path());
-                std::ofstream out(chunkFile, std::ios::binary);
-                if (out.is_open()) {
-                    out.write(reinterpret_cast<const char*>(data.data()), data.size());
-                    out.close();
-                    chunk->isModified = false;
-                } else {
-                    Logger::severe("Immediate legacy save failed: could not open file {}", chunkFile.string());
-                }
-            } catch (const std::exception& e) {
-                Logger::severe("Immediate legacy save failed: {}", e.what());
-            }
-        } else if (db_) {
+    if (useLegacyStorage_) {
+        chunkLoader_->saveChunk(this, chunk);
+    } else if (db_) {
+        uint64_t key = getChunkKey(chunk->xPosition, chunk->zPosition);
+        auto data = compressChunkData(chunk);
+        
+        if (!data.empty()) {
             leveldb::Slice keySlice(reinterpret_cast<const char*>(&key), sizeof(uint64_t)); // NOLINT: leveldb API
             leveldb::Slice valSlice(reinterpret_cast<const char*>(data.data()), data.size()); // NOLINT: leveldb API
             auto status = db_->Put(leveldb::WriteOptions(), keySlice, valSlice);

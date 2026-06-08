@@ -71,6 +71,7 @@ class ChunkProviderGenerate;
 
 class World {
 public:
+    friend class ChunkLoader;
     int spawnX = 0;
     int spawnY = 64;
     int spawnZ = 0;
