@@ -225,3 +225,17 @@ TEST(NBTTest, ListOfCompounds) {
         EXPECT_EQ(rc->getInt("index"), i);
     }
 }
+
+TEST(NBTTest, IteratorInvalidationFix) {
+    auto comp = std::make_shared<NBTCompound>();
+    comp->setString("Items", "some_value");
+    
+    auto it = comp->tags.find("Items");
+    ASSERT_NE(it, comp->tags.end());
+    
+    auto end_it = comp->tags.end();
+    EXPECT_NE(it, end_it);
+    EXPECT_EQ(it->first, "Items");
+    EXPECT_EQ(std::dynamic_pointer_cast<NBTString>(it->second)->value, "some_value");
+}
+
