@@ -102,158 +102,166 @@ public:
     }
 };
 
-class NBTList : public NBTTag {
+// Forward declarations of core wrapper types and proxies
+class NBTCompound;
+class NBTList;
+class NBTCompoundTagsProxy;
+class ProxyElement;
+class NBTListTagsProxy;
+
+class ProxyElement {
+private:
+    NBTCompound* parent_;
+    std::string key_;
 public:
-    std::vector<std::shared_ptr<NBTTag>> tags;
-    NBTTagType tagType = NBTTagType::TAG_End;
-    
-    NBTTagType getType() const override { return NBTTagType::TAG_List; }
-    
-    // Java NBTTagList.writeTagContents: tagType + count + each element's contents only (no type/name)
-    void writeContents(ByteBuffer& buf) const override {
-        NBTTagType actualType = tags.empty() ? NBTTagType::TAG_Byte : tagType;
-        buf.writeUByte(static_cast<uint8_t>(actualType));
-        buf.writeInt(static_cast<int32_t>(tags.size()));
-        for (const auto& tag : tags) {
-            tag->writeContents(buf);
-        }
-    }
+    ProxyElement(NBTCompound* parent, std::string key) : parent_(parent), key_(std::move(key)) {}
+    ProxyElement& operator=(const std::shared_ptr<NBTTag>& tag);
+    operator std::shared_ptr<NBTTag>() const;
 };
 
-// Forward declarations of helper conversion functions
-class NBTCompound;
-inline NbtCompound* cpp_to_rust_compound(const NBTCompound& comp);
-inline NbtList* cpp_to_rust_list(const NBTList& list);
-inline std::shared_ptr<NBTCompound> rust_to_cpp_compound(const NbtCompound* r_comp);
-inline std::shared_ptr<NBTList> rust_to_cpp_list(const NbtList* r_list);
+class NBTCompoundTagsProxy {
+private:
+    NBTCompound* parent_;
+    mutable std::map<std::string, std::shared_ptr<NBTTag>> cache_;
+    void populateCache() const;
+public:
+    explicit NBTCompoundTagsProxy(NBTCompound* parent) : parent_(parent) {}
+    ProxyElement operator[](const std::string& key) {
+        return ProxyElement(parent_, key);
+    }
+    std::map<std::string, std::shared_ptr<NBTTag>>::iterator find(const std::string& key);
+    std::map<std::string, std::shared_ptr<NBTTag>>::const_iterator find(const std::string& key) const;
+    std::map<std::string, std::shared_ptr<NBTTag>>::iterator end();
+    std::map<std::string, std::shared_ptr<NBTTag>>::const_iterator end() const;
+    std::map<std::string, std::shared_ptr<NBTTag>>::iterator begin();
+    std::map<std::string, std::shared_ptr<NBTTag>>::const_iterator begin() const;
+    bool empty() const;
+    size_t size() const;
+};
+
+class NBTListTagsProxy {
+private:
+    NBTList* parent_;
+    mutable std::vector<std::shared_ptr<NBTTag>> cache_;
+    void populateCache() const;
+public:
+    explicit NBTListTagsProxy(NBTList* parent) : parent_(parent) {}
+    void push_back(const std::shared_ptr<NBTTag>& tag);
+    size_t size() const;
+    bool empty() const;
+    std::shared_ptr<NBTTag> operator[](size_t idx) const;
+    NBTListTagsProxy& operator=(const std::vector<std::shared_ptr<NBTTag>>& vec);
+    std::vector<std::shared_ptr<NBTTag>>::iterator begin();
+    std::vector<std::shared_ptr<NBTTag>>::const_iterator begin() const;
+    std::vector<std::shared_ptr<NBTTag>>::iterator end();
+    std::vector<std::shared_ptr<NBTTag>>::const_iterator end() const;
+};
 
 class NBTCompound : public NBTTag {
 public:
-    std::map<std::string, std::shared_ptr<NBTTag>> tags;
+    NbtCompound* rustPtr_ = nullptr;
+    NBTCompoundTagsProxy tags;
+
+    NBTCompound() : rustPtr_(alpha_nbt_compound_create()), tags(this) {}
+    explicit NBTCompound(NbtCompound* ptr) : rustPtr_(ptr ? ptr : alpha_nbt_compound_create()), tags(this) {}
+
+    ~NBTCompound() override {
+        if (rustPtr_) {
+            alpha_nbt_compound_free(rustPtr_);
+            rustPtr_ = nullptr;
+        }
+    }
+
+    NBTCompound(const NBTCompound& other) : tags(this) {
+        rustPtr_ = alpha_nbt_compound_clone(other.rustPtr_);
+    }
+
+    NBTCompound& operator=(const NBTCompound& other) {
+        if (this != &other) {
+            if (rustPtr_) {
+                alpha_nbt_compound_free(rustPtr_);
+            }
+            rustPtr_ = alpha_nbt_compound_clone(other.rustPtr_);
+        }
+        return *this;
+    }
+
+    NBTCompound(NBTCompound&& other) noexcept : tags(this) {
+        rustPtr_ = other.rustPtr_;
+        other.rustPtr_ = nullptr;
+    }
+
+    NBTCompound& operator=(NBTCompound&& other) noexcept {
+        if (this != &other) {
+            if (rustPtr_) {
+                alpha_nbt_compound_free(rustPtr_);
+            }
+            rustPtr_ = other.rustPtr_;
+            other.rustPtr_ = nullptr;
+        }
+        return *this;
+    }
+
     NBTTagType getType() const override { return NBTTagType::TAG_Compound; }
 
-    void setByte(const std::string& name, int8_t v) { tags[name] = std::make_shared<NBTByte>(v); }
-    void setShort(const std::string& name, int16_t v) { tags[name] = std::make_shared<NBTShort>(v); }
-    void setInt(const std::string& name, int32_t v) { tags[name] = std::make_shared<NBTInt>(v); }
-    void setLong(const std::string& name, int64_t v) { tags[name] = std::make_shared<NBTLong>(v); }
-    void setFloat(const std::string& name, float v) { tags[name] = std::make_shared<NBTFloat>(v); }
-    void setDouble(const std::string& name, double v) { tags[name] = std::make_shared<NBTDouble>(v); }
-    void setString(const std::string& name, std::string v) { tags[name] = std::make_shared<NBTString>(std::move(v)); }
-    void setByteArray(const std::string& name, std::vector<uint8_t> v) { tags[name] = std::make_shared<NBTByteArray>(std::move(v)); }
-    void setCompound(const std::string& name, std::shared_ptr<NBTCompound> v) { tags[name] = v; }
-    void setList(const std::string& name, std::shared_ptr<NBTList> v) { tags[name] = v; }
-    void setBoolean(const std::string& name, bool v) { tags[name] = std::make_shared<NBTByte>(v ? 1 : 0); }
+    void setByte(const std::string& name, int8_t v) { alpha_nbt_compound_set_byte(rustPtr_, name.c_str(), v); }
+    void setShort(const std::string& name, int16_t v) { alpha_nbt_compound_set_short(rustPtr_, name.c_str(), v); }
+    void setInt(const std::string& name, int32_t v) { alpha_nbt_compound_set_int(rustPtr_, name.c_str(), v); }
+    void setLong(const std::string& name, int64_t v) { alpha_nbt_compound_set_long(rustPtr_, name.c_str(), v); }
+    void setFloat(const std::string& name, float v) { alpha_nbt_compound_set_float(rustPtr_, name.c_str(), v); }
+    void setDouble(const std::string& name, double v) { alpha_nbt_compound_set_double(rustPtr_, name.c_str(), v); }
+    void setString(const std::string& name, std::string v) { alpha_nbt_compound_set_string(rustPtr_, name.c_str(), v.c_str()); }
+    void setByteArray(const std::string& name, std::vector<uint8_t> v) { alpha_nbt_compound_set_byte_array(rustPtr_, name.c_str(), v.data(), v.size()); }
+    void setByteArray(const std::string& name, const uint8_t* val_ptr, size_t val_len) { alpha_nbt_compound_set_byte_array(rustPtr_, name.c_str(), val_ptr, val_len); }
+    void setCompound(const std::string& name, std::shared_ptr<NBTCompound> v);
+    void setList(const std::string& name, std::shared_ptr<NBTList> v);
+    void setBoolean(const std::string& name, bool v) { alpha_nbt_compound_set_byte(rustPtr_, name.c_str(), v ? 1 : 0); }
 
-    int8_t getByte(const std::string& name) const {
-        auto it = tags.find(name);
-        if (it != tags.end()) {
-            auto t = std::dynamic_pointer_cast<NBTByte>(it->second);
-            if (t) return t->value;
-        }
-        return 0;
-    }
-
-    int16_t getShort(const std::string& name) const {
-        auto it = tags.find(name);
-        if (it != tags.end()) {
-            auto t = std::dynamic_pointer_cast<NBTShort>(it->second);
-            if (t) return t->value;
-        }
-        return 0;
-    }
-
-    int32_t getInt(const std::string& name) const {
-        auto it = tags.find(name);
-        if (it != tags.end()) {
-            auto t = std::dynamic_pointer_cast<NBTInt>(it->second);
-            if (t) return t->value;
-        }
-        return 0;
-    }
-
-    int64_t getLong(const std::string& name) const {
-        auto it = tags.find(name);
-        if (it != tags.end()) {
-            auto t = std::dynamic_pointer_cast<NBTLong>(it->second);
-            if (t) return t->value;
-        }
-        return 0;
-    }
-
-    float getFloat(const std::string& name) const {
-        auto it = tags.find(name);
-        if (it != tags.end()) {
-            auto t = std::dynamic_pointer_cast<NBTFloat>(it->second);
-            if (t) return t->value;
-        }
-        return 0.0f;
-    }
-
-    double getDouble(const std::string& name) const {
-        auto it = tags.find(name);
-        if (it != tags.end()) {
-            auto t = std::dynamic_pointer_cast<NBTDouble>(it->second);
-            if (t) return t->value;
-        }
-        return 0.0;
-    }
-
+    int8_t getByte(const std::string& name) const { return alpha_nbt_compound_get_byte(rustPtr_, name.c_str()); }
+    int16_t getShort(const std::string& name) const { return alpha_nbt_compound_get_short(rustPtr_, name.c_str()); }
+    int32_t getInt(const std::string& name) const { return alpha_nbt_compound_get_int(rustPtr_, name.c_str()); }
+    int64_t getLong(const std::string& name) const { return alpha_nbt_compound_get_long(rustPtr_, name.c_str()); }
+    float getFloat(const std::string& name) const { return alpha_nbt_compound_get_float(rustPtr_, name.c_str()); }
+    double getDouble(const std::string& name) const { return alpha_nbt_compound_get_double(rustPtr_, name.c_str()); }
     std::vector<uint8_t> getByteArray(const std::string& name) const {
-        auto it = tags.find(name);
-        if (it != tags.end()) {
-            auto t = std::dynamic_pointer_cast<NBTByteArray>(it->second);
-            if (t) return t->value;
+        AlphaBuffer buf = alpha_nbt_compound_get_byte_array(rustPtr_, name.c_str());
+        std::vector<uint8_t> v;
+        if (buf.data) {
+            v.assign(buf.data, buf.data + buf.len);
+            alpha_buffer_free(buf);
         }
-        return {};
+        return v;
     }
-
     std::string getString(const std::string& name) const {
-        auto it = tags.find(name);
-        if (it != tags.end()) {
-            auto t = std::dynamic_pointer_cast<NBTString>(it->second);
-            if (t) return t->value;
+        AlphaBuffer buf = alpha_nbt_compound_get_string(rustPtr_, name.c_str());
+        std::string s;
+        if (buf.data) {
+            s = reinterpret_cast<const char*>(buf.data);
+            alpha_buffer_free(buf);
         }
-        return {};
+        return s;
     }
-
-    std::shared_ptr<NBTCompound> getCompound(const std::string& name) const {
-        auto it = tags.find(name);
-        if (it != tags.end()) {
-            return std::dynamic_pointer_cast<NBTCompound>(it->second);
-        }
-        return nullptr;
-    }
-
-    std::shared_ptr<NBTList> getList(const std::string& name) const {
-        auto it = tags.find(name);
-        if (it != tags.end()) {
-            return std::dynamic_pointer_cast<NBTList>(it->second);
-        }
-        return nullptr;
-    }
+    std::shared_ptr<NBTCompound> getCompound(const std::string& name) const;
+    std::shared_ptr<NBTList> getList(const std::string& name) const;
 
     void writeContents(ByteBuffer& buf) const override {
-        NbtCompound* r_comp = cpp_to_rust_compound(*this);
-        AlphaBuffer serialized = alpha_nbt_compound_serialize_root(r_comp, "");
+        AlphaBuffer serialized = alpha_nbt_compound_serialize_root(rustPtr_, "");
         if (serialized.data && serialized.len >= 3) {
             buf.writeBytes(serialized.data + 3, serialized.len - 3);
         }
         if (serialized.data) {
             alpha_buffer_free(serialized);
         }
-        alpha_nbt_compound_free(r_comp);
     }
 
     void write(ByteBuffer& buf) const { writeContents(buf); }
 
     void writeRoot(ByteBuffer& buf, const std::string& rootName) const {
-        NbtCompound* r_comp = cpp_to_rust_compound(*this);
-        AlphaBuffer serialized = alpha_nbt_compound_serialize_root(r_comp, rootName.c_str());
+        AlphaBuffer serialized = alpha_nbt_compound_serialize_root(rustPtr_, rootName.c_str());
         if (serialized.data) {
             buf.writeBytes(serialized.data, serialized.len);
             alpha_buffer_free(serialized);
         }
-        alpha_nbt_compound_free(r_comp);
     }
 
     static std::shared_ptr<NBTTag> readTag(ByteBuffer& buf, NBTTagType type);
@@ -273,9 +281,10 @@ public:
         size_t bytes_read = 0;
         NbtCompound* r_comp = alpha_nbt_compound_deserialize_root(temp_buf.data(), temp_buf.size(), &out_name, &bytes_read);
         if (r_comp) {
-            auto cpp_comp = rust_to_cpp_compound(r_comp);
-            this->tags = std::move(cpp_comp->tags);
-            alpha_nbt_compound_free(r_comp);
+            if (rustPtr_) {
+                alpha_nbt_compound_free(rustPtr_);
+            }
+            rustPtr_ = r_comp;
             if (out_name) alpha_nbt_free_name(out_name);
 
             if (bytes_read >= 3) {
@@ -295,14 +304,385 @@ public:
         NbtCompound* r_comp = alpha_nbt_compound_deserialize_root(buf.data.data() + buf.readPos, remaining, &out_name, &bytes_read);
         if (!r_comp) return nullptr;
 
-        auto comp = rust_to_cpp_compound(r_comp);
-        alpha_nbt_compound_free(r_comp);
+        auto comp = std::make_shared<NBTCompound>(r_comp);
         if (out_name) alpha_nbt_free_name(out_name);
 
         buf.readPos += bytes_read;
         return comp;
     }
+
+    std::shared_ptr<NBTTag> readTagFromRust(const std::string& name, uint8_t type) const;
 };
+
+class NBTList : public NBTTag {
+public:
+    NbtList* rustPtr_ = nullptr;
+    NBTListTagsProxy tags;
+    NBTTagType tagType = NBTTagType::TAG_End;
+
+    NBTList() : rustPtr_(alpha_nbt_list_create(0)), tags(this) {}
+    explicit NBTList(NbtList* ptr) : rustPtr_(ptr ? ptr : alpha_nbt_list_create(0)), tags(this) {
+        tagType = static_cast<NBTTagType>(alpha_nbt_list_get_type(rustPtr_));
+    }
+
+    ~NBTList() override {
+        if (rustPtr_) {
+            alpha_nbt_list_free(rustPtr_);
+            rustPtr_ = nullptr;
+        }
+    }
+
+    NBTList(const NBTList& other) : tags(this) {
+        rustPtr_ = alpha_nbt_list_clone(other.rustPtr_);
+        tagType = other.tagType;
+    }
+
+    NBTList& operator=(const NBTList& other) {
+        if (this != &other) {
+            if (rustPtr_) {
+                alpha_nbt_list_free(rustPtr_);
+            }
+            rustPtr_ = alpha_nbt_list_clone(other.rustPtr_);
+            tagType = other.tagType;
+        }
+        return *this;
+    }
+
+    NBTList(NBTList&& other) noexcept : tags(this) {
+        rustPtr_ = other.rustPtr_;
+        tagType = other.tagType;
+        other.rustPtr_ = nullptr;
+    }
+
+    NBTList& operator=(NBTList&& other) noexcept {
+        if (this != &other) {
+            if (rustPtr_) {
+                alpha_nbt_list_free(rustPtr_);
+            }
+            rustPtr_ = other.rustPtr_;
+            tagType = other.tagType;
+            other.rustPtr_ = nullptr;
+        }
+        return *this;
+    }
+
+    NBTTagType getType() const override { return NBTTagType::TAG_List; }
+
+    void writeContents(ByteBuffer& buf) const override {
+        NBTTagType actualType = tags.empty() ? NBTTagType::TAG_Byte : tagType;
+        buf.writeUByte(static_cast<uint8_t>(actualType));
+        buf.writeInt(static_cast<int32_t>(tags.size()));
+        for (const auto& tag : tags) {
+            tag->writeContents(buf);
+        }
+    }
+
+    std::shared_ptr<NBTTag> readTagFromRust(size_t idx, uint8_t type) const;
+    void addTagToRust(const std::shared_ptr<NBTTag>& tag);
+};
+
+// Inline implementations of setCompound and setList
+inline void NBTCompound::setCompound(const std::string& name, std::shared_ptr<NBTCompound> v) {
+    if (v) {
+        NbtCompound* cloned = alpha_nbt_compound_clone(v->rustPtr_);
+        alpha_nbt_compound_set_compound(rustPtr_, name.c_str(), cloned);
+    } else {
+        alpha_nbt_compound_remove(rustPtr_, name.c_str());
+    }
+}
+
+inline void NBTCompound::setList(const std::string& name, std::shared_ptr<NBTList> v) {
+    if (v) {
+        NbtList* cloned = alpha_nbt_list_clone(v->rustPtr_);
+        alpha_nbt_compound_set_list(rustPtr_, name.c_str(), cloned);
+    } else {
+        alpha_nbt_compound_remove(rustPtr_, name.c_str());
+    }
+}
+
+inline std::shared_ptr<NBTCompound> NBTCompound::getCompound(const std::string& name) const {
+    NbtCompound* child = alpha_nbt_compound_get_compound(rustPtr_, name.c_str());
+    if (!child) return nullptr;
+    return std::make_shared<NBTCompound>(child);
+}
+
+inline std::shared_ptr<NBTList> NBTCompound::getList(const std::string& name) const {
+    NbtList* child = alpha_nbt_compound_get_list(rustPtr_, name.c_str());
+    if (!child) return nullptr;
+    return std::make_shared<NBTList>(child);
+}
+
+// ProxyElement Inline Methods
+inline ProxyElement& ProxyElement::operator=(const std::shared_ptr<NBTTag>& tag) {
+    if (!tag) {
+        alpha_nbt_compound_remove(parent_->rustPtr_, key_.c_str());
+        return *this;
+    }
+    auto type = tag->getType();
+    if (type == NBTTagType::TAG_Byte) {
+        alpha_nbt_compound_set_byte(parent_->rustPtr_, key_.c_str(), std::dynamic_pointer_cast<NBTByte>(tag)->value);
+    } else if (type == NBTTagType::TAG_Short) {
+        alpha_nbt_compound_set_short(parent_->rustPtr_, key_.c_str(), std::dynamic_pointer_cast<NBTShort>(tag)->value);
+    } else if (type == NBTTagType::TAG_Int) {
+        alpha_nbt_compound_set_int(parent_->rustPtr_, key_.c_str(), std::dynamic_pointer_cast<NBTInt>(tag)->value);
+    } else if (type == NBTTagType::TAG_Long) {
+        alpha_nbt_compound_set_long(parent_->rustPtr_, key_.c_str(), std::dynamic_pointer_cast<NBTLong>(tag)->value);
+    } else if (type == NBTTagType::TAG_Float) {
+        alpha_nbt_compound_set_float(parent_->rustPtr_, key_.c_str(), std::dynamic_pointer_cast<NBTFloat>(tag)->value);
+    } else if (type == NBTTagType::TAG_Double) {
+        alpha_nbt_compound_set_double(parent_->rustPtr_, key_.c_str(), std::dynamic_pointer_cast<NBTDouble>(tag)->value);
+    } else if (type == NBTTagType::TAG_String) {
+        alpha_nbt_compound_set_string(parent_->rustPtr_, key_.c_str(), std::dynamic_pointer_cast<NBTString>(tag)->value.c_str());
+    } else if (type == NBTTagType::TAG_ByteArray) {
+        const auto& vec = std::dynamic_pointer_cast<NBTByteArray>(tag)->value;
+        alpha_nbt_compound_set_byte_array(parent_->rustPtr_, key_.c_str(), vec.data(), vec.size());
+    } else if (type == NBTTagType::TAG_Compound) {
+        auto child = std::dynamic_pointer_cast<NBTCompound>(tag);
+        NbtCompound* cloned = alpha_nbt_compound_clone(child->rustPtr_);
+        alpha_nbt_compound_set_compound(parent_->rustPtr_, key_.c_str(), cloned);
+    } else if (type == NBTTagType::TAG_List) {
+        auto child = std::dynamic_pointer_cast<NBTList>(tag);
+        NbtList* cloned = alpha_nbt_list_clone(child->rustPtr_);
+        alpha_nbt_compound_set_list(parent_->rustPtr_, key_.c_str(), cloned);
+    }
+    return *this;
+}
+
+inline ProxyElement::operator std::shared_ptr<NBTTag>() const {
+    if (!alpha_nbt_compound_has_key(parent_->rustPtr_, key_.c_str())) {
+        return nullptr;
+    }
+    uint8_t type = alpha_nbt_compound_get_tag_type(parent_->rustPtr_, key_.c_str());
+    return parent_->readTagFromRust(key_, type);
+}
+
+// NBTCompoundTagsProxy Inline Methods
+inline void NBTCompoundTagsProxy::populateCache() const {
+    cache_.clear();
+    AlphaBuffer keys_buf = alpha_nbt_compound_get_keys(parent_->rustPtr_);
+    if (keys_buf.data) {
+        const char* p = reinterpret_cast<const char*>(keys_buf.data);
+        const char* end = p + keys_buf.len;
+        while (p < end && *p != '\0') {
+            std::string key(p);
+            p += key.size() + 1;
+            uint8_t type = alpha_nbt_compound_get_tag_type(parent_->rustPtr_, key.c_str());
+            cache_[key] = parent_->readTagFromRust(key, type);
+        }
+        alpha_buffer_free(keys_buf);
+    }
+}
+
+inline std::map<std::string, std::shared_ptr<NBTTag>>::iterator NBTCompoundTagsProxy::find(const std::string& key) {
+    populateCache();
+    return cache_.find(key);
+}
+
+inline std::map<std::string, std::shared_ptr<NBTTag>>::const_iterator NBTCompoundTagsProxy::find(const std::string& key) const {
+    populateCache();
+    return cache_.find(key);
+}
+
+inline std::map<std::string, std::shared_ptr<NBTTag>>::iterator NBTCompoundTagsProxy::end() {
+    populateCache();
+    return cache_.end();
+}
+
+inline std::map<std::string, std::shared_ptr<NBTTag>>::const_iterator NBTCompoundTagsProxy::end() const {
+    populateCache();
+    return cache_.end();
+}
+
+inline std::map<std::string, std::shared_ptr<NBTTag>>::iterator NBTCompoundTagsProxy::begin() {
+    populateCache();
+    return cache_.begin();
+}
+
+inline std::map<std::string, std::shared_ptr<NBTTag>>::const_iterator NBTCompoundTagsProxy::begin() const {
+    populateCache();
+    return cache_.begin();
+}
+
+inline bool NBTCompoundTagsProxy::empty() const {
+    populateCache();
+    return cache_.empty();
+}
+
+inline size_t NBTCompoundTagsProxy::size() const {
+    populateCache();
+    return cache_.size();
+}
+
+// NBTListTagsProxy Inline Methods
+inline void NBTListTagsProxy::populateCache() const {
+    cache_.clear();
+    size_t size = alpha_nbt_list_get_size(parent_->rustPtr_);
+    uint8_t type = alpha_nbt_list_get_type(parent_->rustPtr_);
+    if (type == 0 && parent_->tagType != NBTTagType::TAG_End) {
+        type = static_cast<uint8_t>(parent_->tagType);
+        alpha_nbt_list_set_type(parent_->rustPtr_, type);
+    }
+    for (size_t i = 0; i < size; ++i) {
+        cache_.push_back(parent_->readTagFromRust(i, type));
+    }
+}
+
+inline void NBTListTagsProxy::push_back(const std::shared_ptr<NBTTag>& tag) {
+    if (!tag) return;
+    uint8_t type = alpha_nbt_list_get_type(parent_->rustPtr_);
+    if (type == 0) {
+        uint8_t new_type = static_cast<uint8_t>(tag->getType());
+        alpha_nbt_list_set_type(parent_->rustPtr_, new_type);
+        parent_->tagType = static_cast<NBTTagType>(new_type);
+    }
+    parent_->addTagToRust(tag);
+}
+
+inline size_t NBTListTagsProxy::size() const {
+    return alpha_nbt_list_get_size(parent_->rustPtr_);
+}
+
+inline bool NBTListTagsProxy::empty() const {
+    return size() == 0;
+}
+
+inline std::shared_ptr<NBTTag> NBTListTagsProxy::operator[](size_t idx) const {
+    populateCache();
+    return cache_[idx];
+}
+
+inline NBTListTagsProxy& NBTListTagsProxy::operator=(const std::vector<std::shared_ptr<NBTTag>>& vec) {
+    uint8_t type = alpha_nbt_list_get_type(parent_->rustPtr_);
+    alpha_nbt_list_free(parent_->rustPtr_);
+    parent_->rustPtr_ = alpha_nbt_list_create(type);
+    for (const auto& tag : vec) {
+        push_back(tag);
+    }
+    return *this;
+}
+
+inline std::vector<std::shared_ptr<NBTTag>>::iterator NBTListTagsProxy::begin() {
+    populateCache();
+    return cache_.begin();
+}
+
+inline std::vector<std::shared_ptr<NBTTag>>::const_iterator NBTListTagsProxy::begin() const {
+    populateCache();
+    return cache_.begin();
+}
+
+inline std::vector<std::shared_ptr<NBTTag>>::iterator NBTListTagsProxy::end() {
+    populateCache();
+    return cache_.end();
+}
+
+inline std::vector<std::shared_ptr<NBTTag>>::const_iterator NBTListTagsProxy::end() const {
+    populateCache();
+    return cache_.end();
+}
+
+// NBTCompound::readTagFromRust and NBTList::readTagFromRust / addTagToRust Inline Implementations
+inline std::shared_ptr<NBTTag> NBTCompound::readTagFromRust(const std::string& name, uint8_t type) const {
+    if (type == 1) return std::make_shared<NBTByte>(alpha_nbt_compound_get_byte(rustPtr_, name.c_str()));
+    if (type == 2) return std::make_shared<NBTShort>(alpha_nbt_compound_get_short(rustPtr_, name.c_str()));
+    if (type == 3) return std::make_shared<NBTInt>(alpha_nbt_compound_get_int(rustPtr_, name.c_str()));
+    if (type == 4) return std::make_shared<NBTLong>(alpha_nbt_compound_get_long(rustPtr_, name.c_str()));
+    if (type == 5) return std::make_shared<NBTFloat>(alpha_nbt_compound_get_float(rustPtr_, name.c_str()));
+    if (type == 6) return std::make_shared<NBTDouble>(alpha_nbt_compound_get_double(rustPtr_, name.c_str()));
+    if (type == 7) {
+        AlphaBuffer buf = alpha_nbt_compound_get_byte_array(rustPtr_, name.c_str());
+        std::vector<uint8_t> v;
+        if (buf.data) {
+            v.assign(buf.data, buf.data + buf.len);
+            alpha_buffer_free(buf);
+        }
+        return std::make_shared<NBTByteArray>(std::move(v));
+    }
+    if (type == 8) {
+        AlphaBuffer buf = alpha_nbt_compound_get_string(rustPtr_, name.c_str());
+        std::string s;
+        if (buf.data) {
+            s = reinterpret_cast<const char*>(buf.data);
+            alpha_buffer_free(buf);
+        }
+        return std::make_shared<NBTString>(std::move(s));
+    }
+    if (type == 9) {
+        NbtList* r_list = alpha_nbt_compound_get_list(rustPtr_, name.c_str());
+        return std::make_shared<NBTList>(r_list);
+    }
+    if (type == 10) {
+        NbtCompound* r_comp = alpha_nbt_compound_get_compound(rustPtr_, name.c_str());
+        return std::make_shared<NBTCompound>(r_comp);
+    }
+    return nullptr;
+}
+
+inline std::shared_ptr<NBTTag> NBTList::readTagFromRust(size_t idx, uint8_t type) const {
+    if (type == 1) return std::make_shared<NBTByte>(alpha_nbt_list_get_byte(rustPtr_, idx));
+    if (type == 2) return std::make_shared<NBTShort>(alpha_nbt_list_get_short(rustPtr_, idx));
+    if (type == 3) return std::make_shared<NBTInt>(alpha_nbt_list_get_int(rustPtr_, idx));
+    if (type == 4) return std::make_shared<NBTLong>(alpha_nbt_list_get_long(rustPtr_, idx));
+    if (type == 5) return std::make_shared<NBTFloat>(alpha_nbt_list_get_float(rustPtr_, idx));
+    if (type == 6) return std::make_shared<NBTDouble>(alpha_nbt_list_get_double(rustPtr_, idx));
+    if (type == 7) {
+        AlphaBuffer buf = alpha_nbt_list_get_byte_array(rustPtr_, idx);
+        std::vector<uint8_t> v;
+        if (buf.data) {
+            v.assign(buf.data, buf.data + buf.len);
+            alpha_buffer_free(buf);
+        }
+        return std::make_shared<NBTByteArray>(std::move(v));
+    }
+    if (type == 8) {
+        AlphaBuffer buf = alpha_nbt_list_get_string(rustPtr_, idx);
+        std::string s;
+        if (buf.data) {
+            s = reinterpret_cast<const char*>(buf.data);
+            alpha_buffer_free(buf);
+        }
+        return std::make_shared<NBTString>(std::move(s));
+    }
+    if (type == 9) {
+        NbtList* r_list = alpha_nbt_list_get_list(rustPtr_, idx);
+        return std::make_shared<NBTList>(r_list);
+    }
+    if (type == 10) {
+        NbtCompound* r_comp = alpha_nbt_list_get_compound(rustPtr_, idx);
+        return std::make_shared<NBTCompound>(r_comp);
+    }
+    return nullptr;
+}
+
+inline void NBTList::addTagToRust(const std::shared_ptr<NBTTag>& tag) {
+    auto type = tag->getType();
+    if (type == NBTTagType::TAG_Byte) {
+        alpha_nbt_list_add_byte(rustPtr_, std::dynamic_pointer_cast<NBTByte>(tag)->value);
+    } else if (type == NBTTagType::TAG_Short) {
+        alpha_nbt_list_add_short(rustPtr_, std::dynamic_pointer_cast<NBTShort>(tag)->value);
+    } else if (type == NBTTagType::TAG_Int) {
+        alpha_nbt_list_add_int(rustPtr_, std::dynamic_pointer_cast<NBTInt>(tag)->value);
+    } else if (type == NBTTagType::TAG_Long) {
+        alpha_nbt_list_add_long(rustPtr_, std::dynamic_pointer_cast<NBTLong>(tag)->value);
+    } else if (type == NBTTagType::TAG_Float) {
+        alpha_nbt_list_add_float(rustPtr_, std::dynamic_pointer_cast<NBTFloat>(tag)->value);
+    } else if (type == NBTTagType::TAG_Double) {
+        alpha_nbt_list_add_double(rustPtr_, std::dynamic_pointer_cast<NBTDouble>(tag)->value);
+    } else if (type == NBTTagType::TAG_String) {
+        alpha_nbt_list_add_string(rustPtr_, std::dynamic_pointer_cast<NBTString>(tag)->value.c_str());
+    } else if (type == NBTTagType::TAG_ByteArray) {
+        const auto& vec = std::dynamic_pointer_cast<NBTByteArray>(tag)->value;
+        alpha_nbt_list_add_byte_array(rustPtr_, vec.data(), vec.size());
+    } else if (type == NBTTagType::TAG_Compound) {
+        auto child = std::dynamic_pointer_cast<NBTCompound>(tag);
+        NbtCompound* cloned = alpha_nbt_compound_clone(child->rustPtr_);
+        alpha_nbt_list_add_compound(rustPtr_, cloned);
+    } else if (type == NBTTagType::TAG_List) {
+        auto child = std::dynamic_pointer_cast<NBTList>(tag);
+        NbtList* cloned = alpha_nbt_list_clone(child->rustPtr_);
+        alpha_nbt_list_add_list(rustPtr_, cloned);
+    }
+}
 
 inline std::shared_ptr<NBTTag> NBTCompound::readTag(ByteBuffer& buf, NBTTagType type) {
     if (type == NBTTagType::TAG_Byte) {
@@ -334,6 +714,8 @@ inline std::shared_ptr<NBTTag> NBTCompound::readTag(ByteBuffer& buf, NBTTagType 
         list->tagType = static_cast<NBTTagType>(buf.readUByte());
         int32_t count = buf.readInt();
         if (count < 0) throw std::runtime_error("NBT readTag: negative list count");
+        alpha_nbt_list_free(list->rustPtr_);
+        list->rustPtr_ = alpha_nbt_list_create(static_cast<uint8_t>(list->tagType));
         for (int32_t i = 0; i < count; ++i) {
             list->tags.push_back(readTag(buf, list->tagType));
         }
@@ -344,183 +726,4 @@ inline std::shared_ptr<NBTTag> NBTCompound::readTag(ByteBuffer& buf, NBTTagType 
         return comp;
     }
     throw std::runtime_error("NBT readTag: unknown tag type " + std::to_string(static_cast<int>(type)));
-}
-
-// Inline Conversion Helpers Implementation
-
-inline void cpp_to_rust_tag_to_compound(NbtCompound* r_comp, const std::string& name, const std::shared_ptr<NBTTag>& tag) {
-    if (!tag) return;
-    auto type = tag->getType();
-    if (type == NBTTagType::TAG_Byte) {
-        alpha_nbt_compound_set_byte(r_comp, name.c_str(), std::dynamic_pointer_cast<NBTByte>(tag)->value);
-    } else if (type == NBTTagType::TAG_Short) {
-        alpha_nbt_compound_set_short(r_comp, name.c_str(), std::dynamic_pointer_cast<NBTShort>(tag)->value);
-    } else if (type == NBTTagType::TAG_Int) {
-        alpha_nbt_compound_set_int(r_comp, name.c_str(), std::dynamic_pointer_cast<NBTInt>(tag)->value);
-    } else if (type == NBTTagType::TAG_Long) {
-        alpha_nbt_compound_set_long(r_comp, name.c_str(), std::dynamic_pointer_cast<NBTLong>(tag)->value);
-    } else if (type == NBTTagType::TAG_Float) {
-        alpha_nbt_compound_set_float(r_comp, name.c_str(), std::dynamic_pointer_cast<NBTFloat>(tag)->value);
-    } else if (type == NBTTagType::TAG_Double) {
-        alpha_nbt_compound_set_double(r_comp, name.c_str(), std::dynamic_pointer_cast<NBTDouble>(tag)->value);
-    } else if (type == NBTTagType::TAG_String) {
-        alpha_nbt_compound_set_string(r_comp, name.c_str(), std::dynamic_pointer_cast<NBTString>(tag)->value.c_str());
-    } else if (type == NBTTagType::TAG_ByteArray) {
-        const auto& vec = std::dynamic_pointer_cast<NBTByteArray>(tag)->value;
-        alpha_nbt_compound_set_byte_array(r_comp, name.c_str(), vec.data(), vec.size());
-    } else if (type == NBTTagType::TAG_Compound) {
-        alpha_nbt_compound_set_compound(r_comp, name.c_str(), cpp_to_rust_compound(*std::dynamic_pointer_cast<NBTCompound>(tag)));
-    } else if (type == NBTTagType::TAG_List) {
-        alpha_nbt_compound_set_list(r_comp, name.c_str(), cpp_to_rust_list(*std::dynamic_pointer_cast<NBTList>(tag)));
-    }
-}
-
-inline void cpp_to_rust_tag_to_list(NbtList* r_list, const std::shared_ptr<NBTTag>& tag) {
-    if (!tag) return;
-    auto type = tag->getType();
-    if (type == NBTTagType::TAG_Byte) {
-        alpha_nbt_list_add_byte(r_list, std::dynamic_pointer_cast<NBTByte>(tag)->value);
-    } else if (type == NBTTagType::TAG_Short) {
-        alpha_nbt_list_add_short(r_list, std::dynamic_pointer_cast<NBTShort>(tag)->value);
-    } else if (type == NBTTagType::TAG_Int) {
-        alpha_nbt_list_add_int(r_list, std::dynamic_pointer_cast<NBTInt>(tag)->value);
-    } else if (type == NBTTagType::TAG_Long) {
-        alpha_nbt_list_add_long(r_list, std::dynamic_pointer_cast<NBTLong>(tag)->value);
-    } else if (type == NBTTagType::TAG_Float) {
-        alpha_nbt_list_add_float(r_list, std::dynamic_pointer_cast<NBTFloat>(tag)->value);
-    } else if (type == NBTTagType::TAG_Double) {
-        alpha_nbt_list_add_double(r_list, std::dynamic_pointer_cast<NBTDouble>(tag)->value);
-    } else if (type == NBTTagType::TAG_String) {
-        alpha_nbt_list_add_string(r_list, std::dynamic_pointer_cast<NBTString>(tag)->value.c_str());
-    } else if (type == NBTTagType::TAG_ByteArray) {
-        const auto& vec = std::dynamic_pointer_cast<NBTByteArray>(tag)->value;
-        alpha_nbt_list_add_byte_array(r_list, vec.data(), vec.size());
-    } else if (type == NBTTagType::TAG_Compound) {
-        alpha_nbt_list_add_compound(r_list, cpp_to_rust_compound(*std::dynamic_pointer_cast<NBTCompound>(tag)));
-    } else if (type == NBTTagType::TAG_List) {
-        alpha_nbt_list_add_list(r_list, cpp_to_rust_list(*std::dynamic_pointer_cast<NBTList>(tag)));
-    }
-}
-
-inline NbtCompound* cpp_to_rust_compound(const NBTCompound& comp) {
-    NbtCompound* r_comp = alpha_nbt_compound_create();
-    for (const auto& [name, tag] : comp.tags) {
-        cpp_to_rust_tag_to_compound(r_comp, name, tag);
-    }
-    return r_comp;
-}
-
-inline NbtList* cpp_to_rust_list(const NBTList& list) {
-    NbtList* r_list = alpha_nbt_list_create(static_cast<uint8_t>(list.tagType));
-    for (const auto& tag : list.tags) {
-        cpp_to_rust_tag_to_list(r_list, tag);
-    }
-    return r_list;
-}
-
-inline std::shared_ptr<NBTTag> rust_to_cpp_tag(uint8_t type, const void* container_ptr, const std::string& name_or_idx, bool is_list, size_t idx = 0) {
-    const NbtCompound* r_comp = is_list ? nullptr : reinterpret_cast<const NbtCompound*>(container_ptr);
-    const NbtList* r_list = is_list ? reinterpret_cast<const NbtList*>(container_ptr) : nullptr;
-
-    auto get_byte = [&]() -> int8_t {
-        return is_list ? alpha_nbt_list_get_byte(r_list, idx) : alpha_nbt_compound_get_byte(r_comp, name_or_idx.c_str());
-    };
-    auto get_short = [&]() -> int16_t {
-        return is_list ? alpha_nbt_list_get_short(r_list, idx) : alpha_nbt_compound_get_short(r_comp, name_or_idx.c_str());
-    };
-    auto get_int = [&]() -> int32_t {
-        return is_list ? alpha_nbt_list_get_int(r_list, idx) : alpha_nbt_compound_get_int(r_comp, name_or_idx.c_str());
-    };
-    auto get_long = [&]() -> int64_t {
-        return is_list ? alpha_nbt_list_get_long(r_list, idx) : alpha_nbt_compound_get_long(r_comp, name_or_idx.c_str());
-    };
-    auto get_float = [&]() -> float {
-        return is_list ? alpha_nbt_list_get_float(r_list, idx) : alpha_nbt_compound_get_float(r_comp, name_or_idx.c_str());
-    };
-    auto get_double = [&]() -> double {
-        return is_list ? alpha_nbt_list_get_double(r_list, idx) : alpha_nbt_compound_get_double(r_comp, name_or_idx.c_str());
-    };
-    auto get_string = [&]() -> std::string {
-        AlphaBuffer buf = is_list ? alpha_nbt_list_get_string(r_list, idx) : alpha_nbt_compound_get_string(r_comp, name_or_idx.c_str());
-        std::string s;
-        if (buf.data) {
-            s = reinterpret_cast<const char*>(buf.data);
-            alpha_buffer_free(buf);
-        }
-        return s;
-    };
-    auto get_byte_array = [&]() -> std::vector<uint8_t> {
-        AlphaBuffer buf = is_list ? alpha_nbt_list_get_byte_array(r_list, idx) : alpha_nbt_compound_get_byte_array(r_comp, name_or_idx.c_str());
-        std::vector<uint8_t> v;
-        if (buf.data) {
-            v.assign(buf.data, buf.data + buf.len);
-            alpha_buffer_free(buf);
-        }
-        return v;
-    };
-    auto get_compound = [&]() -> NbtCompound* {
-        return is_list ? alpha_nbt_list_get_compound(r_list, idx) : alpha_nbt_compound_get_compound(r_comp, name_or_idx.c_str());
-    };
-    auto get_list = [&]() -> NbtList* {
-        return is_list ? alpha_nbt_list_get_list(r_list, idx) : alpha_nbt_compound_get_list(r_comp, name_or_idx.c_str());
-    };
-
-    if (type == 1) return std::make_shared<NBTByte>(get_byte());
-    if (type == 2) return std::make_shared<NBTShort>(get_short());
-    if (type == 3) return std::make_shared<NBTInt>(get_int());
-    if (type == 4) return std::make_shared<NBTLong>(get_long());
-    if (type == 5) return std::make_shared<NBTFloat>(get_float());
-    if (type == 6) return std::make_shared<NBTDouble>(get_double());
-    if (type == 7) return std::make_shared<NBTByteArray>(get_byte_array());
-    if (type == 8) return std::make_shared<NBTString>(get_string());
-    if (type == 9) {
-        NbtList* child_list = get_list();
-        auto cpp_list = rust_to_cpp_list(child_list);
-        alpha_nbt_list_free(child_list);
-        return cpp_list;
-    }
-    if (type == 10) {
-        NbtCompound* child_comp = get_compound();
-        auto cpp_comp = rust_to_cpp_compound(child_comp);
-        alpha_nbt_compound_free(child_comp);
-        return cpp_comp;
-    }
-    return nullptr;
-}
-
-inline std::shared_ptr<NBTCompound> rust_to_cpp_compound(const NbtCompound* r_comp) {
-    auto cpp_comp = std::make_shared<NBTCompound>();
-    if (!r_comp) return cpp_comp;
-
-    AlphaBuffer keys_buf = alpha_nbt_compound_get_keys(r_comp);
-    if (keys_buf.data) {
-        const char* p = reinterpret_cast<const char*>(keys_buf.data);
-        const char* end = p + keys_buf.len;
-        while (p < end && *p != '\0') {
-            std::string key(p);
-            p += key.size() + 1;
-            uint8_t type = alpha_nbt_compound_get_tag_type(r_comp, key.c_str());
-            auto tag = rust_to_cpp_tag(type, r_comp, key, false);
-            if (tag) {
-                cpp_comp->tags[key] = tag;
-            }
-        }
-        alpha_buffer_free(keys_buf);
-    }
-    return cpp_comp;
-}
-
-inline std::shared_ptr<NBTList> rust_to_cpp_list(const NbtList* r_list) {
-    auto cpp_list = std::make_shared<NBTList>();
-    if (!r_list) return cpp_list;
-
-    cpp_list->tagType = static_cast<NBTTagType>(alpha_nbt_list_get_type(r_list));
-    size_t size = alpha_nbt_list_get_size(r_list);
-    for (size_t i = 0; i < size; ++i) {
-        auto tag = rust_to_cpp_tag(static_cast<uint8_t>(cpp_list->tagType), r_list, "", true, i);
-        if (tag) {
-            cpp_list->tags.push_back(tag);
-        }
-    }
-    return cpp_list;
 }
