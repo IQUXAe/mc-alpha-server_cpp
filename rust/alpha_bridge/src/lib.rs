@@ -446,6 +446,7 @@ pub mod decorators;
 pub mod nbt;
 pub mod chunk_loader;
 pub mod network;
+pub mod generator;
 
 
 use crate::random::JavaRandom;

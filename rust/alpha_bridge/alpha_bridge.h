@@ -341,6 +341,41 @@ void rust_network_manager_get_termination_reason(
 size_t rust_network_manager_get_send_queue_length(RustNetworkManager* manager);
 void rust_network_manager_server_shutdown(RustNetworkManager* manager);
 
+// ChunkProviderGenerate FFI
+typedef struct RustChunkProviderGenerate RustChunkProviderGenerate;
+
+typedef struct RustChunkData {
+    uint8_t* blocks;
+    uint8_t* metadata;
+    int32_t x;
+    int32_t z;
+} RustChunkData;
+
+typedef struct RustChunkDataBatch {
+    RustChunkData chunks[4];
+} RustChunkDataBatch;
+
+RustChunkProviderGenerate* rust_chunk_provider_generate_create(int64_t seed);
+void rust_chunk_provider_generate_destroy(RustChunkProviderGenerate* ptr);
+void rust_chunk_provider_generate_chunk(
+    RustChunkProviderGenerate* ptr,
+    int32_t chunk_x,
+    int32_t chunk_z,
+    uint8_t* out_blocks,
+    MobSpawnerBase* out_biomes,
+    double* out_temps,
+    double* out_humids
+);
+void rust_chunk_provider_populate_batch(
+    RustChunkProviderGenerate* generator,
+    const RustChunkDataBatch* batch,
+    WorldAccessor accessor,
+    int32_t chunk_x,
+    int32_t chunk_z,
+    int32_t biome_type_raw,
+    const double* temperatures
+);
+
 #ifdef __cplusplus
 }
 #endif
