@@ -140,13 +140,6 @@ public:
     static void registerPackets();
     static std::unique_ptr<Packet> createPacket(int id);
 
-    // Read a full packet from a socket fd (blocking)
-    // Returns nullptr on disconnect
-    static std::unique_ptr<Packet> readPacket(int fd);
-
-    // Write a packet to a socket fd
-    static void writePacket(Packet& pkt, int fd);
-
     // Registry
     static std::unordered_map<int, std::function<std::unique_ptr<Packet>()>> idToFactory;
     static std::unordered_map<std::string, int> classToId;

@@ -15,7 +15,7 @@
 #include <utility>
 
 namespace {
-constexpr std::string_view kSessionHost = "www.minecraft.net";
+constexpr std::string_view kSessionHost = "session.minecraft.net";
 constexpr std::string_view kSessionPath = "/game/checkserver.jsp";
 
 std::string urlEncode(std::string_view value) {
@@ -163,18 +163,29 @@ void NetLoginHandler::tryLogin() {
         doLogin(*loginToProcess);
     }
 
+    if (finishedProcessing.load(std::memory_order_relaxed)) {
+        return;
+    }
+
     if (++tickCounter_ >= 600) {
         kickUser("Took too long to log in");
     } else {
-        netManager->processReadPackets();
+        if (netManager) {
+            netManager->processReadPackets();
+        }
     }
 }
 
 void NetLoginHandler::kickUser(const std::string& reason) {
+    if (finishedProcessing.load(std::memory_order_relaxed)) {
+        return;
+    }
     try {
         Logger::info("Disconnecting {}: {}", getUserAndIPString(), reason);
-        netManager->addToSendQueue(std::make_unique<Packet255KickDisconnect>(reason));
-        netManager->serverShutdown();
+        if (netManager) {
+            netManager->addToSendQueue(std::make_unique<Packet255KickDisconnect>(reason));
+            netManager->serverShutdown();
+        }
         finishedProcessing.store(true, std::memory_order_relaxed);
     } catch (const std::exception& e) {
         Logger::severe("{}", e.what());
@@ -280,10 +291,11 @@ void NetLoginHandler::handleErrorMessage(const std::string& reason) {
 }
 
 std::string NetLoginHandler::getUserAndIPString() const {
+    std::string ip = netManager ? netManager->getRemoteAddress() : "unknown";
     if (!username_.empty()) {
-        return username_ + " [" + netManager->getRemoteAddress() + "]";
+        return username_ + " [" + ip + "]";
     }
-    return netManager->getRemoteAddress();
+    return ip;
 }
 
 void NetLoginHandler::verifyLoginSession(Packet1Login pkt) {
