@@ -51,23 +51,22 @@ public:
             chunkData.z_pos = chunk->zPosition;
             chunkData.last_update = world->worldTime;
 
-            // Prepare blocks
-            std::vector<uint8_t> blocksArray(chunk->blocks.begin(), chunk->blocks.end());
-            chunkData.blocks = blocksArray.data();
-            chunkData.blocks_len = blocksArray.size();
+            // Prepare blocks (zero-copy, passing raw pointers)
+            chunkData.blocks = chunk->blocks;
+            chunkData.blocks_len = CHUNK_VOLUME;
 
             // Prepare metadata and lights
-            chunkData.data = chunk->data.data.data();
-            chunkData.data_len = chunk->data.data.size();
+            chunkData.data = chunk->data.data_ptr;
+            chunkData.data_len = CHUNK_VOLUME / 2;
 
-            chunkData.sky_light = chunk->skylight.data.data();
-            chunkData.sky_light_len = chunk->skylight.data.size();
+            chunkData.sky_light = chunk->skylight.data_ptr;
+            chunkData.sky_light_len = CHUNK_VOLUME / 2;
 
-            chunkData.block_light = chunk->blocklight.data.data();
-            chunkData.block_light_len = chunk->blocklight.data.size();
+            chunkData.block_light = chunk->blocklight.data_ptr;
+            chunkData.block_light_len = CHUNK_VOLUME / 2;
 
-            chunkData.height_map = chunk->heightMap.data();
-            chunkData.height_map_len = chunk->heightMap.size();
+            chunkData.height_map = chunk->heightMap;
+            chunkData.height_map_len = CHUNK_AREA;
 
             chunkData.terrain_populated = chunk->isTerrainPopulated;
 
@@ -79,9 +78,7 @@ public:
                 auto teCompound = std::make_shared<NBTCompound>();
                 te->writeToNBT(*teCompound);
                 teCppCompounds.push_back(teCompound);
-                
-                NbtCompound* r_comp = cpp_to_rust_compound(*teCompound);
-                teRustPtrs.push_back(r_comp);
+                teRustPtrs.push_back(teCompound->rustPtr_);
             }
 
             chunkData.tile_entities = teRustPtrs.data();
@@ -109,7 +106,7 @@ public:
                 tag->setDouble("y",  ed.posY);
                 tag->setDouble("z",  ed.posZ);
                 itemCppCompounds.push_back(tag);
-                itemRustPtrs.push_back(cpp_to_rust_compound(*tag));
+                itemRustPtrs.push_back(tag->rustPtr_);
             }
             for (const auto& e : world->entities_) {
                 auto* item = dynamic_cast<EntityItem*>(e.get());
@@ -127,7 +124,7 @@ public:
                 tag->setDouble("y",  item->posY);
                 tag->setDouble("z",  item->posZ);
                 itemCppCompounds.push_back(tag);
-                itemRustPtrs.push_back(cpp_to_rust_compound(*tag));
+                itemRustPtrs.push_back(tag->rustPtr_);
             }
             chunkData.items = itemRustPtrs.data();
             chunkData.items_count = itemRustPtrs.size();
@@ -150,7 +147,7 @@ public:
                     const std::string key = makeEntityKey(id, root->getDouble("PosX"), root->getDouble("PosY"), root->getDouble("PosZ"));
                     if (seenAnimals.insert(key).second) {
                         animalCppCompounds.push_back(root);
-                        animalRustPtrs.push_back(cpp_to_rust_compound(*root));
+                        animalRustPtrs.push_back(root->rustPtr_);
                     }
                 }
             }
@@ -165,7 +162,7 @@ public:
                 auto tag = std::make_shared<NBTCompound>();
                 animal->writeToNBT(*tag);
                 animalCppCompounds.push_back(tag);
-                animalRustPtrs.push_back(cpp_to_rust_compound(*tag));
+                animalRustPtrs.push_back(tag->rustPtr_);
             }
             chunkData.animals = animalRustPtrs.data();
             chunkData.animals_count = animalRustPtrs.size();
@@ -180,7 +177,7 @@ public:
                     const std::string key = makeEntityKey(id, root->getDouble("PosX"), root->getDouble("PosY"), root->getDouble("PosZ"));
                     if (seenMonsters.insert(key).second) {
                         monsterCppCompounds.push_back(root);
-                        monsterRustPtrs.push_back(cpp_to_rust_compound(*root));
+                        monsterRustPtrs.push_back(root->rustPtr_);
                     }
                 }
             }
@@ -195,7 +192,7 @@ public:
                 auto tag = std::make_shared<NBTCompound>();
                 mob->writeToNBT(*tag);
                 monsterCppCompounds.push_back(tag);
-                monsterRustPtrs.push_back(cpp_to_rust_compound(*tag));
+                monsterRustPtrs.push_back(tag->rustPtr_);
             }
             chunkData.monsters = monsterRustPtrs.data();
             chunkData.monsters_count = monsterRustPtrs.size();
@@ -215,7 +212,7 @@ public:
                 const std::string key = makeBoatKey(root->getDouble("PosX"), root->getDouble("PosY"), root->getDouble("PosZ"));
                 if (!seenBoats.insert(key).second) continue;
                 boatCppCompounds.push_back(root);
-                boatRustPtrs.push_back(cpp_to_rust_compound(*root));
+                boatRustPtrs.push_back(root->rustPtr_);
             }
             for (const auto& e : world->entities_) {
                 auto* boat = dynamic_cast<EntityBoat*>(e.get());
@@ -228,7 +225,7 @@ public:
                 auto tag = std::make_shared<NBTCompound>();
                 boat->writeToNBT(*tag);
                 boatCppCompounds.push_back(tag);
-                boatRustPtrs.push_back(cpp_to_rust_compound(*tag));
+                boatRustPtrs.push_back(tag->rustPtr_);
             }
             chunkData.boats = boatRustPtrs.data();
             chunkData.boats_count = boatRustPtrs.size();
@@ -239,18 +236,6 @@ public:
                 createDirectories_,
                 &chunkData
             );
-
-            // Free temporary Rust compounds allocated for serialization
-            auto freeRustPtrs = [](std::vector<NbtCompound*>& ptrs) {
-                for (auto* ptr : ptrs) {
-                    if (ptr) alpha_nbt_compound_free(ptr);
-                }
-            };
-            freeRustPtrs(teRustPtrs);
-            freeRustPtrs(itemRustPtrs);
-            freeRustPtrs(animalRustPtrs);
-            freeRustPtrs(monsterRustPtrs);
-            freeRustPtrs(boatRustPtrs);
 
             if (success) {
                 chunk->isModified = false;
@@ -279,44 +264,30 @@ public:
                 return nullptr;
             }
 
-            Chunk* chunk = new Chunk(world, data->x_pos, data->z_pos);
-
-            // Copy chunk data arrays from AlphaChunkData
-            chunk->blocks.assign(data->blocks, data->blocks + data->blocks_len);
-            chunk->data.data.assign(data->data, data->data + data->data_len);
-            chunk->skylight.data.assign(data->sky_light, data->sky_light + data->sky_light_len);
-            chunk->blocklight.data.assign(data->block_light, data->block_light + data->block_light_len);
-            chunk->heightMap.assign(data->height_map, data->height_map + data->height_map_len);
+            // Create Chunk taking ownership of the raw pointers
+            Chunk* chunk = new Chunk(
+                world, 
+                data->x_pos, 
+                data->z_pos,
+                data->blocks,
+                data->data,
+                data->sky_light,
+                data->block_light,
+                data->height_map
+            );
             chunk->isTerrainPopulated = data->terrain_populated;
-
-            // Validate data arrays (same as C++ fallback code)
-            if (chunk->data.data.size() != CHUNK_VOLUME / 2) {
-                chunk->data.data.resize(CHUNK_VOLUME / 2, 0);
-            }
-            if (chunk->skylight.data.size() != CHUNK_VOLUME / 2) {
-                chunk->skylight.data.resize(CHUNK_VOLUME / 2, 0);
-                chunk->generateSkylightMap();
-            }
-            if (chunk->blocklight.data.size() != CHUNK_VOLUME / 2) {
-                chunk->blocklight.data.resize(CHUNK_VOLUME / 2, 0);
-            }
-            if (chunk->heightMap.size() != CHUNK_AREA) {
-                chunk->heightMap.resize(CHUNK_AREA, 0);
-                chunk->generateHeightMap();
-            }
 
             // Load TileEntities
             if (data->tile_entities && data->tile_entities_count > 0) {
                 for (size_t i = 0; i < data->tile_entities_count; ++i) {
                     NbtCompound* r_comp = data->tile_entities[i];
                     if (r_comp) {
-                        auto cpp_comp = rust_to_cpp_compound(r_comp);
-                        if (cpp_comp) {
-                            auto tileEntity = TileEntity::createFromNBT(*cpp_comp);
-                            if (tileEntity) {
-                                tileEntity->worldObj = world;
-                                chunk->addTileEntity(tileEntity.release());
-                            }
+                        // Create NBTCompound wrapping a cloned pointer
+                        auto cpp_comp = std::make_shared<NBTCompound>(alpha_nbt_compound_clone(r_comp));
+                        auto tileEntity = TileEntity::createFromNBT(*cpp_comp);
+                        if (tileEntity) {
+                            tileEntity->worldObj = world;
+                            chunk->addTileEntity(tileEntity.release());
                         }
                     }
                 }
@@ -328,20 +299,18 @@ public:
                 for (size_t i = 0; i < data->items_count; ++i) {
                     NbtCompound* r_comp = data->items[i];
                     if (r_comp) {
-                        auto cpp_comp = rust_to_cpp_compound(r_comp);
-                        if (cpp_comp) {
-                            ChunkEntityData ed;
-                            ed.itemID      = cpp_comp->getInt("id");
-                            ed.count       = cpp_comp->getInt("count");
-                            ed.metadata    = cpp_comp->getInt("meta");
-                            ed.age         = cpp_comp->getInt("age");
-                            ed.pickupDelay = cpp_comp->getInt("delay");
-                            ed.posX        = cpp_comp->getDouble("x");
-                            ed.posY        = cpp_comp->getDouble("y");
-                            ed.posZ        = cpp_comp->getDouble("z");
-                            if (ed.age < 6000)
-                                chunk->pendingItems.push_back(ed);
-                        }
+                        auto cpp_comp = std::make_shared<NBTCompound>(alpha_nbt_compound_clone(r_comp));
+                        ChunkEntityData ed;
+                        ed.itemID      = cpp_comp->getInt("id");
+                        ed.count       = cpp_comp->getInt("count");
+                        ed.metadata    = cpp_comp->getInt("meta");
+                        ed.age         = cpp_comp->getInt("age");
+                        ed.pickupDelay = cpp_comp->getInt("delay");
+                        ed.posX        = cpp_comp->getDouble("x");
+                        ed.posY        = cpp_comp->getDouble("y");
+                        ed.posZ        = cpp_comp->getDouble("z");
+                        if (ed.age < 6000)
+                            chunk->pendingItems.push_back(ed);
                     }
                 }
             }
@@ -352,18 +321,16 @@ public:
                 for (size_t i = 0; i < data->animals_count; ++i) {
                     NbtCompound* r_comp = data->animals[i];
                     if (r_comp) {
-                        auto cpp_comp = rust_to_cpp_compound(r_comp);
-                        if (cpp_comp) {
-                            ByteBuffer buf;
-                            cpp_comp->writeRoot(buf, cpp_comp->getString("id"));
-                            chunk->pendingAnimals.push_back({
-                                .entityId = cpp_comp->getString("id"),
-                                .nbtData = std::move(buf.data),
-                                .posX = cpp_comp->getDouble("PosX"),
-                                .posY = cpp_comp->getDouble("PosY"),
-                                .posZ = cpp_comp->getDouble("PosZ"),
-                            });
-                        }
+                        auto cpp_comp = std::make_shared<NBTCompound>(alpha_nbt_compound_clone(r_comp));
+                        ByteBuffer buf;
+                        cpp_comp->writeRoot(buf, cpp_comp->getString("id"));
+                        chunk->pendingAnimals.push_back({
+                            .entityId = cpp_comp->getString("id"),
+                            .nbtData = std::move(buf.data),
+                            .posX = cpp_comp->getDouble("PosX"),
+                            .posY = cpp_comp->getDouble("PosY"),
+                            .posZ = cpp_comp->getDouble("PosZ"),
+                        });
                     }
                 }
             }
@@ -374,18 +341,16 @@ public:
                 for (size_t i = 0; i < data->monsters_count; ++i) {
                     NbtCompound* r_comp = data->monsters[i];
                     if (r_comp) {
-                        auto cpp_comp = rust_to_cpp_compound(r_comp);
-                        if (cpp_comp) {
-                            ByteBuffer buf;
-                            cpp_comp->writeRoot(buf, cpp_comp->getString("id"));
-                            chunk->pendingMonsters.push_back({
-                                .entityId = cpp_comp->getString("id"),
-                                .nbtData = std::move(buf.data),
-                                .posX = cpp_comp->getDouble("PosX"),
-                                .posY = cpp_comp->getDouble("PosY"),
-                                .posZ = cpp_comp->getDouble("PosZ"),
-                            });
-                        }
+                        auto cpp_comp = std::make_shared<NBTCompound>(alpha_nbt_compound_clone(r_comp));
+                        ByteBuffer buf;
+                        cpp_comp->writeRoot(buf, cpp_comp->getString("id"));
+                        chunk->pendingMonsters.push_back({
+                            .entityId = cpp_comp->getString("id"),
+                            .nbtData = std::move(buf.data),
+                            .posX = cpp_comp->getDouble("PosX"),
+                            .posY = cpp_comp->getDouble("PosY"),
+                            .posZ = cpp_comp->getDouble("PosZ"),
+                        });
                     }
                 }
             }
@@ -396,23 +361,21 @@ public:
                 for (size_t i = 0; i < data->boats_count; ++i) {
                     NbtCompound* r_comp = data->boats[i];
                     if (r_comp) {
-                        auto cpp_comp = rust_to_cpp_compound(r_comp);
-                        if (cpp_comp) {
-                            ByteBuffer buf;
-                            cpp_comp->writeRoot(buf, "Boat");
-                            chunk->pendingBoats.push_back({
-                                .nbtData = std::move(buf.data),
-                                .posX = cpp_comp->getDouble("PosX"),
-                                .posY = cpp_comp->getDouble("PosY"),
-                                .posZ = cpp_comp->getDouble("PosZ"),
-                            });
-                        }
+                        auto cpp_comp = std::make_shared<NBTCompound>(alpha_nbt_compound_clone(r_comp));
+                        ByteBuffer buf;
+                        cpp_comp->writeRoot(buf, "Boat");
+                        chunk->pendingBoats.push_back({
+                            .nbtData = std::move(buf.data),
+                            .posX = cpp_comp->getDouble("PosX"),
+                            .posY = cpp_comp->getDouble("PosY"),
+                            .posZ = cpp_comp->getDouble("PosZ"),
+                        });
                     }
                 }
             }
 
-            // Safely free all heap allocated arrays in Rust
-            alpha_chunk_data_free(data);
+            // Free the AlphaChunkData structure itself, but NOT the arrays owned by Chunk
+            alpha_chunk_data_free_except_arrays(data);
 
             std::cout << "[ChunkLoader] Loaded chunk (" << chunkX << ", " 
                       << chunkZ << ") with " 

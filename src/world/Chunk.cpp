@@ -13,17 +13,32 @@ struct LightNode {
 };
 
 Chunk::Chunk(World* world, int x, int z) 
+    : xPosition(x), zPosition(z), worldObj(world) {
+    uint8_t* raw_blocks = nullptr;
+    uint8_t* raw_data = nullptr;
+    uint8_t* raw_sky = nullptr;
+    uint8_t* raw_blocklight = nullptr;
+    uint8_t* raw_height = nullptr;
+    alpha_chunk_alloc_arrays(&raw_blocks, &raw_data, &raw_sky, &raw_blocklight, &raw_height);
+
+    blocks = raw_blocks;
+    data = NibbleArray(raw_data, 16384, false);
+    skylight = NibbleArray(raw_sky, 16384, false);
+    blocklight = NibbleArray(raw_blocklight, 16384, false);
+    heightMap = raw_height;
+}
+
+Chunk::Chunk(World* world, int x, int z, uint8_t* raw_blocks, uint8_t* raw_data, uint8_t* raw_sky, uint8_t* raw_blocklight, uint8_t* raw_height)
     : xPosition(x), zPosition(z), worldObj(world),
-      blocks(CHUNK_VOLUME, 0),
-      data(CHUNK_VOLUME),
-      skylight(CHUNK_VOLUME),
-      blocklight(CHUNK_VOLUME),
-      heightMap(CHUNK_AREA, 0) {
-    // Everything is air initially.
+      blocks(raw_blocks),
+      data(raw_data, 16384, false),
+      skylight(raw_sky, 16384, false),
+      blocklight(raw_blocklight, 16384, false),
+      heightMap(raw_height) {
 }
 
 Chunk::~Chunk() {
-    // TileEntities are owned by World, not Chunk
+    alpha_chunk_free_arrays(blocks, data.data_ptr, skylight.data_ptr, blocklight.data_ptr, heightMap);
     tileEntities_.clear();
 }
 
@@ -230,10 +245,10 @@ void Chunk::generateSkylightMap() {
 std::vector<uint8_t> Chunk::getChunkData() const {
     std::vector<uint8_t> rawData(CHUNK_VOLUME * 5 / 2, 0);
 
-    std::ranges::copy(blocks,           rawData.begin());
-    std::ranges::copy(data.data,        rawData.begin() + CHUNK_VOLUME);
-    std::ranges::copy(blocklight.data,  rawData.begin() + CHUNK_VOLUME + CHUNK_VOLUME / 2);
-    std::ranges::copy(skylight.data,    rawData.begin() + CHUNK_VOLUME + CHUNK_VOLUME);
+    std::copy(blocks, blocks + CHUNK_VOLUME, rawData.begin());
+    std::copy(data.data_ptr, data.data_ptr + CHUNK_VOLUME / 2, rawData.begin() + CHUNK_VOLUME);
+    std::copy(blocklight.data_ptr, blocklight.data_ptr + CHUNK_VOLUME / 2, rawData.begin() + CHUNK_VOLUME + CHUNK_VOLUME / 2);
+    std::copy(skylight.data_ptr, skylight.data_ptr + CHUNK_VOLUME / 2, rawData.begin() + CHUNK_VOLUME + CHUNK_VOLUME);
 
     return RustBridge::zlibCompress(rawData, 1);
 }

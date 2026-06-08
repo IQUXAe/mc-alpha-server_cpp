@@ -39,7 +39,7 @@ void ChunkProviderGenerate::generateChunk(Chunk& chunk, bool generateLighting) {
         rustGen_,
         chunkX,
         chunkZ,
-        chunk.blocks.data(),
+        chunk.blocks,
         biomesForGeneration.data(),
         temps.data(),
         humids.data()
@@ -79,10 +79,10 @@ void ChunkProviderGenerate::populate(int chunkX, int chunkZ) {
 
     if (c00 && c01 && c10 && c11) {
         RustChunkDataBatch batch;
-        batch.chunks[0] = { c00->blocks.data(), c00->data.data.data(), c00->xPosition, c00->zPosition };
-        batch.chunks[1] = { c01->blocks.data(), c01->data.data.data(), c01->xPosition, c01->zPosition };
-        batch.chunks[2] = { c10->blocks.data(), c10->data.data.data(), c10->xPosition, c10->zPosition };
-        batch.chunks[3] = { c11->blocks.data(), c11->data.data.data(), c11->xPosition, c11->zPosition };
+        batch.chunks[0] = RustChunkData { c00->blocks, c00->data.data_ptr, c00->xPosition, c00->zPosition };
+        batch.chunks[1] = RustChunkData { c01->blocks, c01->data.data_ptr, c01->xPosition, c01->zPosition };
+        batch.chunks[2] = RustChunkData { c10->blocks, c10->data.data_ptr, c10->xPosition, c10->zPosition };
+        batch.chunks[3] = RustChunkData { c11->blocks, c11->data.data_ptr, c11->xPosition, c11->zPosition };
 
         WorldAccessor accessor {
             .get_block_id = [](int32_t x, int32_t y, int32_t z) -> uint8_t {

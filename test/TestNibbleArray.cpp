@@ -9,7 +9,7 @@ TEST(NibbleArrayTest, DefaultConstructorEmpty) {
 TEST(NibbleArrayTest, SizeConstructor) {
     NibbleArray arr(32768);
     EXPECT_TRUE(arr.isValid());
-    EXPECT_EQ(arr.data.size(), 16384);
+    EXPECT_EQ(arr.size, 16384);
 }
 
 TEST(NibbleArrayTest, SetAndGet) {

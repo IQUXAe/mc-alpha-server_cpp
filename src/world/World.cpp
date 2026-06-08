@@ -1149,15 +1149,7 @@ bool World::commitPreparedChunk(uint64_t key) {
         return true;
     }
 
-    if (chunk->heightMap.size() != CHUNK_AREA) {
-        chunk->heightMap.assign(CHUNK_AREA, 0);
-        chunk->generateHeightMap();
-    }
-    if (chunk->skylight.data.size() != CHUNK_VOLUME / 2 || chunk->blocklight.data.size() != CHUNK_VOLUME / 2) {
-        chunk->skylight.data.resize(CHUNK_VOLUME / 2, 0);
-        chunk->blocklight.data.resize(CHUNK_VOLUME / 2, 0);
-        chunk->generateSkylightMap();
-    }
+    // Raw pointers are pre-allocated with correct sizes.
 
     {
         std::unique_lock lock(tileEntitiesMutex_);
@@ -2144,11 +2136,11 @@ std::vector<uint8_t> World::compressChunkData(Chunk* chunk) {
     level.setInt("xPos", chunk->xPosition);
     level.setInt("zPos", chunk->zPosition);
     level.setByte("TerrainPopulated", chunk->isTerrainPopulated ? 1 : 0);
-    level.setByteArray("Blocks", chunk->blocks);
-    level.setByteArray("Data", chunk->data.data);
-    level.setByteArray("SkyLight", chunk->skylight.data);
-    level.setByteArray("BlockLight", chunk->blocklight.data);
-    level.setByteArray("HeightMap", chunk->heightMap);
+    level.setByteArray("Blocks", chunk->blocks, CHUNK_VOLUME);
+    level.setByteArray("Data", chunk->data.data_ptr, CHUNK_VOLUME / 2);
+    level.setByteArray("SkyLight", chunk->skylight.data_ptr, CHUNK_VOLUME / 2);
+    level.setByteArray("BlockLight", chunk->blocklight.data_ptr, CHUNK_VOLUME / 2);
+    level.setByteArray("HeightMap", chunk->heightMap, CHUNK_AREA);
 
     // Save EntityItems that belong to this chunk
     {
@@ -2371,11 +2363,16 @@ void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data,
     if (!level) return;
 
     chunk->isTerrainPopulated = level->getByte("TerrainPopulated") != 0;
-    chunk->blocks       = level->getByteArray("Blocks");
-    chunk->data.data    = level->getByteArray("Data");
-    chunk->skylight.data   = level->getByteArray("SkyLight");
-    chunk->blocklight.data = level->getByteArray("BlockLight");
-    chunk->heightMap    = level->getByteArray("HeightMap");
+    auto blocksVec = level->getByteArray("Blocks");
+    std::copy(blocksVec.begin(), blocksVec.end(), chunk->blocks);
+    auto dataVec = level->getByteArray("Data");
+    std::copy(dataVec.begin(), dataVec.end(), chunk->data.data_ptr);
+    auto skyVec = level->getByteArray("SkyLight");
+    std::copy(skyVec.begin(), skyVec.end(), chunk->skylight.data_ptr);
+    auto blVec = level->getByteArray("BlockLight");
+    std::copy(blVec.begin(), blVec.end(), chunk->blocklight.data_ptr);
+    auto hmVec = level->getByteArray("HeightMap");
+    std::copy(hmVec.begin(), hmVec.end(), chunk->heightMap);
     chunk->pendingItems.clear();
     chunk->pendingAnimals.clear();
     chunk->pendingMonsters.clear();
@@ -2494,8 +2491,8 @@ void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data,
         }
     }
 
-    if (chunk->heightMap.empty() || chunk->heightMap.size() < 256) {
-        chunk->heightMap.assign(256, 0);
+    if (hmVec.empty()) {
+        std::fill(chunk->heightMap, chunk->heightMap + CHUNK_AREA, 0);
         chunk->generateHeightMap();
         chunk->generateSkylightMap();
     }

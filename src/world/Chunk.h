@@ -54,14 +54,15 @@ public:
     std::vector<ChunkAnimalData> pendingMonsters;
     std::vector<ChunkBoatData> pendingBoats;
 
-    // Direct flat arrays for massive CPU cache-locality (C++ advantage)
-    std::vector<uint8_t> blocks;      // 32768 bytes
+    // Direct flat arrays allocated in Rust and kept alive there (zero-copy)
+    uint8_t* blocks = nullptr;        // 32768 bytes
     NibbleArray data;                 // 16384 bytes
     NibbleArray skylight;             // 16384 bytes
     NibbleArray blocklight;           // 16384 bytes
-    std::vector<uint8_t> heightMap;   // 256 bytes
+    uint8_t* heightMap = nullptr;     // 256 bytes
 
     Chunk(World* world, int x, int z);
+    Chunk(World* world, int x, int z, uint8_t* raw_blocks, uint8_t* raw_data, uint8_t* raw_sky, uint8_t* raw_blocklight, uint8_t* raw_height);
     ~Chunk();
 
     // The index formula matching Alpha exactly: x << 11 | z << 7 | y
