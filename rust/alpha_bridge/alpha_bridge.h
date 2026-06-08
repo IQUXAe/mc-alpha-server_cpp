@@ -527,6 +527,30 @@ void rust_chunk_provider_populate_batch(
     const double* temperatures
 );
 
+typedef struct PathfinderWorldAccessor {
+    void* world;
+    bool (*is_liquid)(void* world, int32_t x, int32_t y, int32_t z);
+    bool (*blocks_movement)(void* world, int32_t x, int32_t y, int32_t z);
+} PathfinderWorldAccessor;
+
+typedef struct FfiPathPoint {
+    int32_t x;
+    int32_t y;
+    int32_t z;
+} FfiPathPoint;
+
+int32_t rust_pathfinder_find_path(
+    PathfinderWorldAccessor accessor,
+    double start_x, double start_y, double start_z,
+    double target_x, double target_y, double target_z,
+    float entity_width,
+    float entity_height,
+    float max_distance,
+    FfiPathPoint* out_points,
+    int32_t max_points
+);
+
 #ifdef __cplusplus
 }
 #endif
+
