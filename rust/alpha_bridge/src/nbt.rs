@@ -761,6 +761,46 @@ pub unsafe extern "C" fn alpha_nbt_free_name(name: *mut c_char) {
     }
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn alpha_nbt_compound_clone(ptr: *const NbtCompound) -> *mut NbtCompound {
+    if ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+    Box::into_raw(Box::new((*ptr).clone()))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alpha_nbt_list_clone(ptr: *const NbtList) -> *mut NbtList {
+    if ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+    Box::into_raw(Box::new((*ptr).clone()))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alpha_nbt_compound_remove(comp: *mut NbtCompound, name: *const c_char) {
+    if !comp.is_null() {
+        let comp = &mut *comp;
+        comp.map.remove(c_to_str(name));
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alpha_nbt_compound_has_key(comp: *const NbtCompound, name: *const c_char) -> bool {
+    if comp.is_null() {
+        return false;
+    }
+    (*comp).map.contains_key(c_to_str(name))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alpha_nbt_list_set_type(list: *mut NbtList, tag_type: u8) {
+    if !list.is_null() {
+        (*list).tag_type = tag_type;
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;

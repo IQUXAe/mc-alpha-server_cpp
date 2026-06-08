@@ -156,6 +156,97 @@ pub unsafe extern "C" fn alpha_chunk_data_free(data: *mut AlphaChunkData) {
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn alpha_chunk_data_free_except_arrays(data: *mut AlphaChunkData) {
+    if data.is_null() {
+        return;
+    }
+    let d = Box::from_raw(data);
+    
+    let free_nbt_list = |ptrs: *mut *mut NbtCompound, count: size_t| {
+        if !ptrs.is_null() && count > 0 {
+            let list = Vec::from_raw_parts(ptrs, count, count);
+            for &comp in &list {
+                if !comp.is_null() {
+                    let _ = Box::from_raw(comp);
+                }
+            }
+        }
+    };
+    
+    free_nbt_list(d.tile_entities, d.tile_entities_count);
+    free_nbt_list(d.items, d.items_count);
+    free_nbt_list(d.animals, d.animals_count);
+    free_nbt_list(d.monsters, d.monsters_count);
+    free_nbt_list(d.boats, d.boats_count);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alpha_chunk_alloc_arrays(
+    blocks: *mut *mut u8,
+    data: *mut *mut u8,
+    skylight: *mut *mut u8,
+    blocklight: *mut *mut u8,
+    height_map: *mut *mut u8,
+) {
+    if !blocks.is_null() {
+        let mut v = vec![0u8; 32768];
+        v.shrink_to_fit();
+        *blocks = v.as_mut_ptr();
+        std::mem::forget(v);
+    }
+    if !data.is_null() {
+        let mut v = vec![0u8; 16384];
+        v.shrink_to_fit();
+        *data = v.as_mut_ptr();
+        std::mem::forget(v);
+    }
+    if !skylight.is_null() {
+        let mut v = vec![0u8; 16384];
+        v.shrink_to_fit();
+        *skylight = v.as_mut_ptr();
+        std::mem::forget(v);
+    }
+    if !blocklight.is_null() {
+        let mut v = vec![0u8; 16384];
+        v.shrink_to_fit();
+        *blocklight = v.as_mut_ptr();
+        std::mem::forget(v);
+    }
+    if !height_map.is_null() {
+        let mut v = vec![0u8; 256];
+        v.shrink_to_fit();
+        *height_map = v.as_mut_ptr();
+        std::mem::forget(v);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alpha_chunk_free_arrays(
+    blocks: *mut u8,
+    data: *mut u8,
+    skylight: *mut u8,
+    blocklight: *mut u8,
+    height_map: *mut u8,
+) {
+    if !blocks.is_null() {
+        let _ = Vec::from_raw_parts(blocks, 32768, 32768);
+    }
+    if !data.is_null() {
+        let _ = Vec::from_raw_parts(data, 16384, 16384);
+    }
+    if !skylight.is_null() {
+        let _ = Vec::from_raw_parts(skylight, 16384, 16384);
+    }
+    if !blocklight.is_null() {
+        let _ = Vec::from_raw_parts(blocklight, 16384, 16384);
+    }
+    if !height_map.is_null() {
+        let _ = Vec::from_raw_parts(height_map, 256, 256);
+    }
+}
+
+
+#[no_mangle]
 pub unsafe extern "C" fn alpha_chunk_loader_save(
     world_dir: *const c_char,
     create_dirs: bool,

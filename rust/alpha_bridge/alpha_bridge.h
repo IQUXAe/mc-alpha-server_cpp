@@ -240,11 +240,16 @@ AlphaBuffer alpha_nbt_compound_get_byte_array(const NbtCompound* comp, const cha
 NbtCompound* alpha_nbt_compound_get_compound(const NbtCompound* comp, const char* name);
 NbtList* alpha_nbt_compound_get_list(const NbtCompound* comp, const char* name);
 AlphaBuffer alpha_nbt_compound_get_keys(const NbtCompound* comp);
+NbtCompound* alpha_nbt_compound_clone(const NbtCompound* ptr);
+NbtList* alpha_nbt_list_clone(const NbtList* ptr);
+void alpha_nbt_compound_remove(NbtCompound* comp, const char* name);
+bool alpha_nbt_compound_has_key(const NbtCompound* comp, const char* name);
 
 NbtList* alpha_nbt_list_create(uint8_t tag_type);
 void alpha_nbt_list_free(NbtList* ptr);
 uint8_t alpha_nbt_list_get_type(const NbtList* list);
 size_t alpha_nbt_list_get_size(const NbtList* list);
+void alpha_nbt_list_set_type(NbtList* list, uint8_t tag_type);
 
 void alpha_nbt_list_add_byte(NbtList* list, int8_t val);
 void alpha_nbt_list_add_short(NbtList* list, int16_t val);
@@ -301,6 +306,21 @@ typedef struct AlphaChunkData {
 } AlphaChunkData;
 
 void alpha_chunk_data_free(AlphaChunkData* data);
+void alpha_chunk_data_free_except_arrays(AlphaChunkData* data);
+void alpha_chunk_alloc_arrays(
+    uint8_t** blocks,
+    uint8_t** data,
+    uint8_t** skylight,
+    uint8_t** blocklight,
+    uint8_t** height_map
+);
+void alpha_chunk_free_arrays(
+    uint8_t* blocks,
+    uint8_t* data,
+    uint8_t* skylight,
+    uint8_t* blocklight,
+    uint8_t* height_map
+);
 bool alpha_chunk_loader_save(
     const char* world_dir,
     bool create_dirs,
