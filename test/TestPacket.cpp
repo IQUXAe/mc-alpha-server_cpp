@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "network/Packet.h"
 #include "network/packets/AllPackets.h"
+#include "alpha_bridge.h"
 
 class PacketTest : public ::testing::Test {
 protected:
@@ -385,4 +386,43 @@ TEST_F(PacketTest, Packet17AddToInventory) {
     EXPECT_EQ(read.itemId, 264);
     EXPECT_EQ(read.count, 5);
     EXPECT_EQ(read.damage, 0);
+}
+
+TEST_F(PacketTest, PacketCreateFromFfi) {
+    RustPacket ffiPacket;
+    ffiPacket.packet_id = 3; // Chat
+    ffiPacket.data.chat.message = "Hello from Rust FFI!";
+
+    auto pkt = Packet::createFromFfi(&ffiPacket);
+    ASSERT_NE(pkt, nullptr);
+    EXPECT_EQ(pkt->getPacketId(), 3);
+    
+    auto chatPkt = dynamic_cast<Packet3Chat*>(pkt.get());
+    ASSERT_NE(chatPkt, nullptr);
+    EXPECT_EQ(chatPkt->message, "Hello from Rust FFI!");
+}
+
+TEST_F(PacketTest, PacketCreateFromFfiInventory) {
+    FfiSlotData slots[2] = {
+        { 264, 1, 10 },
+        { -1, 0, 0 }
+    };
+    RustPacket ffiPacket;
+    ffiPacket.packet_id = 5;
+    ffiPacket.data.inventory.type = 0;
+    ffiPacket.data.inventory.item_count = 2;
+    ffiPacket.data.inventory.slots = slots;
+
+    auto pkt = Packet::createFromFfi(&ffiPacket);
+    ASSERT_NE(pkt, nullptr);
+    EXPECT_EQ(pkt->getPacketId(), 5);
+
+    auto invPkt = dynamic_cast<Packet5PlayerInventory*>(pkt.get());
+    ASSERT_NE(invPkt, nullptr);
+    EXPECT_EQ(invPkt->type, 0);
+    ASSERT_EQ(invPkt->slots.size(), 2);
+    EXPECT_EQ(invPkt->slots[0].itemId, 264);
+    EXPECT_EQ(invPkt->slots[0].count, 1);
+    EXPECT_EQ(invPkt->slots[0].damage, 10);
+    EXPECT_EQ(invPkt->slots[1].itemId, -1);
 }

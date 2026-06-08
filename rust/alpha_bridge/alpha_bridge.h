@@ -335,6 +335,142 @@ AlphaChunkData* alpha_chunk_loader_load(
 // RustNetworkManager FFI
 typedef struct RustNetworkManager RustNetworkManager;
 
+typedef struct FfiSlotData {
+    int16_t item_id;
+    int8_t count;
+    int16_t damage;
+} FfiSlotData;
+
+typedef struct RustPacket1Login {
+    int32_t protocol_version;
+    const char* username;
+    const char* password;
+    int64_t map_seed;
+    int8_t dimension;
+} RustPacket1Login;
+
+typedef struct RustPacket2Handshake {
+    const char* username;
+} RustPacket2Handshake;
+
+typedef struct RustPacket3Chat {
+    const char* message;
+} RustPacket3Chat;
+
+typedef struct RustPacket5PlayerInventory {
+    int32_t type;
+    int16_t item_count;
+    const FfiSlotData* slots;
+} RustPacket5PlayerInventory;
+
+typedef struct RustPacket7UseEntity {
+    int32_t player_entity_id;
+    int32_t target_entity_id;
+    bool is_left_click;
+} RustPacket7UseEntity;
+
+typedef struct RustPacket10Flying {
+    bool on_ground;
+} RustPacket10Flying;
+
+typedef struct RustPacket11PlayerPosition {
+    double x;
+    double y;
+    double stance;
+    double z;
+    bool on_ground;
+} RustPacket11PlayerPosition;
+
+typedef struct RustPacket12PlayerLook {
+    float yaw;
+    float pitch;
+    bool on_ground;
+} RustPacket12PlayerLook;
+
+typedef struct RustPacket13PlayerLookMove {
+    double x;
+    double y;
+    double stance;
+    double z;
+    float yaw;
+    float pitch;
+    bool on_ground;
+} RustPacket13PlayerLookMove;
+
+typedef struct RustPacket14BlockDig {
+    int8_t status;
+    int32_t x;
+    int8_t y;
+    int32_t z;
+    int8_t face;
+} RustPacket14BlockDig;
+
+typedef struct RustPacket15Place {
+    int16_t item_id;
+    int32_t x;
+    int8_t y;
+    int32_t z;
+    int8_t direction;
+} RustPacket15Place;
+
+typedef struct RustPacket16BlockItemSwitch {
+    int32_t entity_id;
+    int16_t item_id;
+} RustPacket16BlockItemSwitch;
+
+typedef struct RustPacket18ArmAnimation {
+    int32_t entity_id;
+    int8_t animate;
+} RustPacket18ArmAnimation;
+
+typedef struct RustPacket21PickupSpawn {
+    int32_t entity_id;
+    int16_t item_id;
+    int8_t count;
+    int32_t x;
+    int32_t y;
+    int32_t z;
+    int8_t rotation;
+    int8_t pitch;
+    int8_t roll;
+} RustPacket21PickupSpawn;
+
+typedef struct RustPacket59ComplexEntity {
+    int32_t x;
+    int16_t y;
+    int32_t z;
+    const uint8_t* nbt_data;
+    size_t nbt_len;
+} RustPacket59ComplexEntity;
+
+typedef struct RustPacket255KickDisconnect {
+    const char* reason;
+} RustPacket255KickDisconnect;
+
+typedef union RustPacketUnion {
+    RustPacket1Login login;
+    RustPacket2Handshake handshake;
+    RustPacket3Chat chat;
+    RustPacket5PlayerInventory inventory;
+    RustPacket7UseEntity use_entity;
+    RustPacket10Flying flying;
+    RustPacket11PlayerPosition position;
+    RustPacket12PlayerLook look;
+    RustPacket13PlayerLookMove look_move;
+    RustPacket14BlockDig block_dig;
+    RustPacket15Place place;
+    RustPacket16BlockItemSwitch item_switch;
+    RustPacket18ArmAnimation arm_anim;
+    RustPacket21PickupSpawn pickup_spawn;
+    RustPacket59ComplexEntity complex_entity;
+    RustPacket255KickDisconnect kick;
+} RustPacketUnion;
+
+typedef struct RustPacket {
+    uint8_t packet_id;
+    RustPacketUnion data;
+} RustPacket;
+
 RustNetworkManager* rust_network_manager_create(int socket_fd);
 void rust_network_manager_destroy(RustNetworkManager* manager);
 void rust_network_manager_send(
@@ -343,13 +479,8 @@ void rust_network_manager_send(
     size_t len,
     bool is_chunk_data
 );
-bool rust_network_manager_poll(
-    RustNetworkManager* manager,
-    uint8_t* out_packet_id,
-    uint8_t** out_payload,
-    size_t* out_payload_len
-);
-void rust_network_manager_free_buffer(uint8_t* ptr, size_t len);
+RustPacket* rust_network_manager_poll_parsed(RustNetworkManager* manager);
+void rust_network_manager_free_packet(RustPacket* packet);
 void rust_network_manager_shutdown(RustNetworkManager* manager, const char* reason);
 bool rust_network_manager_is_running(RustNetworkManager* manager);
 bool rust_network_manager_is_terminating(RustNetworkManager* manager);

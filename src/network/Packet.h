@@ -13,6 +13,7 @@
 #include <arpa/inet.h>
 
 class NetHandler;
+struct RustPacket;
 
 // Big-endian byte buffer for Minecraft protocol I/O
 class ByteBuffer {
@@ -139,6 +140,7 @@ public:
 
     static void registerPackets();
     static std::unique_ptr<Packet> createPacket(int id);
+    static std::unique_ptr<Packet> createFromFfi(const struct RustPacket* ffiPacket);
 
     // Registry
     static std::unordered_map<int, std::function<std::unique_ptr<Packet>()>> idToFactory;

@@ -43,40 +43,26 @@ public:
             return;
         }
 
-        uint8_t packetId = 0;
-        uint8_t* payload = nullptr;
-        size_t payloadLen = 0;
-
         std::vector<std::unique_ptr<Packet>> toProcess;
 
         // Poll incoming packets from Rust
         bool polledAny = false;
-        while (rust_network_manager_poll(rustManager_, &packetId, &payload, &payloadLen)) {
+        RustPacket* ffiPacket = nullptr;
+        while ((ffiPacket = rust_network_manager_poll_parsed(rustManager_)) != nullptr) {
             polledAny = true;
             try {
-                auto pkt = Packet::createPacket(static_cast<int>(packetId));
+                auto pkt = Packet::createFromFfi(ffiPacket);
                 if (!pkt) {
-                    throw std::runtime_error("Bad packet id " + std::to_string(packetId));
+                    throw std::runtime_error("Bad packet id " + std::to_string(ffiPacket->packet_id));
                 }
-
-                std::vector<uint8_t> payloadVec;
-                if (payload && payloadLen > 0) {
-                    payloadVec.assign(payload, payload + payloadLen);
-                    rust_network_manager_free_buffer(payload, payloadLen);
-                    payload = nullptr;
-                }
-                
-                ByteBuffer buf(payloadVec);
-                pkt->readPacketData(buf);
                 toProcess.push_back(std::move(pkt));
             } catch (const std::exception& e) {
-                if (payload) {
-                    rust_network_manager_free_buffer(payload, payloadLen);
-                }
-                Logger::warning("Failed to parse packet ID {}: {}", packetId, e.what());
+                Logger::warning("Failed to parse packet ID {}: {}", ffiPacket->packet_id, e.what());
                 shutdown("Packet parsing error: " + std::string(e.what()));
+                rust_network_manager_free_packet(ffiPacket);
                 break;
             }
+            rust_network_manager_free_packet(ffiPacket);
         }
 
         if (!polledAny) {
