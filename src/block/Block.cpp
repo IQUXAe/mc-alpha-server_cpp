@@ -86,7 +86,7 @@ public:
     }
 
     void updateTick(World* world, int x, int y, int z) override {
-        if (canFallBelow(world, x, y - 1, z) && y >= 0) {
+        if (y >= 0 && canFallBelow(world, x, y - 1, z)) {
             world->setBlockAndUpdate(x, y, z, 0);
             auto entity = std::make_unique<EntityFallingSand>(blockID, x + 0.5, y + 0.5, z + 0.5);
             world->spawnEntityInWorld(std::move(entity));

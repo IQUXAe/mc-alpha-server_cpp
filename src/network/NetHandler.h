@@ -35,8 +35,8 @@ public:
 
     virtual void handleGenericPacket(Packet& pkt) { unexpectedPacket(); }
 
-private:
+protected:
     void unexpectedPacket() {
-        // Default: kick on unexpected packet in Java
+        handleErrorMessage("Unexpected packet");
     }
 };

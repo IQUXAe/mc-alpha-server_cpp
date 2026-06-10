@@ -585,7 +585,7 @@ World::~World() {
 void World::tick() {
     drainPreparedChunks();
 
-    // Безопасное добавление накопившихся сущностей в главный поток
+    // Safe flush of queued entities into the main tick
     std::vector<std::unique_ptr<Entity>> entitiesToAdd;
     {
         std::lock_guard<std::mutex> lock(pendingEntitiesMutex_);
@@ -2052,12 +2052,14 @@ std::optional<MovingObjectPosition> World::rayTraceBlocks(const Vec3D& from, con
 void World::findSafeSpawnPoint() {
     Logger::info("Searching for safe spawn point...");
     std::uniform_int_distribution<int> dist(-1, 1);
-    for (int sx = 0, sz = 0; ; sx += dist(rand), sz += dist(rand)) {
+    for (int sx = 0, sz = 0, iter = 0; iter < 10000; ++iter, sx += dist(rand), sz += dist(rand)) {
         Chunk* chunk = getChunk(sx, sz, true);
+        if (!chunk) continue;
         bool found = false;
         for (int x = 0; x < 16 && !found; ++x) {
             for (int z = 0; z < 16 && !found; ++z) {
                 int y = chunk->getHeightValue(x, z);
+                if (y < 1) continue;
                 uint8_t ground = chunk->getBlockID(x, y - 1, z);
                 if (ground == 2 || ground == 12) {
                     spawnX = sx * 16 + x;

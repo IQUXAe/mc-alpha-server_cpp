@@ -53,9 +53,9 @@ NetworkListenThread::~NetworkListenThread() {
     acceptThread_.request_stop();
 }
 
-void NetworkListenThread::addConnection(NetServerHandler* handler) {
+void NetworkListenThread::addConnection(std::unique_ptr<NetServerHandler> handler) {
     std::lock_guard<std::mutex> lock(activeMutex_);
-    activeConnections_.push_back(handler);
+    activeConnections_.push_back(std::move(handler));
 }
 
 void NetworkListenThread::addPendingConnection(std::shared_ptr<NetLoginHandler> handler) {
@@ -88,7 +88,7 @@ void NetworkListenThread::networkTick() {
     {
         std::lock_guard<std::mutex> lock(activeMutex_);
         for (auto it = activeConnections_.begin(); it != activeConnections_.end(); ) {
-            auto* handler = *it;
+            auto* handler = it->get();
             try {
                 handler->tick();
             } catch (const std::exception& e) {

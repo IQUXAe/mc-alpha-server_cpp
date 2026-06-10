@@ -48,7 +48,7 @@ public:
     void writeBool(bool v)     { writeByte(v ? 1 : 0); }
 
     void writeUTF(const std::string& s) {
-        if (s.size() > 65535) throw std::runtime_error("String too long for writeUTF");
+        if (s.size() > 32767) throw std::runtime_error("String too long for writeUTF");
         writeShort(static_cast<int16_t>(s.size()));
         data.insert(data.end(), s.begin(), s.end());
     }

@@ -13,9 +13,9 @@ public:
     double zCoord;
 
     Vec3D(double x = 0.0, double y = 0.0, double z = 0.0)
-        : xCoord(x == -0.0 ? 0.0 : x),
-          yCoord(y == -0.0 ? 0.0 : y),
-          zCoord(z == -0.0 ? 0.0 : z) {}
+        : xCoord(x),
+          yCoord(y),
+          zCoord(z) {}
 
     static Vec3D createVectorHelper(double x, double y, double z) {
         return Vec3D(x, y, z);

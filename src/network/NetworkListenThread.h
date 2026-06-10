@@ -28,7 +28,7 @@ public:
     NetworkListenThread(MinecraftServer* server, const std::string& bindAddress, int port);
     ~NetworkListenThread();
 
-    void addConnection(NetServerHandler* handler);
+    void addConnection(std::unique_ptr<NetServerHandler> handler);
     void addPendingConnection(std::shared_ptr<NetLoginHandler> handler);
 
     // Called every tick from the main server thread
@@ -43,7 +43,7 @@ private:
     std::vector<std::shared_ptr<NetLoginHandler>> pendingConnections_;
 
     std::mutex activeMutex_;
-    std::vector<NetServerHandler*> activeConnections_;
+    std::vector<std::unique_ptr<NetServerHandler>> activeConnections_;
 
     void acceptLoop(std::stop_token stopToken);
 };

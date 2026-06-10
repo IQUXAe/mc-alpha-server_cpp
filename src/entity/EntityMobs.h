@@ -31,7 +31,7 @@ public:
         if (!isEntityAlive()) return;
 
         if (attackCooldown_ > 0) --attackCooldown_;
-        if (daylightBurnTicks_ <= 0) fire = 0;
+        if (daylightBurnTicks_ <= 0 && fire <= 20) fire = 0;
         if (daylightBurnTicks_ > 0) {
             fire = std::max(fire, 20);
             if ((daylightBurnTicks_ % 20) == 0) damageEntity(1);

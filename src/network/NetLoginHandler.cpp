@@ -199,7 +199,10 @@ void NetLoginHandler::handleHandshake(Packet2Handshake& pkt) {
         int64_t randVal = dist(rng_);
         std::stringstream ss;
         ss << std::hex << randVal;
-        serverId_ = ss.str();
+        {
+            std::lock_guard lock(stateMutex_);
+            serverId_ = ss.str();
+        }
         netManager->addToSendQueue(std::make_unique<Packet2Handshake>(serverId_));
     } else {
         netManager->addToSendQueue(std::make_unique<Packet2Handshake>("-"));
@@ -244,7 +247,7 @@ void NetLoginHandler::doLogin(Packet1Login& pkt) {
     if (player) {
         Logger::info("{} logged in with entity id {}", getUserAndIPString(), player->entityId);
 
-        auto serverHandler = new NetServerHandler(mcServer_, std::move(netManager), player); // ALLOW_NEW
+        auto serverHandler = std::make_unique<NetServerHandler>(mcServer_, std::move(netManager), player);
 
         // Send login response
         serverHandler->sendPacket(std::make_unique<Packet1Login>(
@@ -274,12 +277,10 @@ void NetLoginHandler::doLogin(Packet1Login& pkt) {
         serverHandler->sendInventory();
         
         serverHandler->sendChunks();
-
-        // Register connection
-        mcServer_->networkListenThread->addConnection(serverHandler);
-
-        // Send time
         serverHandler->sendPacket(std::make_unique<Packet4UpdateTime>(mcServer_->getWorldTime()));
+
+        // Register connection (transfer ownership to NetworkListenThread)
+        mcServer_->networkListenThread->addConnection(std::move(serverHandler));
     }
 
     finishedProcessing.store(true, std::memory_order_relaxed);
@@ -300,7 +301,12 @@ std::string NetLoginHandler::getUserAndIPString() const {
 
 void NetLoginHandler::verifyLoginSession(Packet1Login pkt) {
     try {
-        const std::string reply = performSessionCheck(pkt.username, serverId_);
+        std::string sid;
+        {
+            std::lock_guard lock(stateMutex_);
+            sid = serverId_;
+        }
+        const std::string reply = performSessionCheck(pkt.username, sid);
         Logger::info("Session check for {} returned '{}'", pkt.username, reply);
 
         if (reply == "YES") {

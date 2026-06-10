@@ -145,7 +145,9 @@ public:
     void readPacketData(ByteBuffer& buf) override {
         type = buf.readInt();
         itemCount = buf.readShort();
-        slots.resize(itemCount);
+        if (itemCount < 0) throw std::runtime_error("Negative item count in Packet5");
+        if (itemCount > 1024) throw std::runtime_error("Item count too large in Packet5");
+        slots.resize(static_cast<size_t>(itemCount));
         for (int i = 0; i < itemCount; ++i) {
             slots[i].itemId = buf.readShort();
             if (slots[i].itemId >= 0) {
@@ -937,6 +939,8 @@ public:
         sizeY = buf.readByte() + 1;
         sizeZ = buf.readByte() + 1;
         int32_t compressedSize = buf.readInt();
+        if (compressedSize < 0) throw std::runtime_error("Negative compressed size in Packet51");
+        if (compressedSize > 1 << 24) throw std::runtime_error("Compressed size too large in Packet51");
         compressedData = buf.readBytes(static_cast<size_t>(compressedSize));
     }
 
@@ -971,9 +975,11 @@ public:
         chunkX = buf.readInt();
         chunkZ = buf.readInt();
         int16_t size = buf.readShort();
-        coordinateArray.resize(size);
-        typeArray.resize(size);
-        metadataArray.resize(size);
+        if (size < 0) throw std::runtime_error("Negative size in Packet52");
+        if (size > 65536) throw std::runtime_error("Size too large in Packet52");
+        coordinateArray.resize(static_cast<size_t>(size));
+        typeArray.resize(static_cast<size_t>(size));
+        metadataArray.resize(static_cast<size_t>(size));
         for (int i = 0; i < size; ++i) coordinateArray[i] = buf.readShort();
         for (int i = 0; i < size; ++i) typeArray[i] = buf.readByte();
         for (int i = 0; i < size; ++i) metadataArray[i] = buf.readByte();
@@ -1086,7 +1092,9 @@ public:
         x = buf.readDouble(); y = buf.readDouble(); z = buf.readDouble();
         radius = buf.readFloat();
         int32_t count = buf.readInt();
-        destroyedBlocks.resize(count);
+        if (count < 0) throw std::runtime_error("Negative count in Packet60");
+        if (count > 1000000) throw std::runtime_error("Count too large in Packet60");
+        destroyedBlocks.resize(static_cast<size_t>(count));
         for (int i = 0; i < count; ++i) {
             destroyedBlocks[i].dx = buf.readByte();
             destroyedBlocks[i].dy = buf.readByte();

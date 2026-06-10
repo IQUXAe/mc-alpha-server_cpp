@@ -137,7 +137,9 @@ NetServerHandler::NetServerHandler(MinecraftServer* server, std::unique_ptr<Netw
     lastZ_ = player_->posZ;
 }
 
-NetServerHandler::~NetServerHandler() = default;
+NetServerHandler::~NetServerHandler() {
+    delete player_;
+}
 
 void NetServerHandler::tick() {
     netManager_->processReadPackets();

@@ -76,13 +76,12 @@ bool ItemInWorldManager::harvestBlock(int x, int y, int z) {
 
     ItemStack* stack = thisPlayerMP->getCurrentEquippedItem();
     if (stack && stack->itemID > 0 && stack->itemID < 32000) {
-        // Java: ItemTool.hitBlock damages tool by 1
         Item* item = Item::itemsList[stack->itemID];
         if (item && dynamic_cast<ItemTool*>(item)) {
             stack->damageItem(1);
             if (stack->stackSize <= 0 || stack->itemDamage > item->maxDamage) {
-                thisPlayerMP->destroyCurrentEquippedItem();
                 stack = nullptr;
+                thisPlayerMP->destroyCurrentEquippedItem();
             }
         }
     }
