@@ -448,6 +448,8 @@ pub mod chunk_loader;
 pub mod network;
 pub mod generator;
 pub mod pathfinder;
+pub mod commands;
+
 
 
 

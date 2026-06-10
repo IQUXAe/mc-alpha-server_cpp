@@ -550,7 +550,41 @@ int32_t rust_pathfinder_find_path(
     int32_t max_points
 );
 
+typedef enum ConsoleCommandTag {
+    ConsoleCommand_Help,
+    ConsoleCommand_List,
+    ConsoleCommand_Stop,
+    ConsoleCommand_SaveAll,
+    ConsoleCommand_Op,
+    ConsoleCommand_Deop,
+    ConsoleCommand_BanIp,
+    ConsoleCommand_PardonIp,
+    ConsoleCommand_Ban,
+    ConsoleCommand_Pardon,
+    ConsoleCommand_Kick,
+    ConsoleCommand_Tp,
+    ConsoleCommand_Summon,
+    ConsoleCommand_Say,
+    ConsoleCommand_Tell,
+    ConsoleCommand_Unknown
+} ConsoleCommandTag;
+
+typedef struct FfiString {
+    const char* ptr;
+    size_t len;
+} FfiString;
+
+typedef struct RustParsedCommand {
+    ConsoleCommandTag tag;
+    FfiString arg1;
+    FfiString arg2;
+    int32_t count;
+} RustParsedCommand;
+
+RustParsedCommand rust_parse_console_command(const char* cmd, size_t cmd_len);
+
 #ifdef __cplusplus
 }
 #endif
+
 

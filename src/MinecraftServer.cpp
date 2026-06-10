@@ -9,6 +9,8 @@
 #include "world/World.h"
 #include "block/Block.h"
 #include "core/Item.h"
+#include "../rust/alpha_bridge/alpha_bridge.h"
+
 
 #include <chrono>
 #include <thread>
@@ -264,19 +266,14 @@ void MinecraftServer::processCommands() {
     }
 }
 
-void MinecraftServer::handleCommand(const std::string& cmd) {
-    std::string lower = cmd;
-    std::ranges::transform(lower, lower.begin(), ::tolower);
-    std::string_view sv(cmd);
+static std::string fromFfi(FfiString s) {
+    if (!s.ptr || s.len == 0) return "";
+    return std::string(s.ptr, s.len);
+}
 
-    auto argOf = [&](std::string_view prefix) -> std::string {
-        return std::string(trimLeft(sv.substr(prefix.size())));
-    };
-    auto splitTwo = [](std::string_view s) -> std::pair<std::string, std::string> {
-        auto sp = s.find(' ');
-        if (sp == std::string_view::npos) return {std::string(s), {}};
-        return {std::string(s.substr(0, sp)), std::string(trimLeft(s.substr(sp + 1)))};
-    };
+void MinecraftServer::handleCommand(const std::string& cmd) {
+    RustParsedCommand parsed = rust_parse_console_command(cmd.c_str(), cmd.size());
+
     auto toLowerCopy = [](std::string s) {
         std::ranges::transform(s, s.begin(), [](unsigned char c) {
             return static_cast<char>(std::tolower(c));
@@ -284,177 +281,199 @@ void MinecraftServer::handleCommand(const std::string& cmd) {
         return s;
     };
 
-    if (lower.starts_with("help") || lower.starts_with("?")) {
-        Logger::info(
-            "Console commands:\n"
-            "   help  or  ?               shows this message\n"
-            "   kick <player>             removes a player from the server\n"
-            "   ban <player>              bans a player from the server\n"
-            "   pardon <player>           pardons a banned player\n"
-            "   ban-ip <ip>               bans an IP address\n"
-            "   pardon-ip <ip>            pardons a banned IP address\n"
-            "   op <player>               turns a player into an op\n"
-            "   deop <player>             removes op status\n"
-            "   tp <player1> <player2>    teleports player1 to player2\n"
-            "   give <player> <id> [num]  gives a player a resource\n"
-            "   summon <mob> [count] [player] spawns debug mobs near player\n"
-            "   tell <player> <message>   sends a private message\n"
-            "   stop                      gracefully stops the server\n"
-            "   save-all                  forces a server-wide level save\n"
-            "   list                      lists all connected players\n"
-            "   say <message>             broadcasts a message");
-    } else if (lower.starts_with("list")) {
-        Logger::info("Connected players: {}", configManager->getPlayerList());
-    } else if (lower.starts_with("stop")) {
-        Logger::info("Stopping the server..");
-        running_ = false;
-    } else if (lower.starts_with("save-all")) {
-        Logger::info("Forcing save..");
-        if (worldMngr) worldMngr->saveWorld();
-        if (configManager) configManager->savePlayerStates();
-        Logger::info("Save complete.");
-    } else if (lower.starts_with("op ")) {
-        auto name = argOf("op ");
-        configManager->opPlayer(name);
-        Logger::info("Opping {}", name);
-        configManager->sendChatToPlayer(name, "\u00a7eYou are now op!");
-    } else if (lower.starts_with("deop ")) {
-        auto name = argOf("deop ");
-        configManager->deopPlayer(name);
-        Logger::info("De-opping {}", name);
-        configManager->sendChatToPlayer(name, "\u00a7eYou are no longer op!");
-    } else if (lower.starts_with("ban-ip ")) {
-        auto ip = argOf("ban-ip ");
-        configManager->banIP(ip);
-        Logger::info("Banning ip {}", ip);
-    } else if (lower.starts_with("pardon-ip ")) {
-        auto ip = argOf("pardon-ip ");
-        configManager->unbanIP(ip);
-        Logger::info("Pardoning ip {}", ip);
-    } else if (lower.starts_with("ban ")) {
-        auto name = argOf("ban ");
-        configManager->banPlayer(name);
-        Logger::info("Banning {}", name);
-        if (auto* player = configManager->getPlayerEntity(name); player && player->netHandler)
-            player->netHandler->kick("Banned by admin");
-    } else if (lower.starts_with("pardon ")) {
-        auto name = argOf("pardon ");
-        configManager->unbanPlayer(name);
-        Logger::info("Pardoning {}", name);
-    } else if (lower.starts_with("kick ")) {
-        auto name = argOf("kick ");
-        if (auto* player = configManager->getPlayerEntity(name); player && player->netHandler) {
-            player->netHandler->kick("Kicked by admin");
-            Logger::info("Kicking {}", player->username);
-        } else {
-            Logger::info("Can't find user {}. No kick.", name);
+    switch (parsed.tag) {
+        case ConsoleCommand_Help: {
+            Logger::info(
+                "Console commands:\n"
+                "   help  or  ?               shows this message\n"
+                "   kick <player>             removes a player from the server\n"
+                "   ban <player>              bans a player from the server\n"
+                "   pardon <player>           pardons a banned player\n"
+                "   ban-ip <ip>               bans an IP address\n"
+                "   pardon-ip <ip>            pardons a banned IP address\n"
+                "   op <player>               turns a player into an op\n"
+                "   deop <player>             removes op status\n"
+                "   tp <player1> <player2>    teleports player1 to player2\n"
+                "   give <player> <id> [num]  gives a player a resource\n"
+                "   summon <mob> [count] [player] spawns debug mobs near player\n"
+                "   tell <player> <message>   sends a private message\n"
+                "   stop                      gracefully stops the server\n"
+                "   save-all                  forces a server-wide level save\n"
+                "   list                      lists all connected players\n"
+                "   say <message>             broadcasts a message");
+            break;
         }
-    } else if (lower.starts_with("tp ")) {
-        auto [p1, p2] = splitTwo(trimLeft(sv.substr(3)));
-        auto* player1 = configManager->getPlayerEntity(p1);
-        auto* player2 = configManager->getPlayerEntity(p2);
-        if (!player1)       Logger::info("Can't find user {}. No tp.", p1);
-        else if (!player2)  Logger::info("Can't find user {}. No tp.", p2);
-        else {
-            player1->netHandler->teleport(player2->posX, player2->posY, player2->posZ,
-                                          player2->rotationYaw, player2->rotationPitch);
-            Logger::info("Teleporting {} to {}.", p1, p2);
+        case ConsoleCommand_List: {
+            Logger::info("Connected players: {}", configManager->getPlayerList());
+            break;
         }
-    } else if (lower.starts_with("summon ")) {
-        if (!worldMngr || !configManager) {
-            Logger::info("World is not ready.");
-            return;
+        case ConsoleCommand_Stop: {
+            Logger::info("Stopping the server..");
+            running_ = false;
+            break;
         }
-
-        auto rest = std::string(trimLeft(sv.substr(7)));
-        auto [entityNameRaw, tail] = splitTwo(rest);
-        if (entityNameRaw.empty()) {
-            Logger::info("Usage: summon <mob> [count] [player]");
-            return;
+        case ConsoleCommand_SaveAll: {
+            Logger::info("Forcing save..");
+            if (worldMngr) worldMngr->saveWorld();
+            if (configManager) configManager->savePlayerStates();
+            Logger::info("Save complete.");
+            break;
         }
-
-        int count = 1;
-        std::string targetName;
-        if (!tail.empty()) {
-            auto [arg1, arg2] = splitTwo(tail);
-            if (!arg1.empty()) {
-                bool isNumber = std::ranges::all_of(arg1, [](unsigned char c) { return std::isdigit(c) != 0; });
-                if (isNumber) {
-                    count = std::max(1, std::min(64, std::stoi(arg1)));
-                    targetName = arg2;
-                } else {
-                    targetName = arg1;
+        case ConsoleCommand_Op: {
+            auto name = fromFfi(parsed.arg1);
+            configManager->opPlayer(name);
+            Logger::info("Opping {}", name);
+            configManager->sendChatToPlayer(name, "\u00a7eYou are now op!");
+            break;
+        }
+        case ConsoleCommand_Deop: {
+            auto name = fromFfi(parsed.arg1);
+            configManager->deopPlayer(name);
+            Logger::info("De-opping {}", name);
+            configManager->sendChatToPlayer(name, "\u00a7eYou are no longer op!");
+            break;
+        }
+        case ConsoleCommand_BanIp: {
+            auto ip = fromFfi(parsed.arg1);
+            configManager->banIP(ip);
+            Logger::info("Banning ip {}", ip);
+            break;
+        }
+        case ConsoleCommand_PardonIp: {
+            auto ip = fromFfi(parsed.arg1);
+            configManager->unbanIP(ip);
+            Logger::info("Pardoning ip {}", ip);
+            break;
+        }
+        case ConsoleCommand_Ban: {
+            auto name = fromFfi(parsed.arg1);
+            configManager->banPlayer(name);
+            Logger::info("Banning {}", name);
+            if (auto* player = configManager->getPlayerEntity(name); player && player->netHandler)
+                player->netHandler->kick("Banned by admin");
+            break;
+        }
+        case ConsoleCommand_Pardon: {
+            auto name = fromFfi(parsed.arg1);
+            configManager->unbanPlayer(name);
+            Logger::info("Pardoning {}", name);
+            break;
+        }
+        case ConsoleCommand_Kick: {
+            auto name = fromFfi(parsed.arg1);
+            if (auto* player = configManager->getPlayerEntity(name); player && player->netHandler) {
+                player->netHandler->kick("Kicked by admin");
+                Logger::info("Kicking {}", player->username);
+            } else {
+                Logger::info("Can't find user {}. No kick.", name);
+            }
+            break;
+        }
+        case ConsoleCommand_Tp: {
+            auto p1 = fromFfi(parsed.arg1);
+            auto p2 = fromFfi(parsed.arg2);
+            auto* player1 = configManager->getPlayerEntity(p1);
+            auto* player2 = configManager->getPlayerEntity(p2);
+            if (!player1)       Logger::info("Can't find user {}. No tp.", p1);
+            else if (!player2)  Logger::info("Can't find user {}. No tp.", p2);
+            else {
+                player1->netHandler->teleport(player2->posX, player2->posY, player2->posZ,
+                                              player2->rotationYaw, player2->rotationPitch);
+                Logger::info("Teleporting {} to {}.", p1, p2);
+            }
+            break;
+        }
+        case ConsoleCommand_Summon: {
+            if (!worldMngr || !configManager) {
+                Logger::info("World is not ready.");
+                break;
+            }
+            auto entityNameRaw = fromFfi(parsed.arg1);
+            if (entityNameRaw.empty()) {
+                Logger::info("Usage: summon <mob> [count] [player]");
+                break;
+            }
+            auto targetName = fromFfi(parsed.arg2);
+            EntityPlayerMP* anchor = nullptr;
+            if (!targetName.empty()) {
+                anchor = configManager->getPlayerEntity(targetName);
+                if (!anchor) {
+                    Logger::info("Can't find user {}. No summon.", targetName);
+                    break;
                 }
+            } else if (!configManager->playerEntities.empty()) {
+                anchor = configManager->playerEntities.front();
             }
-        }
 
-        EntityPlayerMP* anchor = nullptr;
-        if (!targetName.empty()) {
-            anchor = configManager->getPlayerEntity(targetName);
             if (!anchor) {
-                Logger::info("Can't find user {}. No summon.", targetName);
-                return;
-            }
-        } else if (!configManager->playerEntities.empty()) {
-            anchor = configManager->playerEntities.front();
-        }
-
-        if (!anchor) {
-            Logger::info("No online players to anchor summon.");
-            return;
-        }
-
-        const std::string entityName = toLowerCopy(entityNameRaw);
-        auto createEntity = [&]() -> std::unique_ptr<Entity> {
-            if (entityName == "pig") return std::make_unique<EntityPig>(worldMngr.get());
-            if (entityName == "sheep") return std::make_unique<EntitySheep>(worldMngr.get());
-            if (entityName == "cow") return std::make_unique<EntityCow>(worldMngr.get());
-            if (entityName == "chicken") return std::make_unique<EntityChicken>(worldMngr.get());
-            if (entityName == "zombie") return std::make_unique<EntityZombie>(worldMngr.get());
-            if (entityName == "skeleton") return std::make_unique<EntitySkeleton>(worldMngr.get());
-            if (entityName == "spider") return std::make_unique<EntitySpider>(worldMngr.get());
-            if (entityName == "creeper") return std::make_unique<EntityCreeper>(worldMngr.get());
-            return nullptr;
-        };
-
-        int spawned = 0;
-        for (int i = 0; i < count; ++i) {
-            auto entity = createEntity();
-            if (!entity) {
-                Logger::info("Unknown mob {}. Try pig/sheep/cow/chicken/zombie/skeleton/spider/creeper.", entityNameRaw);
-                return;
+                Logger::info("No online players to anchor summon.");
+                break;
             }
 
-            const double angle = (static_cast<double>(i) / std::max(1, count)) * 6.283185307179586;
-            const double radius = 2.0 + (i % 3);
-            const double spawnX = anchor->posX + std::cos(angle) * radius;
-            const double spawnZ = anchor->posZ + std::sin(angle) * radius;
-            const int groundY = worldMngr->getHeightValue(static_cast<int>(std::floor(spawnX)),
-                                                          static_cast<int>(std::floor(spawnZ)));
-            const double spawnY = std::max(anchor->posY, static_cast<double>(groundY));
+            const std::string entityName = toLowerCopy(entityNameRaw);
+            auto createEntity = [&]() -> std::unique_ptr<Entity> {
+                if (entityName == "pig") return std::make_unique<EntityPig>(worldMngr.get());
+                if (entityName == "sheep") return std::make_unique<EntitySheep>(worldMngr.get());
+                if (entityName == "cow") return std::make_unique<EntityCow>(worldMngr.get());
+                if (entityName == "chicken") return std::make_unique<EntityChicken>(worldMngr.get());
+                if (entityName == "zombie") return std::make_unique<EntityZombie>(worldMngr.get());
+                if (entityName == "skeleton") return std::make_unique<EntitySkeleton>(worldMngr.get());
+                if (entityName == "spider") return std::make_unique<EntitySpider>(worldMngr.get());
+                if (entityName == "creeper") return std::make_unique<EntityCreeper>(worldMngr.get());
+                return nullptr;
+            };
 
-            entity->setPositionAndRotation(
-                spawnX,
-                spawnY,
-                spawnZ,
-                static_cast<float>(std::rand() % 360),
-                0.0f);
-            worldMngr->spawnEntityInWorld(std::move(entity));
-            ++spawned;
+            int spawned = 0;
+            int count = parsed.count;
+            for (int i = 0; i < count; ++i) {
+                auto entity = createEntity();
+                if (!entity) {
+                    Logger::info("Unknown mob {}. Try pig/sheep/cow/chicken/zombie/skeleton/spider/creeper.", entityNameRaw);
+                    break;
+                }
+
+                const double angle = (static_cast<double>(i) / std::max(1, count)) * 6.283185307179586;
+                const double radius = 2.0 + (i % 3);
+                const double spawnX = anchor->posX + std::cos(angle) * radius;
+                const double spawnZ = anchor->posZ + std::sin(angle) * radius;
+                const int groundY = worldMngr->getHeightValue(static_cast<int>(std::floor(spawnX)),
+                                                              static_cast<int>(std::floor(spawnZ)));
+                const double spawnY = std::max(anchor->posY, static_cast<double>(groundY));
+
+                entity->setPositionAndRotation(
+                    spawnX,
+                    spawnY,
+                    spawnZ,
+                    static_cast<float>(std::rand() % 360),
+                    0.0f);
+                worldMngr->spawnEntityInWorld(std::move(entity));
+                ++spawned;
+            }
+            if (spawned > 0) {
+                Logger::info("Spawned {} {} near {}.", spawned, entityNameRaw, anchor->username);
+            }
+            break;
         }
-
-        Logger::info("Spawned {} {} near {}.", spawned, entityNameRaw, anchor->username);
-    } else if (lower.starts_with("say ")) {
-        auto msg = argOf("say ");
-        Logger::info("[Server] {}", msg);
-        configManager->broadcastPacket(std::make_unique<Packet3Chat>("\u00a7d[Server] " + msg));
-    } else if (lower.starts_with("tell ")) {
-        auto [target, msg] = splitTwo(trimLeft(sv.substr(5)));
-        Logger::info("[CONSOLE->{}] {}", target, msg);
-        if (!configManager->sendPacketToPlayer(target,
-                std::make_unique<Packet3Chat>("\u00a77CONSOLE whispers " + msg)))
-            Logger::info("There's no player by that name online.");
-    } else {
-        Logger::info("Unknown console command. Type \"help\" for help.");
+        case ConsoleCommand_Say: {
+            auto msg = fromFfi(parsed.arg1);
+            Logger::info("[Server] {}", msg);
+            configManager->broadcastPacket(std::make_unique<Packet3Chat>("\u00a7d[Server] " + msg));
+            break;
+        }
+        case ConsoleCommand_Tell: {
+            auto target = fromFfi(parsed.arg1);
+            auto msg = fromFfi(parsed.arg2);
+            Logger::info("[CONSOLE->{}] {}", target, msg);
+            if (!configManager->sendPacketToPlayer(target,
+                    std::make_unique<Packet3Chat>("\u00a77CONSOLE whispers " + msg)))
+                Logger::info("There's no player by that name online.");
+            break;
+        }
+        case ConsoleCommand_Unknown:
+        default: {
+            Logger::info("Unknown console command. Type \"help\" for help.");
+            break;
+        }
     }
 }
+
