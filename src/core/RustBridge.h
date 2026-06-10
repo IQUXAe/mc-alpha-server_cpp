@@ -3,8 +3,21 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <type_traits>
 
 namespace RustBridge {
+
+struct FfiItemStack {
+    int32_t stackSize;
+    int32_t animationsToGo;
+    int32_t itemID;
+    int32_t itemDamage;
+};
+static_assert(std::is_standard_layout_v<FfiItemStack>, "FfiItemStack must be standard layout");
+
+FfiItemStack itemStackCreate(int32_t itemID, int32_t stackSize, int32_t itemDamage);
+FfiItemStack itemStackCopy(const FfiItemStack* stack);
+bool itemStackDamage(FfiItemStack* stack, int32_t damage, int32_t maxDamage);
 
 struct LevelDatData {
     int64_t randomSeed = 0;

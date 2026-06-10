@@ -976,7 +976,7 @@ public:
         chunkZ = buf.readInt();
         int16_t size = buf.readShort();
         if (size < 0) throw std::runtime_error("Negative size in Packet52");
-        if (size > 65536) throw std::runtime_error("Size too large in Packet52");
+        if (size > 4096) throw std::runtime_error("Size too large in Packet52");
         coordinateArray.resize(static_cast<size_t>(size));
         typeArray.resize(static_cast<size_t>(size));
         metadataArray.resize(static_cast<size_t>(size));

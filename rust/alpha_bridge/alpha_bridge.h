@@ -338,6 +338,18 @@ AlphaChunkData* alpha_chunk_loader_load(
     int chunk_z
 );
 
+// ItemStack FFI
+typedef struct FfiItemStack {
+    int32_t stack_size;
+    int32_t animations_to_go;
+    int32_t item_id;
+    int32_t item_damage;
+} FfiItemStack;
+
+FfiItemStack item_stack_create(int32_t item_id, int32_t stack_size, int32_t item_damage);
+FfiItemStack item_stack_copy(const FfiItemStack* stack);
+bool item_stack_damage(FfiItemStack* stack, int32_t damage, int32_t max_damage);
+
 // RustNetworkManager FFI
 typedef struct RustNetworkManager RustNetworkManager;
 

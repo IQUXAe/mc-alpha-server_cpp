@@ -440,6 +440,7 @@ pub extern "C" fn alpha_zlib_decompress(
     AlphaBuffer::from_vec(output)
 }
 
+pub mod inventory;
 pub mod random;
 pub mod noise;
 pub mod biome;

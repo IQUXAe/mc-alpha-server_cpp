@@ -2,6 +2,7 @@
 #include "../../rust/alpha_bridge/alpha_bridge.h"
 #include "Logger.h"
 #include <cstring>
+#include <new>
 
 namespace {
 
@@ -20,6 +21,26 @@ std::vector<uint8_t> fromRustBuffer(AlphaBuffer buffer) {
 } // namespace
 
 namespace RustBridge {
+
+FfiItemStack itemStackCreate(int32_t itemID, int32_t stackSize, int32_t itemDamage) {
+    FfiItemStack result;
+    ::FfiItemStack raw = ::item_stack_create(itemID, stackSize, itemDamage);
+    std::memcpy(&result, &raw, sizeof(result));
+    return result;
+}
+
+FfiItemStack itemStackCopy(const FfiItemStack* stack) {
+    FfiItemStack result;
+    ::FfiItemStack raw = ::item_stack_copy(reinterpret_cast<const ::FfiItemStack*>(stack));
+    std::memcpy(&result, &raw, sizeof(result));
+    return result;
+}
+
+bool itemStackDamage(FfiItemStack* stack, int32_t damage, int32_t maxDamage) {
+    return ::item_stack_damage(reinterpret_cast<::FfiItemStack*>(stack), damage, maxDamage);
+}
+
+// end ItemStack FFI
 
 bool enabled() {
     return true;

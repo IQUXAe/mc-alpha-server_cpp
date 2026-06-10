@@ -3,6 +3,7 @@
 #include "Item.h"
 #include "../block/Block.h"
 #include "NBT.h"
+#include "RustBridge.h"
 
 class EntityLiving;
 class EntityPlayerMP;
@@ -81,13 +82,9 @@ public:
     }
     
     void damageItem(int damage) {
-        if (getMaxDamage() <= 0) return; // item has no durability
-        itemDamage += damage;
-        if (itemDamage > getMaxDamage()) {
-            stackSize--;
-            if (stackSize < 0) stackSize = 0;
-            itemDamage = 0;
-        }
+        int maxDamage = getMaxDamage();
+        RustBridge::itemStackDamage(
+            reinterpret_cast<RustBridge::FfiItemStack*>(this), damage, maxDamage);
     }
     
     void hitEntity(EntityLiving* entity) {
@@ -120,3 +117,6 @@ public:
         return ItemStack(itemID, stackSize, itemDamage);
     }
 };
+
+static_assert(sizeof(ItemStack) == sizeof(RustBridge::FfiItemStack),
+    "ItemStack layout must match FfiItemStack");
