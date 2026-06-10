@@ -10,6 +10,7 @@ extern "C" {
 typedef struct AlphaBuffer {
     uint8_t* data;
     size_t len;
+    size_t capacity;
 } AlphaBuffer;
 
 typedef struct AlphaLevelDat {
@@ -284,14 +285,19 @@ typedef struct AlphaChunkData {
     int64_t last_update;
     uint8_t* blocks;
     size_t blocks_len;
+    size_t blocks_capacity;
     uint8_t* data;
     size_t data_len;
+    size_t data_capacity;
     uint8_t* sky_light;
     size_t sky_light_len;
+    size_t sky_light_capacity;
     uint8_t* block_light;
     size_t block_light_len;
+    size_t block_light_capacity;
     uint8_t* height_map;
     size_t height_map_len;
+    size_t height_map_capacity;
     bool terrain_populated;
     NbtCompound** tile_entities;
     size_t tile_entities_count;

@@ -46,7 +46,7 @@ public:
         if (!chunk) return;
 
         try {
-            AlphaChunkData chunkData;
+            AlphaChunkData chunkData{};
             chunkData.x_pos = chunk->xPosition;
             chunkData.z_pos = chunk->zPosition;
             chunkData.last_update = world->worldTime;
@@ -54,19 +54,24 @@ public:
             // Prepare blocks (zero-copy, passing raw pointers)
             chunkData.blocks = chunk->blocks;
             chunkData.blocks_len = CHUNK_VOLUME;
+            chunkData.blocks_capacity = 0;
 
             // Prepare metadata and lights
             chunkData.data = chunk->data.data_ptr;
             chunkData.data_len = CHUNK_VOLUME / 2;
+            chunkData.data_capacity = 0;
 
             chunkData.sky_light = chunk->skylight.data_ptr;
             chunkData.sky_light_len = CHUNK_VOLUME / 2;
+            chunkData.sky_light_capacity = 0;
 
             chunkData.block_light = chunk->blocklight.data_ptr;
             chunkData.block_light_len = CHUNK_VOLUME / 2;
+            chunkData.block_light_capacity = 0;
 
             chunkData.height_map = chunk->heightMap;
             chunkData.height_map_len = CHUNK_AREA;
+            chunkData.height_map_capacity = 0;
 
             chunkData.terrain_populated = chunk->isTerrainPopulated;
 

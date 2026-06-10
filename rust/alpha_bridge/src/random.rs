@@ -34,7 +34,7 @@ impl JavaRandom {
         let ubound = bound as u32;
         if (ubound & ubound.wrapping_neg()) == ubound {
             // Power of 2
-            return (((bound as u64).wrapping_mul(self.next(31) as u64)) >> 31) as i32;
+            return ((bound as i64).wrapping_mul(self.next(31) as i64) >> 31) as i32;
         }
         let mut bits;
         let mut val;

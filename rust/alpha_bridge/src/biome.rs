@@ -1,4 +1,4 @@
-use std::sync::Once;
+use std::sync::OnceLock;
 use libc::{c_int, size_t};
 use std::slice;
 use crate::noise::NoiseGeneratorOctaves2;
@@ -84,30 +84,33 @@ pub fn get_biome(temp: f32, mut humid: f32) -> MobSpawnerBase {
     MobSpawnerBase::RAINFOREST
 }
 
-static mut BIOME_LOOKUP_TABLE: [MobSpawnerBase; 4096] = [MobSpawnerBase::DEFAULT; 4096];
-static BIOME_INIT: Once = Once::new();
+static BIOME_LOOKUP_TABLE: OnceLock<[MobSpawnerBase; 4096]> = OnceLock::new();
 
-pub fn generate_biome_lookup() {
-    BIOME_INIT.call_once(|| unsafe {
+fn init_biome_lookup() -> &'static [MobSpawnerBase; 4096] {
+    BIOME_LOOKUP_TABLE.get_or_init(|| {
+        let mut table = [MobSpawnerBase::DEFAULT; 4096];
         for i in 0..64 {
             for j in 0..64 {
-                BIOME_LOOKUP_TABLE[i + j * 64] = get_biome(i as f32 / 63.0f32, j as f32 / 63.0f32);
+                table[i + j * 64] = get_biome(i as f32 / 63.0f32, j as f32 / 63.0f32);
             }
         }
-    });
+        table
+    })
+}
+
+pub fn generate_biome_lookup() {
+    init_biome_lookup();
 }
 
 pub fn get_biome_from_lookup(temp: f64, humid: f64) -> MobSpawnerBase {
-    generate_biome_lookup();
+    let table = init_biome_lookup();
     let mut t = (temp as f32 * 63.0) as i32;
     let mut h = (humid as f32 * 63.0) as i32;
     if t < 0 { t = 0; }
     if t > 63 { t = 63; }
     if h < 0 { h = 0; }
     if h > 63 { h = 63; }
-    unsafe {
-        BIOME_LOOKUP_TABLE[(t + h * 64) as usize]
-    }
+    table[(t + h * 64) as usize]
 }
 
 #[no_mangle]
@@ -121,14 +124,17 @@ pub unsafe extern "C" fn alpha_biome_get_temperatures(
     x_size: c_int,
     z_size: c_int,
 ) {
+    if temp_noise_gen.is_null() || noise_gen3.is_null() || out_temps.is_null() || out_len == 0 {
+        return;
+    }
     let temp_gen = &*temp_noise_gen;
     let n3_gen = &*noise_gen3;
     let temps = slice::from_raw_parts_mut(out_temps, out_len);
 
-    temp_gen.func_4101_a(temps, x as f64, z as f64, x_size as usize, x_size as usize, 0.025, 0.025, 0.25);
+    temp_gen.func_4101_a(temps, x as f64, z as f64, x_size as usize, z_size as usize, 0.025, 0.025, 0.25);
 
-    let mut field_4257_c = vec![0.0; x_size as usize * x_size as usize];
-    n3_gen.func_4101_a(&mut field_4257_c, x as f64, z as f64, x_size as usize, x_size as usize, 0.25, 0.25, 0.5882352941176471);
+    let mut field_4257_c = vec![0.0; x_size as usize * z_size as usize];
+    n3_gen.func_4101_a(&mut field_4257_c, x as f64, z as f64, x_size as usize, z_size as usize, 0.25, 0.25, 0.5882352941176471);
 
     let mut idx = 0;
     for _i in 0..x_size {
@@ -160,6 +166,11 @@ pub unsafe extern "C" fn alpha_biome_load_block_generator_data(
     x_size: c_int,
     z_size: c_int,
 ) {
+    if temp_noise_gen.is_null() || humid_noise_gen.is_null() || noise_gen3.is_null()
+        || out_biomes.is_null() || out_temps.is_null() || out_humids.is_null() || out_len == 0
+    {
+        return;
+    }
     let temp_gen = &*temp_noise_gen;
     let humid_gen = &*humid_noise_gen;
     let n3_gen = &*noise_gen3;
@@ -168,11 +179,11 @@ pub unsafe extern "C" fn alpha_biome_load_block_generator_data(
     let temperatures = slice::from_raw_parts_mut(out_temps, out_len);
     let humidities = slice::from_raw_parts_mut(out_humids, out_len);
 
-    temp_gen.func_4101_a(temperatures, x as f64, z as f64, x_size as usize, x_size as usize, 0.025, 0.025, 0.25);
-    humid_gen.func_4101_a(humidities, x as f64, z as f64, x_size as usize, x_size as usize, 0.05, 0.05, 1.0 / 3.0);
+    temp_gen.func_4101_a(temperatures, x as f64, z as f64, x_size as usize, z_size as usize, 0.025, 0.025, 0.25);
+    humid_gen.func_4101_a(humidities, x as f64, z as f64, x_size as usize, z_size as usize, 0.05, 0.05, 1.0 / 3.0);
 
-    let mut field_4257_c = vec![0.0; x_size as usize * x_size as usize];
-    n3_gen.func_4101_a(&mut field_4257_c, x as f64, z as f64, x_size as usize, x_size as usize, 0.25, 0.25, 0.5882352941176471);
+    let mut field_4257_c = vec![0.0; x_size as usize * z_size as usize];
+    n3_gen.func_4101_a(&mut field_4257_c, x as f64, z as f64, x_size as usize, z_size as usize, 0.25, 0.25, 0.5882352941176471);
 
     let mut idx = 0;
     for _i in 0..x_size {

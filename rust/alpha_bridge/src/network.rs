@@ -551,8 +551,7 @@ impl RustNetworkManager {
         if !self.is_running.swap(false, Ordering::SeqCst) {
             return;
         }
-        {
-            let mut tr = self.termination_reason.lock().unwrap();
+        if let Ok(mut tr) = self.termination_reason.lock() {
             *tr = reason;
         }
         self.is_terminating.store(true, Ordering::SeqCst);
@@ -582,7 +581,25 @@ pub unsafe extern "C" fn rust_network_manager_create(socket_fd: c_int) -> *mut R
     let termination_reason_c = termination_reason.clone();
     let read_queue_c = read_queue.clone();
     let write_queue_c = write_queue.clone();
-    let mut stream_read = stream.try_clone().unwrap();
+    let mut stream_read = match stream.try_clone() {
+        Ok(s) => s,
+        Err(_) => {
+            // Cannot create read thread, clean up
+            let _ = Box::from_raw(Box::into_raw(Box::new(RustNetworkManager {
+                is_running,
+                is_server_terminating,
+                is_terminating,
+                termination_reason,
+                read_queue,
+                write_queue,
+                send_queue_byte_length,
+                stream,
+                read_thread: None,
+                write_thread: None,
+            })));
+            return std::ptr::null_mut();
+        }
+    };
 
     let read_thread = thread::spawn(move || {
         while is_running_c.load(Ordering::SeqCst) {
@@ -590,14 +607,14 @@ pub unsafe extern "C" fn rust_network_manager_create(socket_fd: c_int) -> *mut R
                 Ok(packet_id) => {
                     match read_packet_payload(&mut stream_read, packet_id) {
                         Ok(pkt_data) => {
-                            let mut q = read_queue_c.lock().unwrap();
-                            q.push_back(pkt_data);
+                            if let Ok(mut q) = read_queue_c.lock() {
+                                q.push_back(pkt_data);
+                            }
                         }
                         Err(e) => {
                             if !is_terminating_c.load(Ordering::SeqCst) {
                                 let err_reason = format!("Internal exception: {}", e);
-                                {
-                                    let mut tr = termination_reason_c.lock().unwrap();
+                                if let Ok(mut tr) = termination_reason_c.lock() {
                                     *tr = err_reason;
                                 }
                                 is_terminating_c.store(true, Ordering::SeqCst);
@@ -612,8 +629,7 @@ pub unsafe extern "C" fn rust_network_manager_create(socket_fd: c_int) -> *mut R
                 }
                 Err(_) => {
                     if !is_terminating_c.load(Ordering::SeqCst) {
-                        {
-                            let mut tr = termination_reason_c.lock().unwrap();
+                        if let Ok(mut tr) = termination_reason_c.lock() {
                             *tr = "End of stream".to_string();
                         }
                         is_terminating_c.store(true, Ordering::SeqCst);
@@ -633,14 +649,33 @@ pub unsafe extern "C" fn rust_network_manager_create(socket_fd: c_int) -> *mut R
     let termination_reason_c = termination_reason.clone();
     let write_queue_c = write_queue.clone();
     let send_queue_byte_length_c = send_queue_byte_length.clone();
-    let mut stream_write = stream.try_clone().unwrap();
+    let mut stream_write = match stream.try_clone() {
+        Ok(s) => s,
+        Err(_) => {
+            // Cannot create write thread, clean up
+            // stream_read is already moved into read_thread, shut down main stream
+            let _ = stream.shutdown(Shutdown::Both);
+            let _ = Box::from_raw(Box::into_raw(Box::new(RustNetworkManager {
+                is_running,
+                is_server_terminating,
+                is_terminating,
+                termination_reason,
+                read_queue,
+                write_queue,
+                send_queue_byte_length,
+                stream,
+                read_thread: Some(read_thread),
+                write_thread: None,
+            })));
+            return std::ptr::null_mut();
+        }
+    };
 
     let write_thread = thread::spawn(move || {
         let &(ref lock, ref cv) = &*write_queue_c;
         while is_running_c.load(Ordering::SeqCst) {
             let mut pkt = None;
-            {
-                let mut q = lock.lock().unwrap();
+            if let Ok(mut q) = lock.lock() {
                 loop {
                     if !is_running_c.load(Ordering::SeqCst) {
                         return;
@@ -672,8 +707,7 @@ pub unsafe extern "C" fn rust_network_manager_create(socket_fd: c_int) -> *mut R
                 let len = data.len();
                 if stream_write.write_all(&data).is_err() {
                     if !is_terminating_c.load(Ordering::SeqCst) {
-                        {
-                            let mut tr = termination_reason_c.lock().unwrap();
+                        if let Ok(mut tr) = termination_reason_c.lock() {
                             *tr = "Write error".to_string();
                         }
                         is_terminating_c.store(true, Ordering::SeqCst);
@@ -740,8 +774,7 @@ pub unsafe extern "C" fn rust_network_manager_send(
     m.send_queue_byte_length.fetch_add(data_len, Ordering::SeqCst);
     
     let &(ref lock, ref cv) = &*m.write_queue;
-    {
-        let mut q = lock.lock().unwrap();
+    if let Ok(mut q) = lock.lock() {
         q.push_back((bytes, is_chunk_data));
     }
     cv.notify_one();
@@ -985,7 +1018,10 @@ pub unsafe extern "C" fn rust_network_manager_poll_parsed(
         return std::ptr::null_mut();
     }
     let m = &*manager;
-    let mut q = m.read_queue.lock().unwrap();
+    let mut q = match m.read_queue.lock() {
+        Ok(guard) => guard,
+        Err(_) => return std::ptr::null_mut(),
+    };
     if let Some(pkt_data) = q.pop_front() {
         let ffi_pkt = to_ffi_packet(pkt_data);
         Box::into_raw(Box::new(ffi_pkt))
@@ -1085,10 +1121,19 @@ pub unsafe extern "C" fn rust_network_manager_get_termination_reason(
         return;
     }
     let m = &*manager;
-    let reason = m.termination_reason.lock().unwrap();
-    let c_str = std::ffi::CString::new(reason.as_str()).unwrap_or_default();
+    let reason = match m.termination_reason.lock() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+    let c_str = match std::ffi::CString::new(reason.as_str()) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
     let bytes = c_str.as_bytes_with_nul();
     let len = std::cmp::min(bytes.len(), max_len);
+    if len == 0 {
+        return;
+    }
     std::ptr::copy_nonoverlapping(bytes.as_ptr() as *const c_char, out_buf, len);
     *out_buf.add(len - 1) = 0;
 }

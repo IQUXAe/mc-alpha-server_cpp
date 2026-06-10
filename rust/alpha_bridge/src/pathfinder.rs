@@ -153,6 +153,12 @@ pub unsafe extern "C" fn rust_pathfinder_find_path(
     out_points: *mut FfiPathPoint,
     max_points: i32,
 ) -> i32 {
+    if accessor.world.is_null() || accessor.is_liquid as usize == 0 || accessor.blocks_movement as usize == 0 {
+        return 0;
+    }
+    if max_points <= 0 {
+        return 0;
+    }
     let start_x_floor = start_x.floor() as i32;
     let start_y_floor = start_y.floor() as i32;
     let start_z_floor = start_z.floor() as i32;
@@ -232,7 +238,10 @@ pub unsafe extern "C" fn rust_pathfinder_find_path(
 
         for &(nx, ny, nz) in &neighbors {
             if let Some(safe_coord) = get_safe_point(&accessor, nx, ny, nz, size_x, size_y, size_z, vertical_step, &mut nodes) {
-                let cand_node = nodes.get(&safe_coord).unwrap().clone();
+                let cand_node = match nodes.get(&safe_coord) {
+                    Some(n) => n.clone(),
+                    None => continue,
+                };
                 if cand_node.is_closed {
                     continue;
                 }
@@ -272,6 +281,9 @@ pub unsafe extern "C" fn rust_pathfinder_find_path(
     path.reverse();
 
     let count = path.len().min(max_points as usize);
+    if out_points.is_null() || count == 0 {
+        return count as i32;
+    }
     let slice = std::slice::from_raw_parts_mut(out_points, count);
     for i in 0..count {
         slice[i] = FfiPathPoint {

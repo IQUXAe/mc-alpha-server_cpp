@@ -263,10 +263,10 @@ pub unsafe extern "C" fn alpha_caves_generate(
     blocks: *mut u8,
     blocks_len: usize,
 ) {
-    if blocks.is_null() || blocks_len == 0 {
+    if blocks.is_null() || blocks_len < 32768 {
         return;
     }
-    let slice = std::slice::from_raw_parts_mut(blocks, blocks_len);
+    let slice = std::slice::from_raw_parts_mut(blocks, 32768);
     let mut gen = MapGenCaves::new();
     gen.generate(world_seed, chunk_x, chunk_z, slice);
 }

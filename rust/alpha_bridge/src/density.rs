@@ -20,6 +20,12 @@ pub unsafe extern "C" fn alpha_density_generate_field(
     field_705_k: *mut NoiseGeneratorOctaves,
     field_704_l: *mut NoiseGeneratorOctaves,
 ) {
+    if out_field.is_null() || temperatures.is_null() || humidities.is_null()
+        || field_715_a.is_null() || field_714_b.is_null() || field_703_m.is_null()
+        || field_705_k.is_null() || field_704_l.is_null()
+    {
+        return;
+    }
     let field = slice::from_raw_parts_mut(out_field, out_len);
     let temperatures = slice::from_raw_parts(temperatures, 256);
     let humidities = slice::from_raw_parts(humidities, 256);
@@ -47,6 +53,9 @@ pub unsafe extern "C" fn alpha_density_generate_field(
 
     let mut var14 = 0;
     let mut var15 = 0;
+    if var5 <= 0 {
+        return;
+    }
     let var16 = 16 / var5;
 
     for var17 in 0..var5 {

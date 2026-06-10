@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString};
 use std::io::{Cursor, Read, Write};
-use libc::{c_char, c_int, c_uchar, size_t};
+use libc::{c_char, size_t};
 use crate::AlphaBuffer;
 
 #[derive(Debug, Clone, PartialEq)]

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
-use std::ffi::{CStr, CString};
-use std::io::{Cursor, Read, Write};
+use std::ffi::CStr;
+use std::io::Read;
 use std::path::PathBuf;
 use libc::{c_char, c_int, size_t};
 use crate::nbt::{NbtCompound, NbtList, NbtTag, read_root, write_root};
@@ -12,14 +12,19 @@ pub struct AlphaChunkData {
     pub last_update: i64,
     pub blocks: *mut u8,
     pub blocks_len: size_t,
+    pub blocks_capacity: size_t,
     pub data: *mut u8,
     pub data_len: size_t,
+    pub data_capacity: size_t,
     pub sky_light: *mut u8,
     pub sky_light_len: size_t,
+    pub sky_light_capacity: size_t,
     pub block_light: *mut u8,
     pub block_light_len: size_t,
+    pub block_light_capacity: size_t,
     pub height_map: *mut u8,
     pub height_map_len: size_t,
+    pub height_map_capacity: size_t,
     pub terrain_populated: bool,
     pub tile_entities: *mut *mut NbtCompound,
     pub tile_entities_count: size_t,
@@ -121,20 +126,20 @@ pub unsafe extern "C" fn alpha_chunk_data_free(data: *mut AlphaChunkData) {
         return;
     }
     let d = Box::from_raw(data);
-    if !d.blocks.is_null() && d.blocks_len > 0 {
-        let _ = Vec::from_raw_parts(d.blocks, d.blocks_len, d.blocks_len);
+    if !d.blocks.is_null() && d.blocks_capacity > 0 {
+        let _ = Vec::from_raw_parts(d.blocks, d.blocks_len, d.blocks_capacity);
     }
-    if !d.data.is_null() && d.data_len > 0 {
-        let _ = Vec::from_raw_parts(d.data, d.data_len, d.data_len);
+    if !d.data.is_null() && d.data_capacity > 0 {
+        let _ = Vec::from_raw_parts(d.data, d.data_len, d.data_capacity);
     }
-    if !d.sky_light.is_null() && d.sky_light_len > 0 {
-        let _ = Vec::from_raw_parts(d.sky_light, d.sky_light_len, d.sky_light_len);
+    if !d.sky_light.is_null() && d.sky_light_capacity > 0 {
+        let _ = Vec::from_raw_parts(d.sky_light, d.sky_light_len, d.sky_light_capacity);
     }
-    if !d.block_light.is_null() && d.block_light_len > 0 {
-        let _ = Vec::from_raw_parts(d.block_light, d.block_light_len, d.block_light_len);
+    if !d.block_light.is_null() && d.block_light_capacity > 0 {
+        let _ = Vec::from_raw_parts(d.block_light, d.block_light_len, d.block_light_capacity);
     }
-    if !d.height_map.is_null() && d.height_map_len > 0 {
-        let _ = Vec::from_raw_parts(d.height_map, d.height_map_len, d.height_map_len);
+    if !d.height_map.is_null() && d.height_map_capacity > 0 {
+        let _ = Vec::from_raw_parts(d.height_map, d.height_map_len, d.height_map_capacity);
     }
     
     let free_nbt_list = |ptrs: *mut *mut NbtCompound, count: size_t| {
@@ -189,34 +194,34 @@ pub unsafe extern "C" fn alpha_chunk_alloc_arrays(
     height_map: *mut *mut u8,
 ) {
     if !blocks.is_null() {
-        let mut v = vec![0u8; 32768];
-        v.shrink_to_fit();
-        *blocks = v.as_mut_ptr();
+        let v = vec![0u8; 32768];
+        let ptr = v.as_ptr() as *mut u8;
         std::mem::forget(v);
+        *blocks = ptr;
     }
     if !data.is_null() {
-        let mut v = vec![0u8; 16384];
-        v.shrink_to_fit();
-        *data = v.as_mut_ptr();
+        let v = vec![0u8; 16384];
+        let ptr = v.as_ptr() as *mut u8;
         std::mem::forget(v);
+        *data = ptr;
     }
     if !skylight.is_null() {
-        let mut v = vec![0u8; 16384];
-        v.shrink_to_fit();
-        *skylight = v.as_mut_ptr();
+        let v = vec![0u8; 16384];
+        let ptr = v.as_ptr() as *mut u8;
         std::mem::forget(v);
+        *skylight = ptr;
     }
     if !blocklight.is_null() {
-        let mut v = vec![0u8; 16384];
-        v.shrink_to_fit();
-        *blocklight = v.as_mut_ptr();
+        let v = vec![0u8; 16384];
+        let ptr = v.as_ptr() as *mut u8;
         std::mem::forget(v);
+        *blocklight = ptr;
     }
     if !height_map.is_null() {
-        let mut v = vec![0u8; 256];
-        v.shrink_to_fit();
-        *height_map = v.as_mut_ptr();
+        let v = vec![0u8; 256];
+        let ptr = v.as_ptr() as *mut u8;
         std::mem::forget(v);
+        *height_map = ptr;
     }
 }
 
@@ -401,34 +406,34 @@ pub unsafe extern "C" fn alpha_chunk_loader_load(
     let (monsters_ptr, monsters_count) = load_nbt_list(level, "Monsters");
     let (boats_ptr, boats_count) = load_nbt_list(level, "Boats");
 
-    let mut blocks = blocks_vec.clone();
-    blocks.shrink_to_fit();
+    let mut blocks = blocks_vec.to_owned();
     let blocks_ptr = blocks.as_mut_ptr();
     let blocks_len = blocks.len();
+    let blocks_capacity = blocks.capacity();
     std::mem::forget(blocks);
 
-    let mut data = data_vec.clone();
-    data.shrink_to_fit();
+    let mut data = data_vec.to_owned();
     let data_ptr = data.as_mut_ptr();
     let data_len = data.len();
+    let data_capacity = data.capacity();
     std::mem::forget(data);
 
-    let mut sky = sky_vec.clone();
-    sky.shrink_to_fit();
+    let mut sky = sky_vec.to_owned();
     let sky_ptr = sky.as_mut_ptr();
     let sky_len = sky.len();
+    let sky_capacity = sky.capacity();
     std::mem::forget(sky);
 
-    let mut bl = bl_vec.clone();
-    bl.shrink_to_fit();
+    let mut bl = bl_vec.to_owned();
     let bl_ptr = bl.as_mut_ptr();
     let bl_len = bl.len();
+    let bl_capacity = bl.capacity();
     std::mem::forget(bl);
 
-    let mut hm = hm_vec.clone();
-    hm.shrink_to_fit();
+    let mut hm = hm_vec.to_owned();
     let hm_ptr = hm.as_mut_ptr();
     let hm_len = hm.len();
+    let hm_capacity = hm.capacity();
     std::mem::forget(hm);
 
     let out = Box::new(AlphaChunkData {
@@ -437,14 +442,19 @@ pub unsafe extern "C" fn alpha_chunk_loader_load(
         last_update,
         blocks: blocks_ptr,
         blocks_len,
+        blocks_capacity,
         data: data_ptr,
         data_len,
+        data_capacity,
         sky_light: sky_ptr,
         sky_light_len: sky_len,
+        sky_light_capacity: sky_capacity,
         block_light: bl_ptr,
         block_light_len: bl_len,
+        block_light_capacity: bl_capacity,
         height_map: hm_ptr,
         height_map_len: hm_len,
+        height_map_capacity: hm_capacity,
         terrain_populated,
         tile_entities: tile_entities_ptr,
         tile_entities_count,

@@ -3,7 +3,6 @@ use crate::noise::{NoiseGeneratorOctaves, NoiseGeneratorOctaves2};
 use crate::biome::{MobSpawnerBase, get_biome_from_lookup};
 use crate::caves::MapGenCaves;
 use crate::decorators::{WorldAccessor, alpha_decorate_chunk};
-use libc::{c_char, c_int, size_t};
 use std::cell::Cell;
 
 thread_local! {
@@ -265,6 +264,11 @@ pub unsafe extern "C" fn rust_chunk_provider_generate_chunk(
     out_temps: *mut f64,
     out_humids: *mut f64,
 ) {
+    if ptr.is_null() || out_blocks.is_null() || out_biomes.is_null()
+        || out_temps.is_null() || out_humids.is_null()
+    {
+        return;
+    }
     let gen = &mut *ptr;
     let blocks = std::slice::from_raw_parts_mut(out_blocks, 32768);
     let biomes = std::slice::from_raw_parts_mut(out_biomes, 256);
@@ -472,6 +476,9 @@ pub unsafe extern "C" fn rust_chunk_provider_populate_batch(
     biome_type_raw: i32,
     temperatures: *const f64,
 ) {
+    if generator.is_null() || batch.is_null() || temperatures.is_null() {
+        return;
+    }
     let mut state = DecoratorWorldState {
         blocks: [
             (*batch).chunks[0].blocks,

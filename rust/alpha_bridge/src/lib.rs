@@ -10,6 +10,7 @@ use std::slice;
 pub struct AlphaBuffer {
     pub data: *mut c_uchar,
     pub len: size_t,
+    pub capacity: size_t,
 }
 
 #[repr(C)]
@@ -29,17 +30,19 @@ impl AlphaBuffer {
         Self {
             data: ptr::null_mut(),
             len: 0,
+            capacity: 0,
         }
     }
 
-    fn from_vec(mut bytes: Vec<u8>) -> Self {
-        bytes.shrink_to_fit();
+    fn from_vec(bytes: Vec<u8>) -> Self {
+        let mut bytes = std::mem::ManuallyDrop::new(bytes);
         let data = bytes.as_mut_ptr();
         let len = bytes.len();
-        std::mem::forget(bytes);
+        let capacity = bytes.capacity();
         Self {
             data,
             len,
+            capacity,
         }
     }
 }
@@ -246,12 +249,12 @@ fn copy_input(input: *const c_uchar, input_len: size_t) -> Option<Vec<u8>> {
 
 #[no_mangle]
 pub extern "C" fn alpha_buffer_free(buffer: AlphaBuffer) {
-    if buffer.data.is_null() || buffer.len == 0 {
+    if buffer.data.is_null() || buffer.capacity == 0 {
         return;
     }
 
     unsafe {
-        drop(Vec::from_raw_parts(buffer.data, buffer.len, buffer.len));
+        drop(Vec::from_raw_parts(buffer.data, buffer.len, buffer.capacity));
     }
 }
 
@@ -475,6 +478,11 @@ pub unsafe extern "C" fn alpha_noise_octaves_create_all(
     out_714: *mut *mut NoiseGeneratorOctaves,
     out_713: *mut *mut NoiseGeneratorOctaves,
 ) {
+    if out_705.is_null() || out_704.is_null() || out_703.is_null() || out_702.is_null()
+        || out_701.is_null() || out_715.is_null() || out_714.is_null() || out_713.is_null()
+    {
+        return;
+    }
     let mut rand = JavaRandom::new(seed);
     *out_705 = Box::into_raw(Box::new(NoiseGeneratorOctaves::new(&mut rand, 16)));
     *out_704 = Box::into_raw(Box::new(NoiseGeneratorOctaves::new(&mut rand, 16)));
@@ -508,6 +516,9 @@ pub unsafe extern "C" fn alpha_noise_octaves_func_648_a(
     y_scale: f64,
     z_scale: f64,
 ) {
+    if ptr.is_null() || out_buf.is_null() || out_len == 0 {
+        return;
+    }
     let gen = &*ptr;
     let slice = slice::from_raw_parts_mut(out_buf, out_len);
     gen.func_648_a(slice, x, y, z, x_size as usize, y_size as usize, z_size as usize, x_scale, y_scale, z_scale);
@@ -525,6 +536,9 @@ pub unsafe extern "C" fn alpha_noise_octaves_func_4103_a(
     x_scale: f64,
     z_scale: f64,
 ) {
+    if ptr.is_null() || out_buf.is_null() || out_len == 0 {
+        return;
+    }
     let gen = &*ptr;
     let slice = slice::from_raw_parts_mut(out_buf, out_len);
     gen.func_4103_a(slice, x, z, x_size as usize, z_size as usize, x_scale, z_scale);
@@ -536,6 +550,9 @@ pub unsafe extern "C" fn alpha_noise_octaves_func_647_a(
     x: f64,
     z: f64,
 ) -> f64 {
+    if ptr.is_null() {
+        return 0.0;
+    }
     let gen = &*ptr;
     gen.func_647_a(x, z)
 }
@@ -567,6 +584,9 @@ pub unsafe extern "C" fn alpha_noise_octaves2_func_4101_a(
     y_scale: f64,
     amplitude: f64,
 ) {
+    if ptr.is_null() || out_buf.is_null() || out_len == 0 {
+        return;
+    }
     let gen = &*ptr;
     let slice = slice::from_raw_parts_mut(out_buf, out_len);
     gen.func_4101_a(slice, x, y, x_size as usize, y_size as usize, x_scale, y_scale, amplitude);
@@ -582,6 +602,9 @@ pub unsafe extern "C" fn alpha_generate_tree(
     y: i32,
     z: i32,
 ) -> bool {
+    if accessor.get_block_id as usize == 0 || accessor.set_block_id as usize == 0 {
+        return false;
+    }
     let mut rand = JavaRandom::new(seed);
     crate::decorators::trees::WorldGenTrees::new().generate(&accessor, &mut rand, x, y, z)
 }
@@ -594,6 +617,9 @@ pub unsafe extern "C" fn alpha_generate_big_tree(
     y: i32,
     z: i32,
 ) -> bool {
+    if accessor.get_block_id as usize == 0 || accessor.set_block_id as usize == 0 {
+        return false;
+    }
     let mut rand = JavaRandom::new(seed);
     let mut big_tree = crate::decorators::trees::WorldGenBigTree::new();
     big_tree.func_420_a(1.0, 1.0, 1.0);
