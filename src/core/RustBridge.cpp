@@ -42,6 +42,32 @@ bool itemStackDamage(FfiItemStack* stack, int32_t damage, int32_t maxDamage) {
 
 // end ItemStack FFI
 
+FfiFurnaceState furnaceCreate() {
+    FfiFurnaceState result;
+    ::FfiFurnaceState raw = ::furnace_create();
+    std::memcpy(&result, &raw, sizeof(result));
+    return result;
+}
+
+FurnaceTickResult furnaceTick(FfiFurnaceState* state, int32_t fuelBurnTime) {
+    ::FurnaceTickResult raw = ::furnace_tick(
+        reinterpret_cast<::FfiFurnaceState*>(state), fuelBurnTime);
+    return FurnaceTickResult{raw.changed, raw.needs_block_update};
+}
+
+FfiItemStack furnaceGetSlot(const FfiFurnaceState* state, int32_t slot) {
+    FfiItemStack result;
+    ::FfiItemStack raw = ::furnace_get_slot(
+        reinterpret_cast<const ::FfiFurnaceState*>(state), slot);
+    std::memcpy(&result, &raw, sizeof(result));
+    return result;
+}
+
+void furnaceSetSlot(FfiFurnaceState* state, int32_t slot, FfiItemStack stack) {
+    ::furnace_set_slot(reinterpret_cast<::FfiFurnaceState*>(state), slot,
+        *reinterpret_cast<::FfiItemStack*>(&stack));
+}
+
 bool enabled() {
     return true;
 }

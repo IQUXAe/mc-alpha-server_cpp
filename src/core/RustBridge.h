@@ -19,6 +19,24 @@ FfiItemStack itemStackCreate(int32_t itemID, int32_t stackSize, int32_t itemDama
 FfiItemStack itemStackCopy(const FfiItemStack* stack);
 bool itemStackDamage(FfiItemStack* stack, int32_t damage, int32_t maxDamage);
 
+struct FfiFurnaceState {
+    FfiItemStack slots[3];
+    int16_t burnTime;
+    int16_t cookTime;
+    int16_t currentItemBurnTime;
+};
+static_assert(std::is_standard_layout_v<FfiFurnaceState>, "FfiFurnaceState must be standard layout");
+
+struct FurnaceTickResult {
+    bool changed;
+    bool needsBlockUpdate;
+};
+
+FfiFurnaceState furnaceCreate();
+FurnaceTickResult furnaceTick(FfiFurnaceState* state, int32_t fuelBurnTime);
+FfiItemStack furnaceGetSlot(const FfiFurnaceState* state, int32_t slot);
+void furnaceSetSlot(FfiFurnaceState* state, int32_t slot, FfiItemStack stack);
+
 struct LevelDatData {
     int64_t randomSeed = 0;
     int32_t spawnX = 0;

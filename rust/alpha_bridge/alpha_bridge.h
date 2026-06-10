@@ -350,6 +350,24 @@ FfiItemStack item_stack_create(int32_t item_id, int32_t stack_size, int32_t item
 FfiItemStack item_stack_copy(const FfiItemStack* stack);
 bool item_stack_damage(FfiItemStack* stack, int32_t damage, int32_t max_damage);
 
+// TileEntityFurnace FFI
+typedef struct FfiFurnaceState {
+    FfiItemStack slots[3];
+    int16_t burn_time;
+    int16_t cook_time;
+    int16_t current_item_burn_time;
+} FfiFurnaceState;
+
+typedef struct FurnaceTickResult {
+    bool changed;
+    bool needs_block_update;
+} FurnaceTickResult;
+
+FfiFurnaceState furnace_create(void);
+FurnaceTickResult furnace_tick(FfiFurnaceState* state, int32_t fuel_burn_time_from_cpp);
+FfiItemStack furnace_get_slot(const FfiFurnaceState* state, int32_t slot);
+void furnace_set_slot(FfiFurnaceState* state, int32_t slot, FfiItemStack stack);
+
 // RustNetworkManager FFI
 typedef struct RustNetworkManager RustNetworkManager;
 
