@@ -1127,7 +1127,7 @@ void NetServerHandler::handleComplexEntity(Packet59ComplexEntity& pkt) {
     te->readFromNBT(*nbt);
 
     if (auto* sign = dynamic_cast<TileEntitySign*>(te)) {
-        Logger::debug("Sign text: '{}' '{}' '{}' '{}'", sign->signText[0], sign->signText[1], sign->signText[2], sign->signText[3]);
+        Logger::debug("Sign text: '{}' '{}' '{}' '{}'", sign->getLine(0), sign->getLine(1), sign->getLine(2), sign->getLine(3));
     }
 
     // Mark dirty: saves chunk + broadcasts Packet59 to nearby players

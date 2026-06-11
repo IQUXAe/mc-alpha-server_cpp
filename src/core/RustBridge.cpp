@@ -62,6 +62,17 @@ FfiChestState chestCreate() {
     return result;
 }
 
+FfiSignState signCreate() {
+    FfiSignState result;
+    ::FfiSignState raw = ::sign_create();
+    std::memcpy(&result, &raw, sizeof(result));
+    return result;
+}
+
+void signSetLine(FfiSignState* state, int32_t line, const char* text) {
+    ::sign_set_line(reinterpret_cast<::FfiSignState*>(state), line, text);
+}
+
 bool enabled() {
     return true;
 }

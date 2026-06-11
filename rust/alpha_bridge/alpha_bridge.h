@@ -373,6 +373,14 @@ typedef struct FfiChestState {
 
 FfiChestState chest_create(void);
 
+// TileEntitySign FFI
+typedef struct FfiSignState {
+    uint8_t lines[4][16];
+} FfiSignState;
+
+FfiSignState sign_create(void);
+void sign_set_line(FfiSignState* state, int32_t line, const char* text);
+
 // RustNetworkManager FFI
 typedef struct RustNetworkManager RustNetworkManager;
 

@@ -44,6 +44,14 @@ static_assert(std::is_standard_layout_v<FfiChestState>, "FfiChestState must be s
 
 FfiChestState chestCreate();
 
+struct FfiSignState {
+    uint8_t lines[4][16];
+};
+static_assert(std::is_standard_layout_v<FfiSignState>, "FfiSignState must be standard layout");
+
+FfiSignState signCreate();
+void signSetLine(FfiSignState* state, int32_t line, const char* text);
+
 struct LevelDatData {
     int64_t randomSeed = 0;
     int32_t spawnX = 0;
