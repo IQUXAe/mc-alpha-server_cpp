@@ -365,8 +365,13 @@ typedef struct FurnaceTickResult {
 
 FfiFurnaceState furnace_create(void);
 FurnaceTickResult furnace_tick(FfiFurnaceState* state, int32_t fuel_burn_time_from_cpp);
-FfiItemStack furnace_get_slot(const FfiFurnaceState* state, int32_t slot);
-void furnace_set_slot(FfiFurnaceState* state, int32_t slot, FfiItemStack stack);
+
+// TileEntityChest FFI
+typedef struct FfiChestState {
+    FfiItemStack slots[27];
+} FfiChestState;
+
+FfiChestState chest_create(void);
 
 // RustNetworkManager FFI
 typedef struct RustNetworkManager RustNetworkManager;

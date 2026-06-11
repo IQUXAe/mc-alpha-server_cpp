@@ -442,6 +442,7 @@ pub extern "C" fn alpha_zlib_decompress(
 
 pub mod inventory;
 pub mod tile_entity_furnace;
+pub mod tile_entity_chest;
 pub mod random;
 pub mod noise;
 pub mod biome;

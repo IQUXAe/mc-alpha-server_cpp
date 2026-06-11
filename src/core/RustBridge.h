@@ -31,11 +31,18 @@ struct FurnaceTickResult {
     bool changed;
     bool needsBlockUpdate;
 };
+static_assert(sizeof(FurnaceTickResult) == 2, "FurnaceTickResult must be 2 bytes (2 bools)");
+static_assert(alignof(FurnaceTickResult) == 1, "FurnaceTickResult must have byte alignment");
 
 FfiFurnaceState furnaceCreate();
 FurnaceTickResult furnaceTick(FfiFurnaceState* state, int32_t fuelBurnTime);
-FfiItemStack furnaceGetSlot(const FfiFurnaceState* state, int32_t slot);
-void furnaceSetSlot(FfiFurnaceState* state, int32_t slot, FfiItemStack stack);
+
+struct FfiChestState {
+    FfiItemStack slots[27];
+};
+static_assert(std::is_standard_layout_v<FfiChestState>, "FfiChestState must be standard layout");
+
+FfiChestState chestCreate();
 
 struct LevelDatData {
     int64_t randomSeed = 0;

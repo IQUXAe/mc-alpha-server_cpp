@@ -55,17 +55,11 @@ FurnaceTickResult furnaceTick(FfiFurnaceState* state, int32_t fuelBurnTime) {
     return FurnaceTickResult{raw.changed, raw.needs_block_update};
 }
 
-FfiItemStack furnaceGetSlot(const FfiFurnaceState* state, int32_t slot) {
-    FfiItemStack result;
-    ::FfiItemStack raw = ::furnace_get_slot(
-        reinterpret_cast<const ::FfiFurnaceState*>(state), slot);
+FfiChestState chestCreate() {
+    FfiChestState result;
+    ::FfiChestState raw = ::chest_create();
     std::memcpy(&result, &raw, sizeof(result));
     return result;
-}
-
-void furnaceSetSlot(FfiFurnaceState* state, int32_t slot, FfiItemStack stack) {
-    ::furnace_set_slot(reinterpret_cast<::FfiFurnaceState*>(state), slot,
-        *reinterpret_cast<::FfiItemStack*>(&stack));
 }
 
 bool enabled() {
