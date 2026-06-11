@@ -440,6 +440,7 @@ pub extern "C" fn alpha_zlib_decompress(
     AlphaBuffer::from_vec(output)
 }
 
+pub mod block;
 pub mod inventory;
 pub mod tile_entity_furnace;
 pub mod tile_entity_chest;

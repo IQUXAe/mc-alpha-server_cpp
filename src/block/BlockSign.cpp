@@ -5,9 +5,7 @@
 #include "../core/AxisAlignedBB.h"
 
 BlockSign::BlockSign(int id, bool isWallSign)
-    : BlockContainer(id, &Material::wood), isWallSign_(isWallSign) {
-    setHardness(1.0f);
-}
+    : BlockContainer(id), isWallSign_(isWallSign) {}
 
 std::optional<AxisAlignedBB> BlockSign::getCollisionBoundingBoxFromPool(World*, int, int, int) {
     // Signs have no collision box (players walk through them)

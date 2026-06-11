@@ -632,6 +632,75 @@ typedef struct RustParsedCommand {
 
 RustParsedCommand rust_parse_console_command(const char* cmd, size_t cmd_len);
 
+enum BlockMaterialId {
+    BLOCK_MATERIAL_AIR = 0,
+    BLOCK_MATERIAL_GROUND = 1,
+    BLOCK_MATERIAL_WOOD = 2,
+    BLOCK_MATERIAL_ROCK = 3,
+    BLOCK_MATERIAL_IRON = 4,
+    BLOCK_MATERIAL_WATER = 5,
+    BLOCK_MATERIAL_LAVA = 6,
+    BLOCK_MATERIAL_LEAVES = 7,
+    BLOCK_MATERIAL_PLANTS = 8,
+    BLOCK_MATERIAL_SPONGE = 9,
+    BLOCK_MATERIAL_CLOTH = 10,
+    BLOCK_MATERIAL_FIRE = 11,
+    BLOCK_MATERIAL_SAND = 12,
+    BLOCK_MATERIAL_CIRCUITS = 13,
+    BLOCK_MATERIAL_GLASS = 14,
+    BLOCK_MATERIAL_TNT = 15,
+    BLOCK_MATERIAL_UNUSED = 16,
+    BLOCK_MATERIAL_ICE = 17,
+    BLOCK_MATERIAL_SNOW = 18,
+    BLOCK_MATERIAL_BUILT_SNOW = 19,
+    BLOCK_MATERIAL_CACTUS = 20,
+    BLOCK_MATERIAL_CLAY = 21,
+    BLOCK_MATERIAL_PUMPKIN = 22,
+    BLOCK_MATERIAL_PORTAL = 23,
+    BLOCK_MATERIAL_WEB = 24,
+};
+
+enum BlockTypeId {
+    BLOCK_TYPE_NORMAL = 0,
+    BLOCK_TYPE_SAND = 1,
+    BLOCK_TYPE_FLUID = 2,
+    BLOCK_TYPE_FLOWER = 3,
+    BLOCK_TYPE_TALL_GRASS = 4,
+    BLOCK_TYPE_MUSHROOM = 5,
+    BLOCK_TYPE_TORCH = 6,
+    BLOCK_TYPE_CACTUS = 7,
+    BLOCK_TYPE_REED = 8,
+    BLOCK_TYPE_LEAVES = 9,
+    BLOCK_TYPE_SAPLING = 10,
+    BLOCK_TYPE_CROPS = 11,
+    BLOCK_TYPE_SOIL = 12,
+    BLOCK_TYPE_FIRE = 13,
+    BLOCK_TYPE_ORE = 14,
+};
+
+typedef struct AlphaBlockProperties {
+    float hardness;
+    float resistance;
+    int32_t light_opacity;
+    int32_t light_value;
+    uint8_t tick_on_load;
+    uint8_t is_block_container;
+    uint8_t allows_attachment;
+    uint8_t material;
+    uint8_t block_type;
+    int32_t id_dropped;
+    int32_t quantity_dropped;
+    uint8_t can_harvest_block;
+    float min_x;
+    float min_y;
+    float min_z;
+    float max_x;
+    float max_y;
+    float max_z;
+} AlphaBlockProperties;
+
+AlphaBlockProperties alpha_block_properties_get(uint32_t id);
+
 #ifdef __cplusplus
 }
 #endif

@@ -5,6 +5,10 @@
 #include <vector>
 #include <type_traits>
 
+#include "../../rust/alpha_bridge/alpha_bridge.h" // AlphaBlockProperties
+
+class Material;
+
 namespace RustBridge {
 
 struct FfiItemStack {
@@ -62,6 +66,10 @@ struct LevelDatData {
     int32_t version = 19132;
     std::string levelName = "world";
 };
+
+// Block properties from Rust data table
+AlphaBlockProperties blockProperties(uint32_t id);
+Material* materialFromId(uint8_t materialId);
 
 bool enabled();
 

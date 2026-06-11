@@ -6,9 +6,7 @@
 // Base class for blocks that have associated TileEntity data
 class BlockContainer : public Block {
 public:
-    BlockContainer(int id, Material* material) : Block(id, material) {
-        isBlockContainer[id] = true;
-    }
+    explicit BlockContainer(int id) : Block(id) {}
 
     void onBlockAdded(World* world, int x, int y, int z) override;
     void onBlockRemoval(World* world, int x, int y, int z) override;

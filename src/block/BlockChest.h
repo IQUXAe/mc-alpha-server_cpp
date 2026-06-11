@@ -5,7 +5,7 @@
 
 class BlockChest : public BlockContainer {
 public:
-    BlockChest(int id) : BlockContainer(id, &Material::wood) {}
+    explicit BlockChest(int id) : BlockContainer(id) {}
 
     bool blockActivated(World* world, int x, int y, int z, EntityPlayer* player) override;
     void onBlockRemoval(World* world, int x, int y, int z) override;

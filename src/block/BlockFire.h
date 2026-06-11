@@ -14,8 +14,7 @@ public:
     int abilityToCatchFire[256]{};
 
     BlockFire(int id, int tex)
-        : Block(id, &Material::fire) {
-        setTickOnLoad(true);
+        : Block(id) {
         // Burn rates matching Java BlockFire constructor
         setBurnRate(5, 5, 20);   // planks
         setBurnRate(17, 5, 5);   // wood (log)

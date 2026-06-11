@@ -5,6 +5,7 @@
 #include "BlockFurnace.h"
 #include "BlockSign.h"
 #include "../core/Material.h"
+#include "../core/RustBridge.h"
 #include "../core/AxisAlignedBB.h"
 #include "../world/World.h"
 #include "../world/TileEntity.h"
@@ -75,7 +76,7 @@ void markBlocksForUpdate(World* world, int minX, int minY, int minZ, int maxX, i
 
 class BlockSand : public Block {
 public:
-    BlockSand(int id, Material* material) : Block(id, material) {}
+    explicit BlockSand(int id) : Block(id) {}
 
     void onBlockAdded(World* world, int x, int y, int z) override {
         world->scheduleBlockUpdate(x, y, z, blockID, tickRate());
@@ -107,7 +108,7 @@ private:
 
 class BlockFluid : public Block {
 public:
-    BlockFluid(int id, Material* material) : Block(id, material) {}
+    explicit BlockFluid(int id) : Block(id) {}
     bool allowsAttachment() const override { return false; }
 
     bool canCollideCheck(int metadata, bool includeLiquids) const override {
@@ -202,10 +203,7 @@ private:
 
 class BlockFlower : public Block {
 public:
-    BlockFlower(int id, Material* mat) : Block(id, mat) {
-        setTickOnLoad(true);
-        setBlockBounds(0.3f, 0.0f, 0.3f, 0.7f, 0.6f, 0.7f);
-    }
+    explicit BlockFlower(int id) : Block(id) {} // props from Rust data table
     bool allowsAttachment() const override { return false; }
     bool canBlockStay(World* world, int x, int y, int z) const override {
         int below = world->getBlockId(x, y - 1, z);
@@ -230,7 +228,7 @@ public:
 
 class BlockTallGrass : public BlockFlower {
 public:
-    BlockTallGrass(int id, Material* mat) : BlockFlower(id, mat) {}
+    explicit BlockTallGrass(int id) : BlockFlower(id) {}
 
     void dropBlockAsItemWithChance(World* world, int x, int y, int z, int metadata, float chance) override {
         if (!world || !Item::seeds) {
@@ -262,7 +260,7 @@ public:
 
 class BlockMushroom : public Block {
 public:
-    BlockMushroom(int id, Material* mat) : Block(id, mat) {}
+    explicit BlockMushroom(int id) : Block(id) {}
     bool allowsAttachment() const override { return false; }
     bool canBlockStay(World* world, int x, int y, int z) const override {
         int below = world->getBlockId(x, y - 1, z);
@@ -280,7 +278,7 @@ public:
 
 class BlockTorch : public Block {
 public:
-    BlockTorch(int id, Material* mat) : Block(id, mat) {}
+    explicit BlockTorch(int id) : Block(id) {}
     bool allowsAttachment() const override { return false; }
 
     // Java: doesBlockAllowAttachment = block is solid and opaque
@@ -346,9 +344,7 @@ public:
 
 class BlockCactus : public Block {
 public:
-    BlockCactus(int id, Material* mat) : Block(id, mat) {
-        setBlockBounds(0.0625f, 0.0f, 0.0625f, 0.9375f, 1.0f, 0.9375f);
-    }
+    explicit BlockCactus(int id) : Block(id) {}
     bool allowsAttachment() const override { return false; }
     void onBlockAdded(World* world, int x, int y, int z) override {
         scheduleBlockTick(world, this, x, y, z);
@@ -406,7 +402,7 @@ public:
 
 class BlockReed : public Block {
 public:
-    BlockReed(int id, Material* mat) : Block(id, mat) {}
+    explicit BlockReed(int id) : Block(id) {}
     bool allowsAttachment() const override { return false; }
     void onBlockAdded(World* world, int x, int y, int z) override {
         scheduleBlockTick(world, this, x, y, z);
@@ -500,6 +496,24 @@ Block* Block::mushroomBrown = nullptr;
 Block* Block::mushroomRed = nullptr;
 Block* Block::sapling = nullptr;
 
+Block::Block(int id)
+    : blockID(id), blockMaterial(nullptr), blockHardness(0.0f), blockResistance(0.0f) {
+    if (blocksList[id] != nullptr) {
+        throw std::runtime_error("Block slot " + std::to_string(id) + " is already occupied!");
+    }
+    blocksList[id] = this;
+    auto props = RustBridge::blockProperties(id);
+    blockHardness = props.hardness;
+    blockResistance = props.resistance;
+    blockMaterial = RustBridge::materialFromId(props.material);
+    lightOpacity[id] = props.light_opacity;
+    lightValue[id] = props.light_value;
+    tickOnLoad[id] = props.tick_on_load;
+    isBlockContainer[id] = props.is_block_container;
+    setBlockBounds(props.min_x, props.min_y, props.min_z,
+                   props.max_x, props.max_y, props.max_z);
+}
+
 Block::Block(int id, Material* material)
     : blockID(id), blockMaterial(material), blockHardness(0.0f), blockResistance(0.0f) {
     
@@ -513,34 +527,19 @@ Block::Block(int id, Material* material)
     isBlockContainer[id] = false;
 }
 
-class BlockOre : public Block {
-public:
-    BlockOre(int id, Material* material) : Block(id, material) {}
+int Block::idDropped(int metadata) const {
+    auto props = RustBridge::blockProperties(blockID);
+    return props.id_dropped ? props.id_dropped : blockID;
+}
 
-    int idDropped(int metadata) const override {
-        if (blockID == 16) return 263; // coal ore -> coal (Item id 7 -> itemID 263)
-        if (blockID == 56) return 264; // diamond ore -> diamond (Item id 8 -> itemID 264)
-        if (blockID == 21) return 351; // lapis ore -> lapis (Item id 95 -> itemID 351)
-        return blockID;                // iron/gold/redstone ore drop themselves
-    }
-};
-
-class BlockStone : public Block {
-public:
-    BlockStone(int id, Material* material) : Block(id, material) {}
-    int idDropped(int metadata) const override { return 4; } // Stone drops Cobblestone
-    bool canHarvestBlock(EntityPlayer* player) const override { return false; } // Hand cannot harvest stone in Alpha
-};
-
-class BlockGrass : public Block {
-public:
-    BlockGrass(int id, Material* material) : Block(id, material) {}
-    int idDropped(int metadata) const override { return 3; } // Grass drops Dirt
-};
+bool Block::canHarvestBlock(EntityPlayer* player) const {
+    auto props = RustBridge::blockProperties(blockID);
+    return props.can_harvest_block;
+}
 
 class BlockLeaves : public Block {
 public:
-    BlockLeaves(int id, Material* material) : Block(id, material) { setTickOnLoad(true); }
+    explicit BlockLeaves(int id) : Block(id) {}
     bool allowsAttachment() const override { return false; }
     void onBlockAdded(World* world, int x, int y, int z) override {
         scheduleBlockTick(world, this, x, y, z);
@@ -678,10 +677,7 @@ private:
 
 class BlockSapling : public Block {
 public:
-    BlockSapling(int id, Material* mat) : Block(id, mat) {
-        setTickOnLoad(true);
-        setBlockBounds(0.1f, 0.0f, 0.1f, 0.9f, 0.8f, 0.9f);
-    }
+    explicit BlockSapling(int id) : Block(id) {}
     bool allowsAttachment() const override { return false; }
 
     void onBlockAdded(World* world, int x, int y, int z) override {
@@ -778,7 +774,7 @@ public:
 
 class BlockCrops : public Block {
 public:
-    BlockCrops(int id, Material* mat) : Block(id, mat) {}
+    explicit BlockCrops(int id) : Block(id) {}
     bool allowsAttachment() const override { return false; }
 
     void onBlockAdded(World* world, int x, int y, int z) override {
@@ -887,11 +883,7 @@ public:
 
 class BlockSoil : public Block {
 public:
-    BlockSoil(int id, Material* mat) : Block(id, mat) {
-        setTickOnLoad(true);
-        setBlockBounds(0.0f, 0.0f, 0.0f, 1.0f, 15.0f / 16.0f, 1.0f);
-        setLightOpacity(255);
-    }
+    explicit BlockSoil(int id) : Block(id) {}
     bool allowsAttachment() const override { return false; }
 
     void onBlockAdded(World* world, int x, int y, int z) override {
@@ -980,161 +972,85 @@ private:
 };
 
 void Block::initBlocks() {
-    stone = (new BlockStone(1, &Material::rock))->setHardness(1.5f)->setResistance(10.0f);
-    grass = (new BlockGrass(2, &Material::ground))->setHardness(0.6f);
-    dirt = (new Block(3, &Material::ground))->setHardness(0.5f);
-    cobblestone = (new Block(4, &Material::rock))->setHardness(2.0f)->setResistance(10.0f);
-    planks = (new Block(5, &Material::wood))->setHardness(2.0f)->setResistance(5.0f);
-    sapling = (new BlockSapling(6, &Material::plants))->setHardness(0.0f)->setLightOpacity(0)->setTickOnLoad(true);
-    bedrock = (new Block(7, &Material::rock))->setHardness(-1.0f)->setResistance(6000000.0f);
-    // water and lava
-    blocksList[8] = (new BlockFluid(8, &Material::water))->setLightOpacity(3);
-    blocksList[9] = (new BlockFluid(9, &Material::water))->setLightOpacity(3);
-    blocksList[10] = (new BlockFluid(10, &Material::lava))->setLightOpacity(255);
-    blocksList[11] = (new BlockFluid(11, &Material::lava))->setLightOpacity(255);
-    sand = (new BlockSand(12, &Material::sand))->setHardness(0.5f);
-    gravel = (new BlockSand(13, &Material::sand))->setHardness(0.6f);
-    oreGold = (new BlockOre(14, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
-    oreIron = (new BlockOre(15, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
-    oreCoal = (new BlockOre(16, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
-    wood = (new Block(17, &Material::wood))->setHardness(2.0f);
-    leaves = (new BlockLeaves(18, &Material::leaves))->setHardness(0.2f)->setLightOpacity(1)->setTickOnLoad(true);
-    (new Block(19, &Material::ground))->setHardness(0.4f);   // sponge
-    glass = (new Block(20, &Material::glass))->setHardness(0.3f)->setLightOpacity(0);
-    (new Block(21, &Material::rock))->setHardness(3.0f);     // lapis ore
-    (new Block(22, &Material::rock))->setHardness(3.0f);     // lapis block
-    (new Block(23, &Material::rock))->setHardness(3.5f);     // dispenser
-    (new Block(24, &Material::rock))->setHardness(0.8f);     // sandstone
-    (new Block(25, &Material::wood))->setHardness(0.8f);     // noteblock
-    (new Block(27, &Material::ground))->setHardness(0.7f);   // powered rail
-    (new Block(28, &Material::ground))->setHardness(0.7f);   // detector rail
-    (new Block(29, &Material::rock))->setHardness(3.5f);     // sticky piston
-    (new Block(30, &Material::web))->setHardness(4.0f)->setLightOpacity(1);      // web
-    (new BlockTallGrass(31, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);   // tall grass
-    (new Block(32, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);   // dead bush
-    (new Block(33, &Material::rock))->setHardness(3.5f);     // piston
-    (new Block(35, &Material::cloth))->setHardness(0.8f);    // wool
-    plantYellow = (new BlockFlower(37, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);
-    plantRed = (new BlockFlower(38, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);
-    mushroomBrown = (new BlockMushroom(39, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);
-    mushroomRed = (new BlockMushroom(40, &Material::plants))->setHardness(0.0f)->setLightOpacity(0);
-    (new Block(41, &Material::iron))->setHardness(3.0f);     // gold block
-    (new Block(42, &Material::iron))->setHardness(5.0f);     // iron block
-    (new Block(43, &Material::rock))->setHardness(2.0f);     // double slab
-    (new Block(44, &Material::rock))->setHardness(2.0f);     // slab
-    (new Block(45, &Material::rock))->setHardness(2.0f);     // brick block
-    (new Block(46, &Material::tnt))->setHardness(0.0f);      // TNT
-    (new Block(47, &Material::wood))->setHardness(1.5f);     // bookshelf
-    cobblestoneMossy = (new Block(48, &Material::rock))->setHardness(2.0f)->setResistance(10.0f);
-    (new Block(49, &Material::rock))->setHardness(2000.0f);  // obsidian
-    (new BlockTorch(50, &Material::circuits))->setHardness(0.0f)->setLightOpacity(0); // torch
-    blocksList[51] = new BlockFire(51, 0);                    // fire
-    (new Block(52, &Material::rock))->setHardness(5.0f);
-    (new Block(53, &Material::wood))->setHardness(2.0f);     // wood stairs
-    blocksList[54] = new BlockChest(54);                     // chest
-    blocksList[54]->setHardness(2.5f);
-    (new Block(55, &Material::circuits))->setHardness(0.0f)->setLightOpacity(0); // redstone wire
-    oreDiamond = (new BlockOre(56, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
-    (new Block(57, &Material::iron))->setHardness(5.0f);     // diamond block
-    (new Block(58, &Material::wood))->setHardness(2.5f);     // crafting table
-    (new BlockCrops(59, &Material::plants))->setHardness(0.0f)->setLightOpacity(0)->setTickOnLoad(true);   // crops
-    (new BlockSoil(60, &Material::ground))->setHardness(0.6f);   // farmland
-    blocksList[61] = new BlockFurnace(61, false);            // furnace idle
-    blocksList[61]->setHardness(3.5f);
-    blocksList[62] = new BlockFurnace(62, true);             // furnace active
-    blocksList[62]->setHardness(3.5f);
-    blocksList[63] = new BlockSign(63, false);  // sign post (floor)
-    blocksList[63]->setHardness(1.0f)->setLightOpacity(0);
-    (new Block(64, &Material::wood))->setHardness(3.0f);     // wood door
-    (new Block(65, &Material::wood))->setHardness(0.4f);     // ladder
-    (new Block(66, &Material::ground))->setHardness(0.7f);   // rail
-    (new Block(67, &Material::rock))->setHardness(2.0f);     // cobblestone stairs
-    blocksList[68] = new BlockSign(68, true);   // wall sign
-    blocksList[68]->setHardness(1.0f)->setLightOpacity(0);
-    (new Block(69, &Material::circuits))->setHardness(0.5f); // lever
-    (new Block(70, &Material::rock))->setHardness(0.5f);     // stone pressure plate
-    (new Block(71, &Material::iron))->setHardness(3.0f);     // iron door
-    (new Block(72, &Material::wood))->setHardness(0.5f);     // wood pressure plate
-    oreRedstone = (new BlockOre(73, &Material::rock))->setHardness(3.0f)->setResistance(5.0f);
-    (new BlockOre(74, &Material::rock))->setHardness(3.0f);     // glowing redstone ore
-    (new Block(75, &Material::circuits))->setHardness(0.0f); // redstone torch off
-    (new Block(76, &Material::circuits))->setHardness(0.0f); // redstone torch on
-    (new Block(77, &Material::circuits))->setHardness(0.5f); // stone button
-    snow = (new Block(78, &Material::snow))->setHardness(0.1f);
-    ice = (new Block(79, &Material::ice))->setHardness(0.5f);
-    (new Block(80, &Material::snow))->setHardness(0.2f);     // snow block
-    cactus = (new BlockCactus(81, &Material::cactus))->setHardness(0.4f)->setLightOpacity(0)->setTickOnLoad(true);
-    blockClay = (new Block(82, &Material::clay))->setHardness(0.6f);
-    reed = (new BlockReed(83, &Material::plants))->setHardness(0.0f)->setLightOpacity(0)->setTickOnLoad(true);
-    (new Block(84, &Material::wood))->setHardness(0.8f);     // jukebox
-    (new Block(85, &Material::wood))->setHardness(2.0f);     // fence
-    pumpkin = (new Block(86, &Material::pumpkin))->setHardness(1.0f);
-    (new Block(87, &Material::rock))->setHardness(0.4f);     // netherrack
-    (new Block(88, &Material::sand))->setHardness(0.5f);     // soul sand
-    (new Block(89, &Material::rock))->setHardness(0.3f);     // glowstone
-    (new Block(91, &Material::pumpkin))->setHardness(1.0f);  // jack-o-lantern
+    for (int id = 1; id < 256; ++id) {
+        auto props = RustBridge::blockProperties(id);
+        if (props.material == BLOCK_MATERIAL_AIR) continue;
+
+        switch (id) {
+            case 51: blocksList[51] = new BlockFire(51, 0); break;
+            case 54: blocksList[54] = new BlockChest(54); break;
+            case 61: blocksList[61] = new BlockFurnace(61, false); break;
+            case 62: blocksList[62] = new BlockFurnace(62, true); break;
+            case 63: blocksList[63] = new BlockSign(63, false); break;
+            case 68: blocksList[68] = new BlockSign(68, true); break;
+            default:
+                switch (static_cast<BlockTypeId>(props.block_type)) {
+                    case BLOCK_TYPE_SAND: blocksList[id] = new BlockSand(id); break;
+                    case BLOCK_TYPE_FLUID: blocksList[id] = new BlockFluid(id); break;
+                    case BLOCK_TYPE_FLOWER: blocksList[id] = new BlockFlower(id); break;
+                    case BLOCK_TYPE_TALL_GRASS: blocksList[id] = new BlockTallGrass(id); break;
+                    case BLOCK_TYPE_MUSHROOM: blocksList[id] = new BlockMushroom(id); break;
+                    case BLOCK_TYPE_TORCH: blocksList[id] = new BlockTorch(id); break;
+                    case BLOCK_TYPE_CACTUS: blocksList[id] = new BlockCactus(id); break;
+                    case BLOCK_TYPE_REED: blocksList[id] = new BlockReed(id); break;
+                    case BLOCK_TYPE_LEAVES: blocksList[id] = new BlockLeaves(id); break;
+                    case BLOCK_TYPE_SAPLING: blocksList[id] = new BlockSapling(id); break;
+                    case BLOCK_TYPE_CROPS: blocksList[id] = new BlockCrops(id); break;
+                    case BLOCK_TYPE_SOIL: blocksList[id] = new BlockSoil(id); break;
+                    default: blocksList[id] = new Block(id); break;
+                }
+        }
+    }
+
+    // Assign static pointers
+    stone = blocksList[1];
+    grass = blocksList[2];
+    dirt = blocksList[3];
+    cobblestone = blocksList[4];
+    planks = blocksList[5];
+    sapling = blocksList[6];
+    bedrock = blocksList[7];
+    sand = blocksList[12];
+    gravel = blocksList[13];
+    oreGold = blocksList[14];
+    oreIron = blocksList[15];
+    oreCoal = blocksList[16];
+    wood = blocksList[17];
+    leaves = blocksList[18];
+    glass = blocksList[20];
+    plantYellow = blocksList[37];
+    plantRed = blocksList[38];
+    mushroomBrown = blocksList[39];
+    mushroomRed = blocksList[40];
+    cobblestoneMossy = blocksList[48];
+    oreDiamond = blocksList[56];
+    oreRedstone = blocksList[73];
+    snow = blocksList[78];
+    ice = blocksList[79];
+    cactus = blocksList[81];
+    blockClay = blocksList[82];
+    reed = blocksList[83];
+    pumpkin = blocksList[86];
 
     // TileEntities are registered via REGISTER_TILE_ENTITY macros in their headers
 
     // Java: field_540_p — populate allowsAttachment array
-    // Default: true (matching Java Block.allowsAttachment() default)
     for (int i = 0; i < 256; ++i) {
         allowsAttachmentArr[i] = (blocksList[i] != nullptr && blocksList[i]->allowsAttachment());
     }
 
-    // Force allowsAttachmentArr to false for blocks that return false in Java
     const std::vector<int> nonAttachingBlocks = {
-        6,   // sapling
-        8, 9, 10, 11, // water/lava
-        20,  // glass
-        27, 28, // rails
-        30,  // web
-        31,  // tall grass
-        32,  // dead bush
-        37, 38, 39, 40, // flowers/mushrooms
-        44,  // slab
-        50,  // torch
-        51,  // fire
-        52,  // mob spawner
-        53,  // wood stairs
-        55,  // redstone wire
-        59,  // crops
-        60,  // farmland
-        63,  // sign post
-        64,  // wood door
-        65,  // ladder
-        66,  // rail
-        67,  // cobblestone stairs
-        68,  // wall sign
-        69,  // lever
-        70,  // stone pressure plate
-        71,  // iron door
-        72,  // wood pressure plate
-        75, 76, // redstone torches
-        77,  // button
-        78,  // snow
-        79,  // ice
-        81,  // cactus
-        83,  // reed
-        85,  // fence
-        90   // portal
+        6, 8, 9, 10, 11, 20, 27, 28, 30, 31, 32, 37, 38, 39, 40,
+        44, 50, 51, 52, 53, 55, 59, 60, 63, 64, 65, 66, 67, 68,
+        69, 70, 71, 72, 75, 76, 77, 78, 79, 81, 83, 85, 90
     };
-
     for (int id : nonAttachingBlocks) {
         allowsAttachmentArr[id] = false;
     }
 
-    // Explicitly set lightOpacity for Ice (79) to 3 to match Java
-    if (blocksList[79] != nullptr) {
-        lightOpacity[79] = 3;
-    }
-
-    // Adjust lightOpacity: if a block doesn't allow attachment and wasn't explicitly set,
-    // its default lightOpacity should be 0, matching Java's constructor logic.
+    // Adjust lightOpacity post-init to match Java
     for (int i = 0; i < 256; ++i) {
         if (blocksList[i] != nullptr) {
-            // Blocks that had setLightOpacity called in C++ Block.cpp, or non-attaching blocks
-            // that explicitly have lightOpacity = 255 in Java (like slabs, stairs, farmland):
             bool hasExplicit = (i == 6 || i == 8 || i == 9 || i == 10 || i == 11 || i == 18 || i == 20 ||
                                 i == 30 || i == 31 || i == 32 || i == 37 || i == 38 || i == 39 || i == 40 ||
                                 i == 44 || i == 50 || i == 53 || i == 55 || i == 59 || i == 60 || i == 63 ||

@@ -7,7 +7,7 @@
 #include <random>
 
 BlockFurnace::BlockFurnace(int id, bool isActive) 
-    : BlockContainer(id, &Material::rock), isActive_(isActive) {}
+    : BlockContainer(id), isActive_(isActive) {}
 
 int BlockFurnace::idDropped(int metadata) const {
     return 61; // Always drop idle furnace

@@ -1,4 +1,5 @@
 #include "RustBridge.h"
+#include "Material.h"
 #include "../../rust/alpha_bridge/alpha_bridge.h"
 #include "Logger.h"
 #include <cstring>
@@ -130,6 +131,44 @@ bool decodeLevelDat(const std::vector<uint8_t>& input, LevelDatData& outLevel) {
         return true;
     }
     return false;
+}
+
+AlphaBlockProperties blockProperties(uint32_t id) {
+    return alpha_block_properties_get(id);
+}
+
+Material* materialFromId(uint8_t materialId) {
+    static Material* map[] = {
+        &Material::air,      // 0
+        &Material::ground,   // 1
+        &Material::wood,     // 2
+        &Material::rock,     // 3
+        &Material::iron,     // 4
+        &Material::water,    // 5
+        &Material::lava,     // 6
+        &Material::leaves,   // 7
+        &Material::plants,   // 8
+        &Material::sponge,   // 9
+        &Material::cloth,    // 10
+        &Material::fire,     // 11
+        &Material::sand,     // 12
+        &Material::circuits, // 13
+        &Material::glass,    // 14
+        &Material::tnt,      // 15
+        &Material::unused,   // 16
+        &Material::ice,      // 17
+        &Material::snow,     // 18
+        &Material::builtSnow,// 19
+        &Material::cactus,   // 20
+        &Material::clay,     // 21
+        &Material::pumpkin,  // 22
+        &Material::portal,   // 23
+        &Material::web,      // 24
+    };
+    if (materialId >= sizeof(map) / sizeof(map[0])) {
+        return &Material::air;
+    }
+    return map[materialId];
 }
 
 } // namespace RustBridge

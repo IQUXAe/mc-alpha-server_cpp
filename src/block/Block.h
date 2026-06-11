@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <optional>
+#include <cstdint>
 
 // Forward declarations
 class Material;
@@ -64,6 +65,7 @@ public:
     double maxX, maxY, maxZ;
 
     Block(int id, Material* material);
+    explicit Block(int id); // Reads all properties from Rust data table
     virtual ~Block() = default;
 
     static void initBlocks(); // Must be called once on server startup
@@ -93,11 +95,11 @@ public:
     virtual int tickRate() const { return 10; }
 
     virtual int quantityDropped() const { return 1; }
-    virtual int idDropped(int metadata) const { return blockID; }
+    virtual int idDropped(int metadata) const;
     // Returns the damage value of the item dropped (0 = no durability/variant).
     // Mirrors Java's Block.damageDropped(). Most blocks return 0.
     virtual int damageDropped(int metadata) const { return 0; }
-    virtual bool canHarvestBlock(EntityPlayer* player) const { return true; }
+    virtual bool canHarvestBlock(EntityPlayer* player) const;
     virtual void dropBlockAsItem(World* world, int x, int y, int z, int metadata);
     virtual void dropBlockAsItemWithChance(World* world, int x, int y, int z, int metadata, float chance);
 
