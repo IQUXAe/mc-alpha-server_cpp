@@ -96,37 +96,13 @@ pub extern "C" fn furnace_tick(
     }
 }
 
-#[no_mangle]
-pub extern "C" fn furnace_get_slot(
-    state: *const FfiFurnaceState,
-    slot: i32,
-) -> FfiItemStack {
-    let state = unsafe { &*state };
-    if slot < 0 || slot as usize >= FURNACE_SIZE {
-        return FfiItemStack { stack_size: 0, animations_to_go: 0, item_id: -1, item_damage: 0 };
-    }
-    state.slots[slot as usize]
-}
-
-#[no_mangle]
-pub extern "C" fn furnace_set_slot(
-    state: *mut FfiFurnaceState,
-    slot: i32,
-    stack: FfiItemStack,
-) {
-    let state = unsafe { &mut *state };
-    if slot < 0 || slot as usize >= FURNACE_SIZE {
-        return;
-    }
-    state.slots[slot as usize] = stack;
-}
-
 fn can_smelt(state: &FfiFurnaceState) -> bool {
     let input = &state.slots[SLOT_INPUT];
     if slot_empty(input) {
         return false;
     }
     let result_id = get_smelting_result(input.item_id);
+    // Matches C++ Item::itemsList[32000] — reject out-of-range item IDs
     if result_id < 0 || result_id >= 32000 {
         return false;
     }

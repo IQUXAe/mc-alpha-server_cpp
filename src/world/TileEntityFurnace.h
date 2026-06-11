@@ -113,7 +113,7 @@ public:
                 for (const auto& tag : listTag->tags) {
                     auto itemCompound = std::dynamic_pointer_cast<NBTCompound>(tag);
                     if (itemCompound) {
-                        int8_t slot = itemCompound->getByte("Slot");
+                        int slot = itemCompound->getByte("Slot") & 0xFF;
                         if (slot >= 0 && slot < FURNACE_SIZE) {
                             auto& ffi = state_.slots[slot];
                             ffi.itemID = itemCompound->getShort("id");
