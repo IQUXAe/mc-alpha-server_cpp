@@ -180,3 +180,49 @@ TEST_F(ItemStackTest, ToolGetStrVsBlockBoundaryId256) {
     ASSERT_NE(tool, nullptr);
     EXPECT_FLOAT_EQ(tool->getStrVsBlock(256), 1.0f);
 }
+
+TEST_F(ItemStackTest, HoeOnItemUseNullStack) {
+    ASSERT_NE(Item::hoeSteel, nullptr);
+    EXPECT_FALSE(Item::hoeSteel->onItemUse(nullptr, nullptr, nullptr, 0, 0, 0, 0));
+}
+
+TEST_F(ItemStackTest, HoeOnItemUseNullPlayer) {
+    ItemStack stack(Item::hoeSteel, 1);
+    ASSERT_NE(Item::hoeSteel, nullptr);
+    // null player should be caught by null check
+    EXPECT_FALSE(Item::hoeSteel->onItemUse(&stack, nullptr, nullptr, 0, 0, 0, 0));
+}
+
+TEST_F(ItemStackTest, HoeOnItemUseNullWorld) {
+    ItemStack stack(Item::hoeSteel, 1);
+    ASSERT_NE(Item::hoeSteel, nullptr);
+    EXPECT_FALSE(Item::hoeSteel->onItemUse(&stack, nullptr, nullptr, 0, 0, 0, 0));
+}
+
+TEST_F(ItemStackTest, SeedsOnItemUseNullStack) {
+    ASSERT_NE(Item::seeds, nullptr);
+    EXPECT_FALSE(Item::seeds->onItemUse(nullptr, nullptr, nullptr, 0, 0, 0, 0));
+}
+
+TEST_F(ItemStackTest, SeedsOnItemUseNullWorld) {
+    ItemStack stack(Item::seeds, 1);
+    ASSERT_NE(Item::seeds, nullptr);
+    EXPECT_FALSE(Item::seeds->onItemUse(&stack, nullptr, nullptr, 0, 0, 0, 0));
+}
+
+TEST_F(ItemStackTest, FlintOnItemUseNullStack) {
+    ASSERT_NE(Item::flintAndSteel, nullptr);
+    EXPECT_FALSE(Item::flintAndSteel->onItemUse(nullptr, nullptr, nullptr, 0, 0, 0, 0));
+}
+
+TEST_F(ItemStackTest, FlintOnItemUseNullWorld) {
+    ItemStack stack(Item::flintAndSteel, 1);
+    ASSERT_NE(Item::flintAndSteel, nullptr);
+    EXPECT_FALSE(Item::flintAndSteel->onItemUse(&stack, nullptr, nullptr, 0, 0, 0, 0));
+}
+
+TEST_F(ItemStackTest, BaseOnItemUseReturnsFalse) {
+    // diamond has no override, uses base Item::onItemUse which returns false
+    ASSERT_NE(Item::diamond, nullptr);
+    EXPECT_FALSE(Item::diamond->onItemUse(nullptr, nullptr, nullptr, 0, 0, 0, 0));
+}
