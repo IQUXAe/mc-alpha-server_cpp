@@ -176,15 +176,16 @@ protected:
                 faceEntity(*targetEntity_, 30.0f);
             }
 
-            // Jump over obstacles (Java field_9084_B = isCollided)
-            if (isCollided) {
-                isJumping_ = true;
-            }
+        }
 
-            // Jump in liquid
-            if (static_cast<float>(std::rand()) / RAND_MAX < 0.8f && inLiquid) {
-                isJumping_ = true;
-            }
+        // Jump over obstacles (only horizontal collision, not ground contact)
+        if (collidedHorizontally) {
+            isJumping_ = true;
+        }
+
+        // Jump in liquid (80% chance each tick to stay afloat)
+        if (static_cast<float>(std::rand()) / RAND_MAX < 0.8f && inLiquid) {
+            isJumping_ = true;
         }
 
         // Set forward movement using per-mob moveSpeed
