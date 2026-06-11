@@ -156,3 +156,27 @@ TEST_F(ItemStackTest, SpadeEffectiveAgainstDirt) {
     ASSERT_NE(dirt, nullptr);
     EXPECT_FLOAT_EQ(spade.getStrVsBlock(dirt), 6.0f);
 }
+
+TEST_F(ItemStackTest, ToolGetStrVsBlockNegativeId) {
+    auto* tool = dynamic_cast<ItemTool*>(Item::pickaxeSteel);
+    ASSERT_NE(tool, nullptr);
+    EXPECT_FLOAT_EQ(tool->getStrVsBlock(-1), 1.0f);
+}
+
+TEST_F(ItemStackTest, ToolGetStrVsBlockZeroId) {
+    auto* tool = dynamic_cast<ItemTool*>(Item::pickaxeSteel);
+    ASSERT_NE(tool, nullptr);
+    EXPECT_FLOAT_EQ(tool->getStrVsBlock(0), 1.0f);
+}
+
+TEST_F(ItemStackTest, ToolGetStrVsBlockLargeId) {
+    auto* tool = dynamic_cast<ItemTool*>(Item::pickaxeSteel);
+    ASSERT_NE(tool, nullptr);
+    EXPECT_FLOAT_EQ(tool->getStrVsBlock(9999), 1.0f);
+}
+
+TEST_F(ItemStackTest, ToolGetStrVsBlockBoundaryId256) {
+    auto* tool = dynamic_cast<ItemTool*>(Item::pickaxeSteel);
+    ASSERT_NE(tool, nullptr);
+    EXPECT_FLOAT_EQ(tool->getStrVsBlock(256), 1.0f);
+}
