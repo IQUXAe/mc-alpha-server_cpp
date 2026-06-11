@@ -86,6 +86,13 @@ void ServerConfigurationManager::playerLoggedIn(EntityPlayerMP* player) {
 }
 
 void ServerConfigurationManager::playerLoggedOut(EntityPlayerMP* player) {
+    if (player && player->netHandler) {
+        auto* handler = static_cast<NetServerHandler*>(player->netHandler);
+        for (int64_t key : handler->sentChunks_) {
+            markChunkUnloaded(player, key);
+        }
+    }
+
     if (player && player->ridingEntity) {
         player->mountEntity(nullptr);
     }
@@ -113,6 +120,26 @@ void ServerConfigurationManager::playerLoggedOut(EntityPlayerMP* player) {
     }
 }
 
+void ServerConfigurationManager::markChunkLoaded(EntityPlayerMP* player, int64_t chunkKey) {
+    playersByChunk_[chunkKey].push_back(player);
+}
+
+void ServerConfigurationManager::markChunkUnloaded(EntityPlayerMP* player, int64_t chunkKey) {
+    auto it = playersByChunk_.find(chunkKey);
+    if (it != playersByChunk_.end()) {
+        std::erase(it->second, player);
+        if (it->second.empty()) {
+            playersByChunk_.erase(it);
+        }
+    }
+}
+
+const std::vector<EntityPlayerMP*>& ServerConfigurationManager::getPlayersInChunk(int64_t chunkKey) const {
+    static const std::vector<EntityPlayerMP*> emptyList;
+    auto it = playersByChunk_.find(chunkKey);
+    return it != playersByChunk_.end() ? it->second : emptyList;
+}
+
 void ServerConfigurationManager::broadcastPacket(std::unique_ptr<Packet> pkt) {
     for (auto* player : playerEntities) {
         if (player->netHandler) {
@@ -136,10 +163,10 @@ void ServerConfigurationManager::sendTileEntityToNearbyPlayers(int x, int y, int
     int chunkZ = z >> 4;
     int sentCount = 0;
 
-    for (auto* player : playerEntities) {
+    auto key = NetServerHandler::chunkKey(chunkX, chunkZ);
+    for (auto* player : getPlayersInChunk(key)) {
         auto* handler = static_cast<NetServerHandler*>(player->netHandler);
         if (!handler) continue;
-        if (!handler->hasChunkLoaded(NetServerHandler::chunkKey(chunkX, chunkZ))) continue;
 
         auto pkt = std::make_unique<Packet59ComplexEntity>();
         pkt->x = x;

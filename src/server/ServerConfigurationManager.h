@@ -11,6 +11,7 @@
 #include <memory>
 #include <iostream>
 #include <algorithm>
+#include <unordered_map>
 
 class MinecraftServer;
 class NetLoginHandler;
@@ -29,6 +30,10 @@ public:
 
     // Broadcast a packet to all players
     void broadcastPacket(std::unique_ptr<Packet> pkt);
+
+    void markChunkLoaded(EntityPlayerMP* player, int64_t chunkKey);
+    void markChunkUnloaded(EntityPlayerMP* player, int64_t chunkKey);
+    const std::vector<EntityPlayerMP*>& getPlayersInChunk(int64_t chunkKey) const;
 
     // Send Packet59 to all players who have the chunk containing (x,y,z) loaded.
     // Matches Java: configManager.sentTileEntityToPlayer -> playerManager.func_541_a
@@ -74,4 +79,6 @@ private:
     void saveList(const std::string& filename, const std::set<std::string>& list);
 
     static std::string toLower(const std::string& s);
+
+    std::unordered_map<int64_t, std::vector<EntityPlayerMP*>> playersByChunk_;
 };

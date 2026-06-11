@@ -1458,9 +1458,9 @@ void World::markBlockNeedsUpdate(int x, int y, int z) {
                             static_cast<int8_t>(getBlockMetadata(x, y, z)));
 
     // Only send to players who have this chunk loaded
-    for (auto* player : mcServer->configManager->playerEntities) {
-        if (player->netHandler && player->netHandler->hasChunkLoaded(
-                player->netHandler->chunkKey(chunkX, chunkZ))) {
+    auto key = NetServerHandler::chunkKey(chunkX, chunkZ);
+    for (auto* player : mcServer->configManager->getPlayersInChunk(key)) {
+        if (player->netHandler) {
             player->netHandler->sendPacket(pkt->clone());
         }
     }
