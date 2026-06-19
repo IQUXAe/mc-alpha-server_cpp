@@ -129,14 +129,14 @@ void ServerConfigurationManager::playerLoggedOut(EntityPlayerMP* player) {
 
 void ServerConfigurationManager::addPlayerToChunk(EntityPlayerMP* player, int64_t chunkKey) {
     if (!player || !player->netHandler) return;
-    playersByChunk_[chunkKey].insert(player);
+    playersByChunk_[chunkKey].insert(player->entityId);
 }
 
 void ServerConfigurationManager::removePlayerFromChunk(EntityPlayerMP* player, int64_t chunkKey) {
     if (!player) return;
     auto it = playersByChunk_.find(chunkKey);
     if (it == playersByChunk_.end()) return;
-    it->second.erase(player);
+    it->second.erase(player->entityId);
     if (it->second.empty()) {
         playersByChunk_.erase(it);
     }
@@ -145,7 +145,7 @@ void ServerConfigurationManager::removePlayerFromChunk(EntityPlayerMP* player, i
 void ServerConfigurationManager::removePlayerFromAllChunks(EntityPlayerMP* player) {
     if (!player) return;
     for (auto it = playersByChunk_.begin(); it != playersByChunk_.end(); ) {
-        it->second.erase(player);
+        it->second.erase(player->entityId);
         if (it->second.empty()) {
             it = playersByChunk_.erase(it);
         } else {
@@ -154,9 +154,27 @@ void ServerConfigurationManager::removePlayerFromAllChunks(EntityPlayerMP* playe
     }
 }
 
-const std::unordered_set<EntityPlayerMP*>* ServerConfigurationManager::getPlayersInChunk(int64_t chunkKey) const {
+EntityPlayerMP* ServerConfigurationManager::getPlayerById(int entityId) {
+    for (auto* p : playerEntities) {
+        if (p && p->entityId == entityId) return p;
+    }
+    return nullptr;
+}
+
+std::vector<EntityPlayerMP*> ServerConfigurationManager::getPlayersInChunk(int64_t chunkKey) const {
     auto it = playersByChunk_.find(chunkKey);
-    return it != playersByChunk_.end() ? &it->second : nullptr;
+    if (it == playersByChunk_.end()) return {};
+    std::vector<EntityPlayerMP*> result;
+    result.reserve(it->second.size());
+    for (int entityId : it->second) {
+        for (auto* p : playerEntities) {
+            if (p && p->entityId == entityId) {
+                result.push_back(p);
+                break;
+            }
+        }
+    }
+    return result;
 }
 
 void ServerConfigurationManager::broadcastPacket(std::unique_ptr<Packet> pkt) {
@@ -181,12 +199,10 @@ void ServerConfigurationManager::sendTileEntityToNearbyPlayers(int x, int y, int
     int chunkZ = z >> 4;
     int64_t key = NetServerHandler::chunkKey(chunkX, chunkZ);
 
-    // Copy pointers to avoid issues if removePlayerFromAllChunks erases the map entry during iteration
-    auto* players = getPlayersInChunk(key);
-    if (!players || players->empty()) return;
+    std::vector<EntityPlayerMP*> players = getPlayersInChunk(key);
+    if (players.empty()) return;
 
-    std::vector<EntityPlayerMP*> copy(players->begin(), players->end());
-    for (auto* player : copy) {
+    for (auto* player : players) {
         if (!player || !player->netHandler) continue;
         auto pkt = std::make_unique<Packet59ComplexEntity>();
         pkt->x = x;

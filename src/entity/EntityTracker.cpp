@@ -157,8 +157,8 @@ void TrackerEntry::updateTracking(const std::vector<EntityPlayerMP*>& allPlayers
     for (auto* player : allPlayers) {
         if (!player || !player->netHandler || player->isDead) continue;
 
-        double dx = player->posX - (double)(lastFixedX / 32);
-        double dz = player->posZ - (double)(lastFixedZ / 32);
+        double dx = player->posX - lastFixedX / 32.0;
+        double dz = player->posZ - lastFixedZ / 32.0;
         bool inRange = dx >= -trackingRange && dx <= trackingRange
                     && dz >= -trackingRange && dz <= trackingRange;
         bool chunkLoaded = observerHasEntityChunkLoaded(entity, player);
@@ -367,6 +367,16 @@ void EntityTracker::tick() {
 
     for (auto& [id, entry] : entries_) {
         if (!entry->entity || entry->entity->isDead) continue;
+
+        // Remove stale player pointers from tracking sets
+        for (auto it = entry->trackingPlayers.begin(); it != entry->trackingPlayers.end(); ) {
+            if (!*it || (*it)->isDead) {
+                it = entry->trackingPlayers.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
         entry->updateTracking(players);
         entry->sendUpdates();
     }
