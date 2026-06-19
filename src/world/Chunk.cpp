@@ -158,12 +158,8 @@ void Chunk::generateSkylightMap() {
                 // Add to queue if has skylight using GLOBAL coordinates
                 if (currentSky > 0) skyQueue.push({globalX + x, y, globalZ + z});
 
-                // Block light emission (torches, lava, etc)
-                int emission = 0;
-                if (id == 10 || id == 11 || id == 51 || id == 89 || id == 91) emission = 15;
-                else if (id == 50) emission = 14;
-                else if (id == 74) emission = 9;
-                else if (id == 76) emission = 7;
+                // Block light emission (torches, lava, etc) — use Block registry
+                int emission = Block::lightValue[static_cast<size_t>(id)];
                 
                 blocklight.setNibble(x, y, z, emission);
                 if (emission > 0) blockQueue.push({globalX + x, y, globalZ + z});
