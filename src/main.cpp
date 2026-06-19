@@ -21,10 +21,12 @@ std::string gConsoleLine;
 
 void signalHandler(int signum) {
     if (globalServer && !isShuttingDown.exchange(true)) {
-        Logger::info("Interrupt signal ({}) received. Stopping server gracefully...", signum);
+        const char msg[] = "[INFO] Interrupt signal received. Stopping server gracefully...\n";
+        ::write(STDERR_FILENO, msg, sizeof(msg) - 1);
         globalServer->stop();
     } else {
-        Logger::info("Force killing server...");
+        const char msg[] = "[INFO] Force killing server...\n";
+        ::write(STDERR_FILENO, msg, sizeof(msg) - 1);
         std::_Exit(signum);
     }
 }
