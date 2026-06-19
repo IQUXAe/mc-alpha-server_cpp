@@ -615,6 +615,67 @@ pub unsafe extern "C" fn alpha_generate_tree(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn rust_session_check(
+    username: *const c_char,
+    server_id: *const c_char,
+    out_buf: *mut c_char,
+    out_max: size_t,
+) -> bool {
+    let username = match unsafe { CStr::from_ptr(username) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let server_id = match unsafe { CStr::from_ptr(server_id) }.to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    let url = format!(
+        "https://session.minecraft.net/game/checkserver.jsp?user={}&serverId={}",
+        urlencoding(username),
+        urlencoding(server_id)
+    );
+
+    match ureq::get(&url).call() {
+        Ok(response) => {
+            let body = match response.into_string() {
+                Ok(b) => b,
+                Err(_) => return false,
+            };
+            let trimmed = body.trim();
+            let c_str = match CString::new(trimmed) {
+                Ok(s) => s,
+                Err(_) => return false,
+            };
+            let bytes = c_str.as_bytes_with_nul();
+            let len = std::cmp::min(bytes.len(), out_max);
+            if len == 0 {
+                return false;
+            }
+            std::ptr::copy_nonoverlapping(bytes.as_ptr() as *const c_char, out_buf, len);
+            out_buf.add(len - 1).write(0);
+            trimmed == "YES"
+        }
+        Err(_) => false,
+    }
+}
+
+fn urlencoding(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    for byte in s.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                result.push(byte as char);
+            }
+            _ => {
+                result.push_str(&format!("%{:02X}", byte));
+            }
+        }
+    }
+    result
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn alpha_generate_big_tree(
     accessor: WorldAccessor,
     seed: i64,

@@ -541,6 +541,9 @@ void rust_network_manager_get_termination_reason(
 size_t rust_network_manager_get_send_queue_length(RustNetworkManager* manager);
 void rust_network_manager_server_shutdown(RustNetworkManager* manager);
 
+// HTTPS session check via Rust (uses ureq/rustls)
+bool rust_session_check(const char* username, const char* server_id, char* out_buf, size_t out_max);
+
 // ChunkProviderGenerate FFI
 typedef struct RustChunkProviderGenerate RustChunkProviderGenerate;
 

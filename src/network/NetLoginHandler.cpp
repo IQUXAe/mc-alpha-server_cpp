@@ -2,143 +2,26 @@
 #include "NetServerHandler.h"
 #include "../MinecraftServer.h"
 #include "../core/Logger.h"
+#include "../../rust/alpha_bridge/alpha_bridge.h"
 
 #include <array>
 #include <cerrno>
 #include <cstring>
-#include <netdb.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <sstream>
-#include <iomanip>
 #include <string_view>
 #include <utility>
 
 namespace {
-constexpr std::string_view kSessionHost = "session.minecraft.net";
-constexpr std::string_view kSessionPath = "/game/checkserver.jsp";
-
-std::string urlEncode(std::string_view value) {
-    std::ostringstream encoded;
-    encoded << std::uppercase << std::hex;
-
-    for (unsigned char ch : value) {
-        if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
-            (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.' || ch == '~') {
-            encoded << static_cast<char>(ch);
-        } else {
-            encoded << '%' << std::setw(2) << std::setfill('0') << static_cast<int>(ch);
-        }
-    }
-
-    return encoded.str();
-}
-
-bool recvAll(int socketFd, std::string& response) {
-    std::array<char, 4096> buffer{};
-    constexpr size_t kMaxResponse = 16384;
-    while (true) {
-        if (response.size() >= kMaxResponse) return false;
-        const size_t toRead = std::min(buffer.size(), kMaxResponse - response.size());
-        const ssize_t received = ::recv(socketFd, buffer.data(), toRead, 0);
-        if (received == 0) {
-            return true;
-        }
-        if (received < 0) {
-            if (errno == EINTR) continue;
-            return false;
-        }
-        response.append(buffer.data(), static_cast<std::size_t>(received));
-    }
-}
 
 std::string performSessionCheck(std::string_view username, std::string_view serverId) {
-    addrinfo hints{};
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-
-    addrinfo* rawResult = nullptr;
-    const int lookupResult = ::getaddrinfo(std::string(kSessionHost).c_str(), "80", &hints, &rawResult);
-    if (lookupResult != 0) {
-        throw std::runtime_error(std::string("Session DNS lookup failed: ") + ::gai_strerror(lookupResult));
+    char buf[128];
+    const bool ok = rust_session_check(
+        std::string(username).c_str(),
+        std::string(serverId).c_str(),
+        buf, sizeof(buf));
+    if (!ok) {
+        throw std::runtime_error("Session verification failed");
     }
-
-    std::unique_ptr<addrinfo, decltype(&::freeaddrinfo)> addresses(rawResult, ::freeaddrinfo);
-    int socketFd = -1;
-
-    for (addrinfo* addr = addresses.get(); addr != nullptr; addr = addr->ai_next) {
-        socketFd = ::socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
-        if (socketFd < 0) {
-            continue;
-        }
-
-        timeval timeout{.tv_sec = 5, .tv_usec = 0};
-        ::setsockopt(socketFd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-        ::setsockopt(socketFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-
-        if (::connect(socketFd, addr->ai_addr, addr->ai_addrlen) == 0) {
-            break;
-        }
-
-        ::close(socketFd);
-        socketFd = -1;
-    }
-
-    if (socketFd < 0) {
-        throw std::runtime_error("Failed to connect to session server");
-    }
-
-    const auto closeSocket = [&]() {
-        if (socketFd >= 0) {
-            ::shutdown(socketFd, SHUT_RDWR);
-            ::close(socketFd);
-            socketFd = -1;
-        }
-    };
-
-    const std::string request =
-        "GET " + std::string(kSessionPath) + "?user=" + urlEncode(username) + "&serverId=" + urlEncode(serverId) + " HTTP/1.1\r\n"
-        "Host: " + std::string(kSessionHost) + "\r\n"
-        "Connection: close\r\n"
-        "User-Agent: alpha_server/0.2.8\r\n"
-        "\r\n";
-
-    std::size_t sent = 0;
-    while (sent < request.size()) {
-        const ssize_t writeResult = ::send(socketFd, request.data() + sent, request.size() - sent, 0);
-        if (writeResult < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            closeSocket();
-            throw std::runtime_error(std::string("Failed to send session request: ") + std::strerror(errno));
-        }
-        sent += static_cast<std::size_t>(writeResult);
-    }
-
-    std::string response;
-    if (!recvAll(socketFd, response)) {
-        const std::string error = std::strerror(errno);
-        closeSocket();
-        throw std::runtime_error("Failed to read session response: " + error);
-    }
-    closeSocket();
-
-    const std::size_t headerEnd = response.find("\r\n\r\n");
-    if (headerEnd == std::string::npos) {
-        throw std::runtime_error("Invalid HTTP response from session server");
-    }
-
-    const std::string_view statusLine(response.data(), response.find("\r\n"));
-    if (statusLine.find("200") == std::string_view::npos) {
-        throw std::runtime_error("Session server returned non-200 status");
-    }
-
-    std::string body = response.substr(headerEnd + 4);
-    while (!body.empty() && (body.back() == '\r' || body.back() == '\n' || body.back() == ' ' || body.back() == '\t')) {
-        body.pop_back();
-    }
-    return body;
+    return std::string(buf);
 }
 }
 
