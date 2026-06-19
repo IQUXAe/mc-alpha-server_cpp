@@ -354,7 +354,9 @@ World::World(MinecraftServer* server, const std::string& savePath, int64_t seed)
                                 uint64_t key = getChunkKey(cx, cz);
                                 leveldb::Slice keySlice(reinterpret_cast<const char*>(&key), sizeof(uint64_t));
                                 leveldb::Slice valSlice(reinterpret_cast<const char*>(modernData.data()), modernData.size());
-                                auto status = db_->Put(leveldb::WriteOptions(), keySlice, valSlice);
+                                leveldb::WriteOptions syncOpts;
+                                syncOpts.sync = true;
+                                auto status = db_->Put(syncOpts, keySlice, valSlice);
                                 if (status.ok()) {
                                     convertedCount++;
                                 } else {
@@ -2106,7 +2108,9 @@ void World::saveWorker(std::stop_token st) {
             } else if (db_) {
                 leveldb::Slice keySlice(reinterpret_cast<const char*>(&task.key), sizeof(uint64_t)); // NOLINT: leveldb API
                 leveldb::Slice valSlice(reinterpret_cast<const char*>(task.data.data()), task.data.size()); // NOLINT: leveldb API
-                auto status = db_->Put(leveldb::WriteOptions(), keySlice, valSlice);
+                leveldb::WriteOptions syncOpts;
+                syncOpts.sync = true;
+                auto status = db_->Put(syncOpts, keySlice, valSlice);
                 if (!status.ok())
                     Logger::severe("LevelDB save failed: {}", status.ToString());
             }
@@ -2606,7 +2610,9 @@ void World::saveChunkImmediate(Chunk* chunk) {
         if (!data.empty()) {
             leveldb::Slice keySlice(reinterpret_cast<const char*>(&key), sizeof(uint64_t)); // NOLINT: leveldb API
             leveldb::Slice valSlice(reinterpret_cast<const char*>(data.data()), data.size()); // NOLINT: leveldb API
-            auto status = db_->Put(leveldb::WriteOptions(), keySlice, valSlice);
+            leveldb::WriteOptions syncOpts;
+            syncOpts.sync = true;
+            auto status = db_->Put(syncOpts, keySlice, valSlice);
             
             if (status.ok()) {
                 chunk->isModified = false;
