@@ -33,8 +33,12 @@ public:
 
     std::string getUserAndIPString() const;
 
+    // The remote address survives after netManager is moved out in doLogin().
+    std::string getRemoteAddress() const { return remoteAddress_; }
+
 private:
     MinecraftServer* mcServer_;
+    std::string remoteAddress_;
     int tickCounter_ = 0;
     std::string username_;
     std::string serverId_;

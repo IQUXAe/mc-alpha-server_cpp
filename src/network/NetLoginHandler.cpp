@@ -29,7 +29,7 @@ std::string performSessionCheck(std::string_view username, std::string_view serv
 std::mt19937_64 NetLoginHandler::rng_(std::random_device{}());
 
 NetLoginHandler::NetLoginHandler(MinecraftServer* server, int socketFd, const std::string& remoteAddr, const std::string& desc)
-    : mcServer_(server) {
+    : mcServer_(server), remoteAddress_(remoteAddr) {
     netManager = std::make_unique<NetworkManager>(socketFd, desc, this);
     netManager->setRemoteAddress(remoteAddr);
 }

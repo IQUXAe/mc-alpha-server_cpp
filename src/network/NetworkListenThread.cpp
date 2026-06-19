@@ -80,8 +80,9 @@ void NetworkListenThread::networkTick() {
             }
 
             if (loginHandler->finishedProcessing) {
-                // Decrement per-IP connection count
-                std::string ip = loginHandler->netManager->getRemoteAddress();
+                // Decrement per-IP connection count (use saved address;
+                // netManager may have been moved out by doLogin())
+                std::string ip = loginHandler->getRemoteAddress();
                 auto slashPos = ip.find('/');
                 if (slashPos != std::string::npos) ip = ip.substr(slashPos + 1);
                 auto colonPos = ip.find(':');
