@@ -623,7 +623,13 @@ void NetServerHandler::handleCommand(const std::string& msg) {
         return v;
     };
 
+    const bool isOp = mcServer_->configManager->isOp(player_->username);
+
     try {
+        if (!isOp && (cmd == "give" || cmd == "tp")) {
+            sendPacket(std::make_unique<Packet3Chat>("You do not have permission to use this command"));
+            return;
+        }
         if (cmd == "give") {
             if (args.size() < 2) {
                 sendPacket(std::make_unique<Packet3Chat>("Usage: /give <itemId> [count] [damage]"));
