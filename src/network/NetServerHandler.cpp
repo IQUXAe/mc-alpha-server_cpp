@@ -23,6 +23,7 @@
 #include <cmath>
 #include <ranges>
 #include <functional>
+#include <charconv>
 namespace {
 
 constexpr double kMaxAttackReach = 5.0;
@@ -598,7 +599,6 @@ void NetServerHandler::handleChat(Packet3Chat& pkt) {
 }
 
 void NetServerHandler::handleCommand(const std::string& msg) {
-    // Tokenize
     std::vector<std::string> args;
     std::istringstream ss(msg.substr(1));
     for (std::string tok; ss >> tok;) args.push_back(tok);
@@ -606,15 +606,28 @@ void NetServerHandler::handleCommand(const std::string& msg) {
 
     const std::string& cmd = args[0];
 
-    if (cmd == "give") {
-        // /give <itemId> [count] [damage]
-        if (args.size() < 2) {
-            sendPacket(std::make_unique<Packet3Chat>("Usage: /give <itemId> [count] [damage]"));
-            return;
-        }
-        int itemId = std::stoi(args[1]);
-        int count  = args.size() >= 3 ? std::stoi(args[2]) : 1;
-        int damage = args.size() >= 4 ? std::stoi(args[3]) : 0;
+    auto toInt = [&](const std::string& s) {
+        int v = 0;
+        auto r = std::from_chars(s.data(), s.data() + s.size(), v);
+        if (r.ec != std::errc()) throw std::invalid_argument("not a number");
+        return v;
+    };
+    auto toDouble = [&](const std::string& s) {
+        double v = 0;
+        auto r = std::from_chars(s.data(), s.data() + s.size(), v);
+        if (r.ec != std::errc()) throw std::invalid_argument("not a number");
+        return v;
+    };
+
+    try {
+        if (cmd == "give") {
+            if (args.size() < 2) {
+                sendPacket(std::make_unique<Packet3Chat>("Usage: /give <itemId> [count] [damage]"));
+                return;
+            }
+            int itemId = toInt(args[1]);
+            int count  = args.size() >= 3 ? toInt(args[2]) : 1;
+            int damage = args.size() >= 4 ? toInt(args[3]) : 0;
         count = std::clamp(count, 1, 64);
 
         // Validate: blocks must exist in blocksList, items must be < 32000
@@ -633,18 +646,20 @@ void NetServerHandler::handleCommand(const std::string& msg) {
         mcServer_->worldMngr->spawnEntityInWorld(std::move(entity));
         sendPacket(std::make_unique<Packet3Chat>("Gave " + std::to_string(count) + "x " + std::to_string(itemId)));
     } else if (cmd == "tp") {
-        // /tp <x> <y> <z>
         if (args.size() < 4) {
             sendPacket(std::make_unique<Packet3Chat>("Usage: /tp <x> <y> <z>"));
             return;
         }
-        double tx = std::stod(args[1]);
-        double ty = std::stod(args[2]);
-        double tz = std::stod(args[3]);
+        double tx = toDouble(args[1]);
+        double ty = toDouble(args[2]);
+        double tz = toDouble(args[3]);
         teleport(tx, ty, tz, player_->rotationYaw, player_->rotationPitch);
         sendPacket(std::make_unique<Packet3Chat>("Teleported to " + std::to_string(tx) + ", " + std::to_string(ty) + ", " + std::to_string(tz)));
     } else {
         sendPacket(std::make_unique<Packet3Chat>("Unknown command: " + cmd));
+    }
+    } catch (const std::exception&) {
+        sendPacket(std::make_unique<Packet3Chat>("Invalid command arguments"));
     }
 }
 
@@ -789,10 +804,11 @@ void NetServerHandler::handleBlockDig(Packet14BlockDig& pkt) {
     if (pkt.status == 1) checkDist = true;
     
     int x = pkt.x;
-    int y = pkt.y;
+    // y arrives as a signed byte; Alpha protocol treats it as unsigned
+    int y = static_cast<uint8_t>(pkt.y);
+    if (y < 0 || y >= 128) return;
     int z = pkt.z;
     int face = pkt.face;
-
 
     if (checkDist) {
         double dX = player_->posX - (x + 0.5);
@@ -1092,13 +1108,12 @@ void NetServerHandler::handlePickupSpawn(Packet21PickupSpawn& pkt) {
 }
 
 void NetServerHandler::handleComplexEntity(Packet59ComplexEntity& pkt) {
-    // Client sends Packet59 when closing a chest/furnace GUI.
-    // entityData is always GZip-compressed NBT (Java: CompressedStreamTools.func_773_a)
-    if (pkt.nbtData.empty()) {
+    if (pkt.nbtData.empty() || pkt.nbtData.size() > 65536) {
         return;
     }
 
     std::vector<uint8_t> decompressed = RustBridge::gzipDecompress(pkt.nbtData);
+    if (decompressed.size() > 524288) return; // 512 KiB limit on decompressed NBT
     if (decompressed.empty()) {
         return;
     }
