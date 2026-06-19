@@ -32,8 +32,8 @@ public:
 
     void readPacketData(ByteBuffer& buf) override {
         protocolVersion = buf.readInt();
-        username = buf.readUTF();
-        password = buf.readUTF();
+        username = buf.readUTF(16);
+        password = buf.readUTF(128);
         mapSeed = buf.readLong();
         dimension = buf.readByte();
     }
@@ -65,7 +65,7 @@ public:
     explicit Packet2Handshake(const std::string& user) : username(user) {}
 
     void readPacketData(ByteBuffer& buf) override {
-        username = buf.readUTF();
+        username = buf.readUTF(16);
     }
 
     void writePacketData(ByteBuffer& buf) override {
@@ -91,7 +91,7 @@ public:
     explicit Packet3Chat(const std::string& msg) : message(msg) {}
 
     void readPacketData(ByteBuffer& buf) override {
-        message = buf.readUTF();
+        message = buf.readUTF(100);
     }
 
     void writePacketData(ByteBuffer& buf) override {
@@ -528,7 +528,7 @@ public:
 
     void readPacketData(ByteBuffer& buf) override {
         entityId = buf.readInt();
-        name = buf.readUTF();
+        name = buf.readUTF(16);
         x = buf.readInt();
         y = buf.readInt();
         z = buf.readInt();
@@ -1128,7 +1128,7 @@ public:
     explicit Packet255KickDisconnect(const std::string& r) : reason(r) {}
 
     void readPacketData(ByteBuffer& buf) override {
-        reason = buf.readUTF();
+        reason = buf.readUTF(256);
     }
 
     void writePacketData(ByteBuffer& buf) override {

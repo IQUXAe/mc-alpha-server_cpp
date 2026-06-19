@@ -96,9 +96,10 @@ public:
     virtual double readDouble() { return std::bit_cast<double>(static_cast<uint64_t>(readLong())); }
     virtual bool   readBool()   { return readByte() != 0; }
 
-    virtual std::string readUTF() {
+    virtual std::string readUTF(int16_t maxLength = 32767) {
         int16_t len = readShort();
         if (len < 0) throw std::runtime_error("Negative UTF length");
+        if (len > maxLength) throw std::runtime_error("UTF length exceeds maximum");
         if (len == 0) return {};
         ensureReadable(static_cast<size_t>(len));
         std::string s(reinterpret_cast<const char*>(&data[readPos]), static_cast<size_t>(len)); // NOLINT: byte buffer access
