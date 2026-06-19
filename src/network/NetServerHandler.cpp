@@ -143,6 +143,7 @@ NetServerHandler::~NetServerHandler() {
 
 void NetServerHandler::tick() {
     netManager_->processReadPackets();
+    if (disconnected) return;
     if (++tickCounter_ % 20 == 0) {
         sendPacket(std::make_unique<Packet0KeepAlive>());
     }

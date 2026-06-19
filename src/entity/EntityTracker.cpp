@@ -155,7 +155,7 @@ void TrackerEntry::broadcastIncludingSelf(std::unique_ptr<Packet> pkt) const {
 
 void TrackerEntry::updateTracking(const std::vector<EntityPlayerMP*>& allPlayers) {
     for (auto* player : allPlayers) {
-        if (!player) continue;
+        if (!player || !player->netHandler || player->isDead) continue;
 
         double dx = player->posX - (double)(lastFixedX / 32);
         double dz = player->posZ - (double)(lastFixedZ / 32);
@@ -383,7 +383,7 @@ void EntityTracker::broadcastPacketIncludingSelf(Entity* entity, std::unique_ptr
 }
 
 void EntityTracker::sendAllToPlayer(EntityPlayerMP* player) {
-    if (!player) {
+    if (!player || !player->netHandler || player->isDead) {
         return;
     }
 
