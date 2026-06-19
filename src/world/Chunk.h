@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <atomic>
 #include "../core/NibbleArray.h"
 #include "../forward.h"
 
@@ -46,7 +47,7 @@ public:
     World* worldObj;
 
     bool isTerrainPopulated = false;
-    bool isModified = false;
+    std::atomic<bool> isModified{false};
 
     // EntityItems waiting to be spawned when the chunk is loaded
     std::vector<ChunkEntityData> pendingItems;

@@ -6,13 +6,14 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <atomic>
 
 enum class LogLevel { DEBUG, INFO, WARNING, SEVERE };
 
 class Logger {
 public:
-    static void setLevel(LogLevel level) { minLevel_ = level; }
-    [[nodiscard]] static LogLevel getLevel() { return minLevel_; }
+    static void setLevel(LogLevel level) { minLevel_.store(level, std::memory_order_relaxed); }
+    [[nodiscard]] static LogLevel getLevel() { return minLevel_.load(std::memory_order_relaxed); }
     static void setConsoleLineProvider(std::function<std::string()> provider);
     static void refreshConsoleLine();
 
@@ -34,7 +35,6 @@ public:
     }
 
 private:
-    static LogLevel minLevel_;
-    static std::function<std::string()> consoleLineProvider_;
+    static std::atomic<LogLevel> minLevel_;
     static void log(LogLevel level, const std::string& msg);
 };
