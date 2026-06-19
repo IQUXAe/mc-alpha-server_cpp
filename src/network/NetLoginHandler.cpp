@@ -7,6 +7,7 @@
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <limits>
 #include <string_view>
 #include <utility>
 
@@ -79,7 +80,7 @@ void NetLoginHandler::kickUser(const std::string& reason) {
 void NetLoginHandler::handleHandshake(Packet2Handshake& pkt) {
     if (mcServer_->isOnlineMode()) {
         // Generate server ID for auth
-        std::uniform_int_distribution<int64_t> dist;
+        std::uniform_int_distribution<int64_t> dist{std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max()};
         int64_t randVal = dist(rng_);
         std::stringstream ss;
         ss << std::hex << randVal;
