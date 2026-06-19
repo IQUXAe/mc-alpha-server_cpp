@@ -13,7 +13,8 @@ class ItemStack;
 
 class Item {
 public:
-    static Item* itemsList[32000];
+    static constexpr int kMaxItems = 32000;
+    static Item* itemsList[kMaxItems];
     
     // Standard Alpha items
     static Item* shovelSteel;
@@ -147,6 +148,7 @@ public:
 class ItemSign : public Item {
 public:
     ItemSign(int id) : Item() {
+        if (id < 0 || id >= kMaxItems) return;
         itemID = id;
         maxStackSize = 1;
         itemsList[id] = this;
@@ -185,7 +187,7 @@ public:
         maxDamage = 32 << level;
         if (level == 3) maxDamage *= 4;
         damageVsEntity_ = 1 + level;
-        itemsList[id] = this;
+        if (id >= 0 && id < kMaxItems) itemsList[id] = this;
     }
 
     // Returns dig speed multiplier for a block.
@@ -239,7 +241,7 @@ public:
         maxStackSize = 1;
         maxDamage = 32 << level;
         if (level == 3) maxDamage *= 4;
-        itemsList[id] = this;
+        if (id >= 0 && id < kMaxItems) itemsList[id] = this;
         damageVsEntity_ = 4 + level * 2;
     }
     int getDamageVsEntity(Entity* entity) const override { return damageVsEntity_; }
