@@ -10,6 +10,7 @@
 #include <memory>
 #include <vector>
 #include <stdexcept>
+#include <chrono>
 
 class NetworkManager {
 public:
@@ -75,7 +76,17 @@ public:
             timeSinceLastRead_ = 0;
         }
 
+        constexpr size_t kMaxPacketsPerTick = 50;
+        if (toProcess.size() > kMaxPacketsPerTick) {
+            shutdown("Rate limit exceeded");
+            return;
+        }
+
         for (auto& pkt : toProcess) {
+            if (!netHandler_) {
+                shutdown("Missing network handler");
+                return;
+            }
             try {
                 pkt->processPacket(*netHandler_);
             } catch (const std::exception& e) {
