@@ -5,6 +5,8 @@
 #include "NBT.h"
 #include "RustBridge.h"
 
+#include <cstring>
+
 class EntityLiving;
 class EntityPlayerMP;
 class ItemStack {
@@ -83,8 +85,10 @@ public:
     
     void damageItem(int damage) {
         int maxDamage = getMaxDamage();
-        RustBridge::itemStackDamage(
-            reinterpret_cast<RustBridge::FfiItemStack*>(this), damage, maxDamage);
+        RustBridge::FfiItemStack ffi;
+        std::memcpy(&ffi, this, sizeof(ffi));
+        RustBridge::itemStackDamage(&ffi, damage, maxDamage);
+        std::memcpy(this, &ffi, sizeof(ffi));
     }
     
     void hitEntity(EntityLiving* entity) {

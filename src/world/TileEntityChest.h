@@ -6,6 +6,8 @@
 #include "../core/NBT.h"
 #include "../core/RustBridge.h"
 
+#include <cstring>
+
 class TileEntityChest : public TileEntity, public IInventory {
 public:
     static constexpr int CHEST_SIZE = 27;
@@ -25,7 +27,8 @@ public:
         if (slot < 0 || slot >= CHEST_SIZE) return nullptr;
         auto& ffi = state_.slots[slot];
         if (ffi.itemID < 0) return nullptr;
-        return reinterpret_cast<ItemStack*>(&ffi);
+        auto* result = new ItemStack(ffi.itemID, ffi.stackSize, ffi.itemDamage);
+        return result;
     }
 
     ItemStack* decrStackSize(int slot, int amount) override {
@@ -34,33 +37,34 @@ public:
         if (ffi.itemID < 0) return nullptr;
 
         if (ffi.stackSize <= amount) {
-            auto result = new ItemStack(ffi.itemID, ffi.stackSize, ffi.itemDamage);
+            auto result = std::make_unique<ItemStack>(ffi.itemID, ffi.stackSize, ffi.itemDamage);
             ffi.itemID = -1;
             ffi.stackSize = 0;
             ffi.itemDamage = 0;
             markDirty();
-            return result;
+            return result.release();
         }
 
-        auto result = new ItemStack(ffi.itemID, amount, ffi.itemDamage);
+        auto result = std::make_unique<ItemStack>(ffi.itemID, amount, ffi.itemDamage);
         ffi.stackSize -= amount;
         markDirty();
-        return result;
+        return result.release();
     }
 
     void setInventorySlotContents(int slot, ItemStack* stack) override {
+        std::unique_ptr<ItemStack> guard(stack);
         if (slot < 0 || slot >= CHEST_SIZE) {
-            delete stack;
             return;
         }
         if (stack) {
-            state_.slots[slot] = *reinterpret_cast<RustBridge::FfiItemStack*>(stack);
+            RustBridge::FfiItemStack ffi;
+            std::memcpy(&ffi, stack, sizeof(ffi));
+            state_.slots[slot] = ffi;
             if (state_.slots[slot].stackSize > getInventoryStackLimit())
                 state_.slots[slot].stackSize = getInventoryStackLimit();
         } else {
             state_.slots[slot] = RustBridge::FfiItemStack{0, 0, -1, 0};
         }
-        delete stack;
         markDirty();
     }
 
