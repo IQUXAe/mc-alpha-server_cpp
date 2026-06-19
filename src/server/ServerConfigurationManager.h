@@ -7,6 +7,8 @@
 #include <vector>
 #include <set>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <fstream>
 #include <memory>
 #include <iostream>
@@ -33,6 +35,13 @@ public:
     // Send Packet59 to all players who have the chunk containing (x,y,z) loaded.
     // Matches Java: configManager.sentTileEntityToPlayer -> playerManager.func_541_a
     void sendTileEntityToNearbyPlayers(int x, int y, int z, TileEntity* te);
+
+    // Chunk-to-player mapping for O(1) spatial lookups.
+    // Updated by NetServerHandler when sentChunks_ changes.
+    void addPlayerToChunk(EntityPlayerMP* player, int64_t chunkKey);
+    void removePlayerFromChunk(EntityPlayerMP* player, int64_t chunkKey);
+    void removePlayerFromAllChunks(EntityPlayerMP* player);
+    const std::unordered_set<EntityPlayerMP*>* getPlayersInChunk(int64_t chunkKey) const;
 
     // Send a chat message to all players
     void broadcastChatMessage(const std::string& msg);
@@ -69,6 +78,9 @@ private:
     std::string bannedPlayersFile_ = "banned-players.txt";
     std::string bannedIPsFile_ = "banned-ips.txt";
     std::string opsFile_ = "ops.txt";
+
+    // chunkKey -> set of players who have this chunk loaded (sentChunks_)
+    std::unordered_map<int64_t, std::unordered_set<EntityPlayerMP*>> playersByChunk_;
 
     void loadList(const std::string& filename, std::set<std::string>& list);
     void saveList(const std::string& filename, const std::set<std::string>& list);

@@ -107,6 +107,7 @@ void ServerConfigurationManager::playerLoggedOut(EntityPlayerMP* player) {
     }
 
     if (mcServer_->entityTracker) mcServer_->entityTracker->removeEntity(player);
+    removePlayerFromAllChunks(player);
 
     const auto& saveDir = mcServer_->getPlayerSaveDir();
     std::string saveFile = saveDir + "/" + toLower(player->username) + ".dat";
@@ -126,6 +127,38 @@ void ServerConfigurationManager::playerLoggedOut(EntityPlayerMP* player) {
     }
 }
 
+void ServerConfigurationManager::addPlayerToChunk(EntityPlayerMP* player, int64_t chunkKey) {
+    if (!player || !player->netHandler) return;
+    playersByChunk_[chunkKey].insert(player);
+}
+
+void ServerConfigurationManager::removePlayerFromChunk(EntityPlayerMP* player, int64_t chunkKey) {
+    if (!player) return;
+    auto it = playersByChunk_.find(chunkKey);
+    if (it == playersByChunk_.end()) return;
+    it->second.erase(player);
+    if (it->second.empty()) {
+        playersByChunk_.erase(it);
+    }
+}
+
+void ServerConfigurationManager::removePlayerFromAllChunks(EntityPlayerMP* player) {
+    if (!player) return;
+    for (auto it = playersByChunk_.begin(); it != playersByChunk_.end(); ) {
+        it->second.erase(player);
+        if (it->second.empty()) {
+            it = playersByChunk_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+const std::unordered_set<EntityPlayerMP*>* ServerConfigurationManager::getPlayersInChunk(int64_t chunkKey) const {
+    auto it = playersByChunk_.find(chunkKey);
+    return it != playersByChunk_.end() ? &it->second : nullptr;
+}
+
 void ServerConfigurationManager::broadcastPacket(std::unique_ptr<Packet> pkt) {
     for (auto* player : playerEntities) {
         if (player->netHandler) {
@@ -137,7 +170,6 @@ void ServerConfigurationManager::broadcastPacket(std::unique_ptr<Packet> pkt) {
 void ServerConfigurationManager::sendTileEntityToNearbyPlayers(int x, int y, int z, TileEntity* te) {
     if (!te) return;
 
-    // Serialize TileEntity to NBT, then GZip compress (Java: CompressedStreamTools.func_772_a)
     NBTCompound nbt;
     te->writeToNBT(nbt);
     ByteBuffer rawBuf;
@@ -147,20 +179,21 @@ void ServerConfigurationManager::sendTileEntityToNearbyPlayers(int x, int y, int
 
     int chunkX = x >> 4;
     int chunkZ = z >> 4;
-    int sentCount = 0;
+    int64_t key = NetServerHandler::chunkKey(chunkX, chunkZ);
 
-    for (auto* player : playerEntities) {
-        auto* handler = static_cast<NetServerHandler*>(player->netHandler);
-        if (!handler) continue;
-        if (!handler->hasChunkLoaded(NetServerHandler::chunkKey(chunkX, chunkZ))) continue;
+    // Copy pointers to avoid issues if removePlayerFromAllChunks erases the map entry during iteration
+    auto* players = getPlayersInChunk(key);
+    if (!players || players->empty()) return;
 
+    std::vector<EntityPlayerMP*> copy(players->begin(), players->end());
+    for (auto* player : copy) {
+        if (!player || !player->netHandler) continue;
         auto pkt = std::make_unique<Packet59ComplexEntity>();
         pkt->x = x;
         pkt->y = static_cast<int16_t>(y);
         pkt->z = z;
         pkt->nbtData = compressed;
-        handler->sendPacket(std::move(pkt));
-        ++sentCount;
+        player->netHandler->sendPacket(std::move(pkt));
     }
 }
 

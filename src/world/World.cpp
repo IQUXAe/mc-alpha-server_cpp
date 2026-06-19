@@ -26,6 +26,7 @@
 #include "../entity/EntityBoat.h"
 #include "../entity/EntityPlayerMP.h"
 #include "../entity/EntityTracker.h"
+#include "../network/NetServerHandler.h"
 #include "../network/packets/AllPackets.h"
 #include "../core/AxisAlignedBB.h"
 #include "../MinecraftServer.h"
@@ -1455,16 +1456,19 @@ void World::markBlockNeedsUpdate(int x, int y, int z) {
 
     int chunkX = x >> 4;
     int chunkZ = z >> 4;
+    int64_t key = NetServerHandler::chunkKey(chunkX, chunkZ);
+    auto* players = mcServer->configManager->getPlayersInChunk(key);
+    if (!players || players->empty()) return;
+
     auto pkt = std::make_unique<Packet53BlockChange>(x, static_cast<int8_t>(y), z,
                             static_cast<int8_t>(getBlockId(x, y, z)),
                             static_cast<int8_t>(getBlockMetadata(x, y, z)));
 
-    // Only send to players who have this chunk loaded
-    for (auto* player : mcServer->configManager->playerEntities) {
-        if (player->netHandler && player->netHandler->hasChunkLoaded(
-                player->netHandler->chunkKey(chunkX, chunkZ))) {
-            player->netHandler->sendPacket(pkt->clone());
-        }
+    // Copy pointers to guard against concurrent map modification
+    std::vector<EntityPlayerMP*> copy(players->begin(), players->end());
+    for (auto* player : copy) {
+        if (!player || !player->netHandler) continue;
+        player->netHandler->sendPacket(pkt->clone());
     }
 }
 

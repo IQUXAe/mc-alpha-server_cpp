@@ -174,7 +174,9 @@ void NetServerHandler::tick() {
             int sx = static_cast<int>(static_cast<uint32_t>(key & 0xFFFFFFFF));
             int sz = static_cast<int>(static_cast<uint32_t>((key >> 32) & 0xFFFFFFFF));
             sendPacket(std::make_unique<Packet50PreChunk>(sx, sz, false));
-            sentChunks_.erase(key);
+            if (sentChunks_.erase(key) > 0 && mcServer_ && mcServer_->configManager) {
+                mcServer_->configManager->removePlayerFromChunk(player_, key);
+            }
         }
 
         // Build sorted list of chunks to load (nearest first), skip already sent
@@ -273,7 +275,9 @@ void NetServerHandler::tick() {
                 sendTileEntityPacket(te);
             }
             
-            sentChunks_.insert(chunkKey(px, pz));
+            if (sentChunks_.insert(chunkKey(px, pz)).second && mcServer_ && mcServer_->configManager) {
+                mcServer_->configManager->addPlayerToChunk(player_, chunkKey(px, pz));
+            }
             it = chunksToLoad_.erase(it);
             ++sent;
         } else {
