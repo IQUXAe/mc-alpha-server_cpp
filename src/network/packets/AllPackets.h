@@ -52,7 +52,7 @@ public:
 
     std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet1Login>(*this); }
     int getPacketSize() override {
-        return 4 + static_cast<int>(username.size()) + static_cast<int>(password.size()) + 4 + 5;
+        return 4 + (2 + static_cast<int>(username.size())) + (2 + static_cast<int>(password.size())) + 8 + 1;
     }
 };
 
@@ -78,7 +78,7 @@ public:
 
     std::unique_ptr<Packet> clone() const override { return std::make_unique<Packet2Handshake>(*this); }
     int getPacketSize() override {
-        return 4 + static_cast<int>(username.size()) + 4;
+        return 2 + static_cast<int>(username.size());
     }
 };
 

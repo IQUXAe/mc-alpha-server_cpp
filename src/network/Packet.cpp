@@ -100,7 +100,9 @@ std::unique_ptr<Packet> Packet::createFromFfi(const RustPacket* ffiPacket) {
             auto p = std::make_unique<Packet5PlayerInventory>();
             p->type = ffiPacket->data.inventory.type;
             p->itemCount = ffiPacket->data.inventory.item_count;
-            p->slots.resize(p->itemCount);
+            if (p->itemCount < 0) throw std::runtime_error("Negative item count in Packet5");
+            if (p->itemCount > 1024) throw std::runtime_error("Item count too large in Packet5");
+            p->slots.resize(static_cast<size_t>(p->itemCount));
             for (int i = 0; i < p->itemCount; ++i) {
                 p->slots[i].itemId = ffiPacket->data.inventory.slots[i].item_id;
                 p->slots[i].count = ffiPacket->data.inventory.slots[i].count;
