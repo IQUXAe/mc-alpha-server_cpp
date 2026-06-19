@@ -2581,15 +2581,6 @@ void World::markTileEntityChanged(int x, int y, int z, TileEntity* te) {
     Chunk* chunk = getChunkFromBlockCoords(x, z, false);
     if (chunk) {
         chunk->isModified = true;
-        // Immediately queue chunk save so TileEntity data (sign text, chest contents)
-        // is persisted even if the server crashes or the chunk is unloaded before autosave
-        uint64_t key = getChunkKey(chunk->xPosition, chunk->zPosition);
-        auto data = compressChunkData(chunk);
-        if (!data.empty()) {
-            std::lock_guard lock(saveMutex_);
-            saveQueue_.push({key, std::move(data)});
-        }
-        saveCondition_.notify_one();
     }
     if (onTileEntityChanged) {
         onTileEntityChanged(x, y, z, te);
