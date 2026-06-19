@@ -181,7 +181,6 @@ void EntityPlayerMP::swingItem() {
 
 void EntityPlayerMP::resetCombatState() {
     respawnInvulnerabilityTicks = kRespawnInvulnerabilityTicks;
-    attackCooldownTicks = 0;
     armSwingTicks = 0;
     isSwinging = false;
     lastDeathMessage_.clear();
@@ -192,5 +191,4 @@ bool EntityPlayerMP::canAttackNow() const {
 }
 
 void EntityPlayerMP::markAttackPerformed() {
-    attackCooldownTicks = 0;
 }

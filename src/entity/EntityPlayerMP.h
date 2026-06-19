@@ -38,7 +38,6 @@ public:
     int savedHeldItemId = 0;
     int armorDamageCarry = 0;
     int respawnInvulnerabilityTicks = 60;
-    int attackCooldownTicks = 0;
     int armSwingTicks = 0;
     bool isSwinging = false;
     std::string lastDeathMessage_;
