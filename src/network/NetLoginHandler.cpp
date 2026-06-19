@@ -36,15 +36,16 @@ std::string urlEncode(std::string_view value) {
 
 bool recvAll(int socketFd, std::string& response) {
     std::array<char, 4096> buffer{};
+    constexpr size_t kMaxResponse = 16384;
     while (true) {
-        const ssize_t received = ::recv(socketFd, buffer.data(), buffer.size(), 0);
+        if (response.size() >= kMaxResponse) return false;
+        const size_t toRead = std::min(buffer.size(), kMaxResponse - response.size());
+        const ssize_t received = ::recv(socketFd, buffer.data(), toRead, 0);
         if (received == 0) {
             return true;
         }
         if (received < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
+            if (errno == EINTR) continue;
             return false;
         }
         response.append(buffer.data(), static_cast<std::size_t>(received));
