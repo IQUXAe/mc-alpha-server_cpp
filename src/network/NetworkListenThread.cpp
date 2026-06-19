@@ -15,7 +15,10 @@ NetworkListenThread::NetworkListenThread(MinecraftServer* server, const std::str
     }
 
     int opt = 1;
-    ::setsockopt(serverSocketFd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    if (::setsockopt(serverSocketFd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        ::close(serverSocketFd_);
+        throw std::runtime_error("Failed to set SO_REUSEADDR on server socket");
+    }
 
     struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
