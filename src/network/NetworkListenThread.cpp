@@ -80,6 +80,21 @@ void NetworkListenThread::networkTick() {
             }
 
             if (loginHandler->finishedProcessing) {
+                // Decrement per-IP connection count
+                std::string ip = loginHandler->netManager->getRemoteAddress();
+                auto slashPos = ip.find('/');
+                if (slashPos != std::string::npos) ip = ip.substr(slashPos + 1);
+                auto colonPos = ip.find(':');
+                if (colonPos != std::string::npos) ip = ip.substr(0, colonPos);
+                {
+                    std::lock_guard lock(ipMutex_);
+                    auto cntIt = ipConnectionCount_.find(ip);
+                    if (cntIt != ipConnectionCount_.end()) {
+                        if (--cntIt->second <= 0) {
+                            ipConnectionCount_.erase(cntIt);
+                        }
+                    }
+                }
                 it = pendingConnections_.erase(it);
             } else {
                 ++it;
@@ -125,6 +140,17 @@ void NetworkListenThread::acceptLoop(std::stop_token stopToken) {
         ::inet_ntop(AF_INET, &clientAddr.sin_addr, addrStr, sizeof(addrStr));
         int clientPort = ntohs(clientAddr.sin_port);
         std::string remoteAddr = std::string("/") + addrStr + ":" + std::to_string(clientPort);
+
+        {
+            std::lock_guard lock(ipMutex_);
+            int& count = ipConnectionCount_[addrStr];
+            if (count >= kMaxConnectionsPerIp) {
+                Logger::info("Connection limit reached for IP {}", addrStr);
+                ::close(clientFd);
+                continue;
+            }
+            ++count;
+        }
 
         std::string connDesc = "#" + std::to_string(connectionCounter_++);
 

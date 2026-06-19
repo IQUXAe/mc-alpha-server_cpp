@@ -10,6 +10,7 @@
 #include <mutex>
 #include <atomic>
 #include <iostream>
+#include <unordered_map>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -44,6 +45,11 @@ private:
 
     std::mutex activeMutex_;
     std::vector<std::unique_ptr<NetServerHandler>> activeConnections_;
+
+    // Per-IP rate limiting
+    static constexpr int kMaxConnectionsPerIp = 5;
+    std::unordered_map<std::string, int> ipConnectionCount_;
+    std::mutex ipMutex_;
 
     void acceptLoop(std::stop_token stopToken);
 };
