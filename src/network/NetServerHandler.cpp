@@ -139,6 +139,13 @@ NetServerHandler::NetServerHandler(MinecraftServer* server, std::unique_ptr<Netw
 }
 
 NetServerHandler::~NetServerHandler() {
+    // Ensure player is removed from playerEntities before deletion to prevent
+    // dangling pointers in ServerConfigurationManager::playerEntities.
+    if (player_ && !disconnected) {
+        if (mcServer_ && mcServer_->configManager) {
+            mcServer_->configManager->playerLoggedOut(player_);
+        }
+    }
     delete player_;
 }
 
