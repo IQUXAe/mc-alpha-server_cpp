@@ -11,6 +11,7 @@
 #include <fstream>
 #include <filesystem>
 #include <algorithm>
+#include <cctype>
 
 ServerConfigurationManager::ServerConfigurationManager(MinecraftServer* server)
     : mcServer_(server) {
@@ -27,6 +28,18 @@ ServerConfigurationManager::ServerConfigurationManager(MinecraftServer* server)
 }
 
 EntityPlayerMP* ServerConfigurationManager::login(NetLoginHandler* handler, const std::string& username, const std::string& password) {
+    // Validate username: alphanumeric + underscore, 1-16 chars
+    if (username.empty() || username.size() > 16) {
+        handler->kickUser("Invalid username length");
+        return nullptr;
+    }
+    for (char c : username) {
+        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') {
+            handler->kickUser("Invalid username characters");
+            return nullptr;
+        }
+    }
+
     std::string lowerName = toLower(username);
 
     if (bannedPlayers_.count(lowerName)) {
