@@ -141,8 +141,9 @@ public:
         const int x = MathHelper::floor_double(posX);
         const int y = MathHelper::floor_double(boundingBox.minY);
         const int z = MathHelper::floor_double(posZ);
-        return worldObj->getBlockMaterialNoChunkLoad(x, y, z)->getIsLiquid()
-            || worldObj->getBlockMaterialNoChunkLoad(x, y + 1, z)->getIsLiquid();
+        auto* mat1 = worldObj->getBlockMaterialNoChunkLoad(x, y, z);
+        auto* mat2 = worldObj->getBlockMaterialNoChunkLoad(x, y + 1, z);
+        return (mat1 && mat1->getIsLiquid()) || (mat2 && mat2->getIsLiquid());
     }
 
     void moveFlying(float strafe, float forward, float acceleration) {

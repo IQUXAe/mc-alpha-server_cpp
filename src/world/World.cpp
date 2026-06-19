@@ -645,10 +645,9 @@ void World::tick() {
         }
 
         NextTickListEntry entry = *it;
-        scheduledTicks.erase(it);
+        it = scheduledTicks.erase(it);
 
         if (!getLoadedChunkFromBlockCoords(entry.x, entry.z)) {
-            it = scheduledTicks.begin();
             continue;
         }
 
@@ -658,8 +657,6 @@ void World::tick() {
                 Block::blocksList[currentBlock]->updateTick(this, entry.x, entry.y, entry.z);
             }
         }
-
-        it = scheduledTicks.begin();
     }
 
     // Random block ticks (Java func_4073_g) — up to 80 per loaded chunk per tick
@@ -1457,16 +1454,14 @@ void World::markBlockNeedsUpdate(int x, int y, int z) {
     int chunkX = x >> 4;
     int chunkZ = z >> 4;
     int64_t key = NetServerHandler::chunkKey(chunkX, chunkZ);
-    auto* players = mcServer->configManager->getPlayersInChunk(key);
-    if (!players || players->empty()) return;
+    auto players = mcServer->configManager->getPlayersInChunk(key);
+    if (players.empty()) return;
 
     auto pkt = std::make_unique<Packet53BlockChange>(x, static_cast<int8_t>(y), z,
                             static_cast<int8_t>(getBlockId(x, y, z)),
                             static_cast<int8_t>(getBlockMetadata(x, y, z)));
 
-    // Copy pointers to guard against concurrent map modification
-    std::vector<EntityPlayerMP*> copy(players->begin(), players->end());
-    for (auto* player : copy) {
+    for (auto* player : players) {
         if (!player || !player->netHandler) continue;
         player->netHandler->sendPacket(pkt->clone());
     }
@@ -2534,6 +2529,13 @@ void World::removeEntity(Entity* entity) {
         chunk->isModified = true;
     }
     entity->isDead = true;
+}
+
+Entity* World::getEntityById(int entityId) const {
+    for (const auto& e : entities_) {
+        if (e && e->entityId == entityId) return e.get();
+    }
+    return nullptr;
 }
 
 void World::sendEntityStatus(Entity* entity, int8_t status) {

@@ -25,6 +25,7 @@
 #include <vector>
 #include <functional>
 #include <optional>
+#include <atomic>
 #include "Chunk.h"
 #include "gen/ChunkProviderGenerate.h"
 #include "biome/WorldChunkManager.h"
@@ -77,7 +78,7 @@ public:
     int spawnZ = 0;
     int64_t randomSeed = 0;
     int64_t worldTime = 0;
-    bool isPopulating = false;
+    std::atomic<bool> isPopulating{false};
 
     std::unique_ptr<ChunkProviderGenerate> chunkProvider;
     std::unique_ptr<WorldChunkManager> worldChunkManager;
@@ -153,6 +154,7 @@ public:
     void sendEntityStatus(Entity* entity, int8_t status);
     void spawnEntityInWorld(std::unique_ptr<Entity> entity);
     void removeEntity(Entity* entity);
+    Entity* getEntityById(int entityId) const;
     void registerLoadedEntitiesWithTracker(EntityTracker* tracker);
 
     void saveWorld(bool flushToDisk = false);

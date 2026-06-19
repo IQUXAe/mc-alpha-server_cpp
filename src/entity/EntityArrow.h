@@ -22,7 +22,7 @@ public:
     }
 
     EntityArrow(World* world, EntityLiving* shooterEntity) : EntityArrow(world) {
-        shooter = shooterEntity;
+        shooterId = shooterEntity ? shooterEntity->entityId : -1;
         if (!shooterEntity) {
             return;
         }
@@ -173,7 +173,7 @@ public:
             worldObj->getEntitiesWithinAABBExcludingEntity(this, boundingBox.addCoord(motionX, motionY, motionZ).expand(1.0, 1.0, 1.0), candidates);
 
             for (Entity* candidate : candidates) {
-                if (!candidate || !candidate->canBeCollidedWith() || (candidate == shooter && ticksInAir < 5)) {
+                if (!candidate || !candidate->canBeCollidedWith() || (candidate->entityId == shooterId && ticksInAir < 5)) {
                     continue;
                 }
 
@@ -192,7 +192,8 @@ public:
         }
 
         if (entityHit) {
-            entityHit->attackEntityFrom(shooter, 4);
+            EntityLiving* shooterPtr = getShooter();
+            entityHit->attackEntityFrom(shooterPtr, 4);
             isDead = true;
             return;
         }
@@ -239,7 +240,13 @@ public:
         setPosition(posX, posY, posZ);
     }
 
-    EntityLiving* shooter = nullptr;
+    EntityLiving* getShooter() const {
+        if (shooterId < 0 || !worldObj) return nullptr;
+        auto* e = worldObj->getEntityById(shooterId);
+        return dynamic_cast<EntityLiving*>(e);
+    }
+
+    int shooterId = -1;
     int tileX = -1;
     int tileY = -1;
     int tileZ = -1;
