@@ -119,18 +119,18 @@ std::vector<uint8_t> encodeLevelDat(const LevelDatData& level) {
 bool decodeLevelDat(const std::vector<uint8_t>& input, LevelDatData& outLevel) {
     AlphaLevelDat ffiLevel{};
     if (alpha_level_dat_decode(input.data(), input.size(), &ffiLevel) != 0) {
-        outLevel.randomSeed = ffiLevel.random_seed;
-        outLevel.spawnX = ffiLevel.spawn_x;
-        outLevel.spawnY = ffiLevel.spawn_y;
-        outLevel.spawnZ = ffiLevel.spawn_z;
-        outLevel.worldTime = ffiLevel.world_time;
-        outLevel.sizeOnDisk = ffiLevel.size_on_disk;
-        outLevel.version = ffiLevel.version;
-        outLevel.levelName = ffiLevel.level_name ? ffiLevel.level_name : "world";
-        alpha_level_dat_free(&ffiLevel);
-        return true;
+        return false;
     }
-    return false;
+    outLevel.randomSeed = ffiLevel.random_seed;
+    outLevel.spawnX = ffiLevel.spawn_x;
+    outLevel.spawnY = ffiLevel.spawn_y;
+    outLevel.spawnZ = ffiLevel.spawn_z;
+    outLevel.worldTime = ffiLevel.world_time;
+    outLevel.sizeOnDisk = ffiLevel.size_on_disk;
+    outLevel.version = ffiLevel.version;
+    outLevel.levelName = ffiLevel.level_name ? ffiLevel.level_name : "world";
+    alpha_level_dat_free(&ffiLevel);
+    return true;
 }
 
 AlphaBlockProperties blockProperties(uint32_t id) {
