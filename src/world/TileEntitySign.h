@@ -41,7 +41,7 @@ public:
             nbt.setString("Text" + std::to_string(i + 1), reinterpret_cast<const char*>(state_.lines[i]));
     }
 
-private:
+public:
     RustBridge::FfiSignState state_;
 };
 

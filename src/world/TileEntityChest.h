@@ -26,27 +26,27 @@ public:
     ItemStack* getStackInSlot(int slot) override {
         if (slot < 0 || slot >= CHEST_SIZE) return nullptr;
         auto& ffi = state_.slots[slot];
-        if (ffi.itemID < 0) return nullptr;
-        auto* result = new ItemStack(ffi.itemID, ffi.stackSize, ffi.itemDamage);
+        if (ffi.item_id < 0) return nullptr;
+        auto* result = new ItemStack(ffi.item_id, ffi.stack_size, ffi.item_damage);
         return result;
     }
 
     ItemStack* decrStackSize(int slot, int amount) override {
         if (slot < 0 || slot >= CHEST_SIZE) return nullptr;
         auto& ffi = state_.slots[slot];
-        if (ffi.itemID < 0) return nullptr;
+        if (ffi.item_id < 0) return nullptr;
 
-        if (ffi.stackSize <= amount) {
-            auto result = std::make_unique<ItemStack>(ffi.itemID, ffi.stackSize, ffi.itemDamage);
-            ffi.itemID = -1;
-            ffi.stackSize = 0;
-            ffi.itemDamage = 0;
+        if (ffi.stack_size <= amount) {
+            auto result = std::make_unique<ItemStack>(ffi.item_id, ffi.stack_size, ffi.item_damage);
+            ffi.item_id = -1;
+            ffi.stack_size = 0;
+            ffi.item_damage = 0;
             markDirty();
             return result.release();
         }
 
-        auto result = std::make_unique<ItemStack>(ffi.itemID, amount, ffi.itemDamage);
-        ffi.stackSize -= amount;
+        auto result = std::make_unique<ItemStack>(ffi.item_id, amount, ffi.item_damage);
+        ffi.stack_size -= amount;
         markDirty();
         return result.release();
     }
@@ -60,8 +60,8 @@ public:
             RustBridge::FfiItemStack ffi;
             std::memcpy(&ffi, stack, sizeof(ffi));
             state_.slots[slot] = ffi;
-            if (state_.slots[slot].stackSize > getInventoryStackLimit())
-                state_.slots[slot].stackSize = getInventoryStackLimit();
+            if (state_.slots[slot].stack_size > getInventoryStackLimit())
+                state_.slots[slot].stack_size = getInventoryStackLimit();
         } else {
             state_.slots[slot] = RustBridge::FfiItemStack{0, 0, -1, 0};
         }
@@ -93,9 +93,9 @@ public:
                         int slot = itemCompound->getByte("Slot") & 0xFF;
                         if (slot >= 0 && slot < CHEST_SIZE) {
                             auto& ffi = state_.slots[slot];
-                            ffi.itemID = itemCompound->getShort("id");
-                            ffi.stackSize = itemCompound->getByte("Count");
-                            ffi.itemDamage = itemCompound->getShort("Damage");
+                            ffi.item_id = itemCompound->getShort("id");
+                            ffi.stack_size = itemCompound->getByte("Count");
+                            ffi.item_damage = itemCompound->getShort("Damage");
                         }
                     }
                 }
@@ -109,12 +109,12 @@ public:
         // Write Items list to NBT (Java format)
         std::vector<std::shared_ptr<NBTTag>> itemsList;
         for (int i = 0; i < CHEST_SIZE; ++i) {
-            if (state_.slots[i].itemID >= 0) {
+            if (state_.slots[i].item_id >= 0) {
                 auto itemCompound = std::make_shared<NBTCompound>();
                 itemCompound->setByte("Slot", static_cast<int8_t>(i));
-                itemCompound->setShort("id", static_cast<int16_t>(state_.slots[i].itemID));
-                itemCompound->setByte("Count", static_cast<int8_t>(state_.slots[i].stackSize));
-                itemCompound->setShort("Damage", static_cast<int16_t>(state_.slots[i].itemDamage));
+                itemCompound->setShort("id", static_cast<int16_t>(state_.slots[i].item_id));
+                itemCompound->setByte("Count", static_cast<int8_t>(state_.slots[i].stack_size));
+                itemCompound->setShort("Damage", static_cast<int16_t>(state_.slots[i].item_damage));
                 itemsList.push_back(itemCompound);
             }
         }
@@ -127,7 +127,7 @@ public:
         }
     }
 
-private:
+public:
     RustBridge::FfiChestState state_;
 };
 

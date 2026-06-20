@@ -32,27 +32,27 @@ public:
     ItemStack* getStackInSlot(int slot) override {
         if (slot < 0 || slot >= FURNACE_SIZE) return nullptr;
         auto& ffi = state_.slots[slot];
-        if (ffi.itemID < 0) return nullptr;
-        auto* result = new ItemStack(ffi.itemID, ffi.stackSize, ffi.itemDamage);
+        if (ffi.item_id < 0) return nullptr;
+        auto* result = new ItemStack(ffi.item_id, ffi.stack_size, ffi.item_damage);
         return result;
     }
 
     ItemStack* decrStackSize(int slot, int amount) override {
         if (slot < 0 || slot >= FURNACE_SIZE) return nullptr;
         auto& ffi = state_.slots[slot];
-        if (ffi.itemID < 0) return nullptr;
+        if (ffi.item_id < 0) return nullptr;
 
-        if (ffi.stackSize <= amount) {
-            auto result = std::make_unique<ItemStack>(ffi.itemID, ffi.stackSize, ffi.itemDamage);
-            ffi.itemID = -1;
-            ffi.stackSize = 0;
-            ffi.itemDamage = 0;
+        if (ffi.stack_size <= amount) {
+            auto result = std::make_unique<ItemStack>(ffi.item_id, ffi.stack_size, ffi.item_damage);
+            ffi.item_id = -1;
+            ffi.stack_size = 0;
+            ffi.item_damage = 0;
             markDirty();
             return result.release();
         }
 
-        auto result = std::make_unique<ItemStack>(ffi.itemID, amount, ffi.itemDamage);
-        ffi.stackSize -= amount;
+        auto result = std::make_unique<ItemStack>(ffi.item_id, amount, ffi.item_damage);
+        ffi.stack_size -= amount;
         markDirty();
         return result.release();
     }
@@ -66,8 +66,8 @@ public:
             RustBridge::FfiItemStack ffi;
             std::memcpy(&ffi, stack, sizeof(ffi));
             state_.slots[slot] = ffi;
-            if (state_.slots[slot].stackSize > getInventoryStackLimit())
-                state_.slots[slot].stackSize = getInventoryStackLimit();
+            if (state_.slots[slot].stack_size > getInventoryStackLimit())
+                state_.slots[slot].stack_size = getInventoryStackLimit();
         } else {
             state_.slots[slot] = RustBridge::FfiItemStack{0, 0, -1, 0};
         }
@@ -79,25 +79,25 @@ public:
     void onInventoryChanged() override { markDirty(); }
     bool canInteractWith(EntityPlayer* player) override { return true; }
 
-    bool isBurning() const { return state_.burnTime > 0; }
-    int getBurnTime() const { return state_.burnTime; }
-    int getCookTime() const { return state_.cookTime; }
+    bool isBurning() const { return state_.burn_time > 0; }
+    int getBurnTime() const { return state_.burn_time; }
+    int getCookTime() const { return state_.cook_time; }
 
     void updateEntity() override {
         if (!worldObj) return;
 
         int fuelBurnTime = 0;
-        if (state_.slots[SLOT_FUEL].itemID >= 0) {
-            ItemStack tmp(state_.slots[SLOT_FUEL].itemID, state_.slots[SLOT_FUEL].stackSize, state_.slots[SLOT_FUEL].itemDamage);
+        if (state_.slots[SLOT_FUEL].item_id >= 0) {
+            ItemStack tmp(state_.slots[SLOT_FUEL].item_id, state_.slots[SLOT_FUEL].stack_size, state_.slots[SLOT_FUEL].item_damage);
             fuelBurnTime = getItemBurnTime(&tmp);
         }
 
         auto result = RustBridge::furnaceTick(&state_, fuelBurnTime);
 
         if (result.needsBlockUpdate) {
-            updateFurnaceBlockState(state_.burnTime > 0);
+            updateFurnaceBlockState(state_.burn_time > 0);
         }
-        if (result.changed || (state_.burnTime > 0 && state_.burnTime % 5 == 0)) {
+        if (result.changed || (state_.burn_time > 0 && state_.burn_time % 5 == 0)) {
             markDirty();
         }
     }
@@ -122,9 +122,9 @@ public:
                         int slot = itemCompound->getByte("Slot") & 0xFF;
                         if (slot >= 0 && slot < FURNACE_SIZE) {
                             auto& ffi = state_.slots[slot];
-                            ffi.itemID = itemCompound->getShort("id");
-                            ffi.stackSize = itemCompound->getByte("Count");
-                            ffi.itemDamage = itemCompound->getShort("Damage");
+                            ffi.item_id = itemCompound->getShort("id");
+                            ffi.stack_size = itemCompound->getByte("Count");
+                            ffi.item_damage = itemCompound->getShort("Damage");
                         }
                     }
                 }
@@ -132,13 +132,13 @@ public:
         }
 
         // Read furnace state (Java format)
-        state_.burnTime = nbt.getShort("BurnTime");
-        state_.cookTime = nbt.getShort("CookTime");
-        state_.currentItemBurnTime = nbt.getShort("BurnTimeTotal");
+        state_.burn_time = nbt.getShort("BurnTime");
+        state_.cook_time = nbt.getShort("CookTime");
+        state_.current_item_burn_time = nbt.getShort("BurnTimeTotal");
         // Fallback: if BurnTimeTotal wasn't saved, recalculate from fuel slot
-        if (state_.currentItemBurnTime == 0 && state_.burnTime > 0 && state_.slots[SLOT_FUEL].itemID >= 0) {
-            ItemStack tmp(state_.slots[SLOT_FUEL].itemID, state_.slots[SLOT_FUEL].stackSize, state_.slots[SLOT_FUEL].itemDamage);
-            state_.currentItemBurnTime = static_cast<int16_t>(getItemBurnTime(&tmp));
+        if (state_.current_item_burn_time == 0 && state_.burn_time > 0 && state_.slots[SLOT_FUEL].item_id >= 0) {
+            ItemStack tmp(state_.slots[SLOT_FUEL].item_id, state_.slots[SLOT_FUEL].stack_size, state_.slots[SLOT_FUEL].item_damage);
+            state_.current_item_burn_time = static_cast<int16_t>(getItemBurnTime(&tmp));
         }
     }
 
@@ -146,19 +146,19 @@ public:
         TileEntity::writeToNBT(nbt);
 
         // Write furnace state first (Java order)
-        nbt.setShort("BurnTime", state_.burnTime);
-        nbt.setShort("CookTime", state_.cookTime);
-        nbt.setShort("BurnTimeTotal", state_.currentItemBurnTime);
+        nbt.setShort("BurnTime", state_.burn_time);
+        nbt.setShort("CookTime", state_.cook_time);
+        nbt.setShort("BurnTimeTotal", state_.current_item_burn_time);
 
         // Write Items list to NBT (Java format)
         std::vector<std::shared_ptr<NBTTag>> itemsList;
         for (int i = 0; i < FURNACE_SIZE; ++i) {
-            if (state_.slots[i].itemID >= 0) {
+            if (state_.slots[i].item_id >= 0) {
                 auto itemCompound = std::make_shared<NBTCompound>();
                 itemCompound->setByte("Slot", static_cast<int8_t>(i));
-                itemCompound->setShort("id", static_cast<int16_t>(state_.slots[i].itemID));
-                itemCompound->setByte("Count", static_cast<int8_t>(state_.slots[i].stackSize));
-                itemCompound->setShort("Damage", static_cast<int16_t>(state_.slots[i].itemDamage));
+                itemCompound->setShort("id", static_cast<int16_t>(state_.slots[i].item_id));
+                itemCompound->setByte("Count", static_cast<int8_t>(state_.slots[i].stack_size));
+                itemCompound->setShort("Damage", static_cast<int16_t>(state_.slots[i].item_damage));
                 itemsList.push_back(itemCompound);
             }
         }
@@ -171,9 +171,10 @@ public:
         }
     }
 
-private:
+public:
     RustBridge::FfiFurnaceState state_;
 
+private:
     static int getItemBurnTime(ItemStack* stack) {
         if (!stack) return 0;
 
