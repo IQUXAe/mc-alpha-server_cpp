@@ -33,7 +33,6 @@
 #include "TileEntity.h"
 #include "TileEntityChest.h"
 #include "TileEntityFurnace.h"
-#include "core/NBT.h"
 #include "core/Logger.h"
 #include "core/RustBridge.h"
 #include <cmath>
@@ -87,26 +86,25 @@ void restorePendingAnimals(World* world, Chunk* chunk) {
         return;
     }
 
-    for (const auto& animalData : chunk->pendingAnimals) {
-        ByteBuffer buf(animalData.nbtData);
-        auto root = NBTCompound::readRoot(buf);
-        if (!root) {
-            continue;
+    for (const auto& a : chunk->pendingAnimals) {
+        auto animal = createAnimalEntity(world, a.id);
+        if (!animal) continue;
+        animal->posX = a.posX; animal->posY = a.posY; animal->posZ = a.posZ;
+        animal->motionX = a.motionX; animal->motionY = a.motionY; animal->motionZ = a.motionZ;
+        animal->rotationYaw = a.rotationYaw; animal->rotationPitch = a.rotationPitch;
+        animal->health = a.health;
+        animal->maxHealth = a.maxHealth;
+        
+        if (auto* pig = dynamic_cast<EntityPig*>(animal.get())) {
+            pig->saddled = a.saddled;
+        } else if (auto* sheep = dynamic_cast<EntitySheep*>(animal.get())) {
+            sheep->sheared = a.sheared;
+        } else if (auto* chicken = dynamic_cast<EntityChicken*>(animal.get())) {
+            chicken->eggLayTime = a.eggLayTime;
         }
-
-        std::string entityId = animalData.entityId;
-        if (entityId.empty()) {
-            entityId = root->getString("id");
-        }
-        auto animal = createAnimalEntity(world, entityId);
-        if (!animal) {
-            continue;
-        }
-
-        animal->readFromNBT(*root);
+        
         world->spawnEntityInWorld(std::move(animal));
     }
-
     chunk->pendingAnimals.clear();
 }
 
@@ -115,26 +113,17 @@ void restorePendingMonsters(World* world, Chunk* chunk) {
         return;
     }
 
-    for (const auto& mobData : chunk->pendingMonsters) {
-        ByteBuffer buf(mobData.nbtData);
-        auto root = NBTCompound::readRoot(buf);
-        if (!root) {
-            continue;
-        }
-
-        std::string entityId = mobData.entityId;
-        if (entityId.empty()) {
-            entityId = root->getString("id");
-        }
-        auto mob = createHostileEntity(world, entityId);
-        if (!mob) {
-            continue;
-        }
-
-        mob->readFromNBT(*root);
+    for (const auto& m : chunk->pendingMonsters) {
+        auto mob = createHostileEntity(world, m.id);
+        if (!mob) continue;
+        mob->posX = m.posX; mob->posY = m.posY; mob->posZ = m.posZ;
+        mob->motionX = m.motionX; mob->motionY = m.motionY; mob->motionZ = m.motionZ;
+        mob->rotationYaw = m.rotationYaw; mob->rotationPitch = m.rotationPitch;
+        mob->health = m.health;
+        mob->maxHealth = m.maxHealth;
+        
         world->spawnEntityInWorld(std::move(mob));
     }
-
     chunk->pendingMonsters.clear();
 }
 
@@ -143,18 +132,17 @@ void restorePendingBoats(World* world, Chunk* chunk) {
         return;
     }
 
-    for (const auto& boatData : chunk->pendingBoats) {
-        ByteBuffer buf(boatData.nbtData);
-        auto root = NBTCompound::readRoot(buf);
-        if (!root) {
-            continue;
-        }
-
+    for (const auto& b : chunk->pendingBoats) {
         auto boat = std::make_unique<EntityBoat>(world);
-        boat->readFromNBT(*root);
+        boat->posX = b.posX; boat->posY = b.posY; boat->posZ = b.posZ;
+        boat->motionX = b.motionX; boat->motionY = b.motionY; boat->motionZ = b.motionZ;
+        boat->rotationYaw = b.rotationYaw; boat->rotationPitch = b.rotationPitch;
+        boat->timeSinceHit = b.timeSinceHit;
+        boat->damageTaken = b.damageTaken;
+        boat->forwardDirection = b.forwardDirection;
+        
         world->spawnEntityInWorld(std::move(boat));
     }
-
     chunk->pendingBoats.clear();
 }
 
@@ -849,16 +837,21 @@ void World::tick() {
                     const int cz = static_cast<int>(std::floor(animal->posZ)) >> 4;
                     if (cx != chunk->xPosition || cz != chunk->zPosition) continue;
 
-                    NBTCompound nbt;
-                    animal->writeToNBT(nbt);
-                    ByteBuffer buf;
-                    nbt.writeRoot(buf, animal->getEntityStringId());
                     chunk->pendingAnimals.push_back({
-                        .entityId = animal->getEntityStringId(),
-                        .nbtData = std::move(buf.data),
+                        .id = animal->getEntityStringId(),
                         .posX = animal->posX,
                         .posY = animal->posY,
                         .posZ = animal->posZ,
+                        .motionX = animal->motionX,
+                        .motionY = animal->motionY,
+                        .motionZ = animal->motionZ,
+                        .rotationYaw = animal->rotationYaw,
+                        .rotationPitch = animal->rotationPitch,
+                        .health = animal->health,
+                        .maxHealth = animal->maxHealth,
+                        .saddled = dynamic_cast<EntityPig*>(animal) ? dynamic_cast<EntityPig*>(animal)->saddled : false,
+                        .sheared = dynamic_cast<EntitySheep*>(animal) ? dynamic_cast<EntitySheep*>(animal)->sheared : false,
+                        .eggLayTime = dynamic_cast<EntityChicken*>(animal) ? dynamic_cast<EntityChicken*>(animal)->eggLayTime : 0,
                     });
                     entitiesToRemove.insert(animal);
                 }
@@ -870,16 +863,18 @@ void World::tick() {
                     const int cz = static_cast<int>(std::floor(mob->posZ)) >> 4;
                     if (cx != chunk->xPosition || cz != chunk->zPosition) continue;
 
-                    NBTCompound nbt;
-                    mob->writeToNBT(nbt);
-                    ByteBuffer buf;
-                    nbt.writeRoot(buf, mob->getEntityStringId());
                     chunk->pendingMonsters.push_back({
-                        .entityId = mob->getEntityStringId(),
-                        .nbtData = std::move(buf.data),
+                        .id = mob->getEntityStringId(),
                         .posX = mob->posX,
                         .posY = mob->posY,
                         .posZ = mob->posZ,
+                        .motionX = mob->motionX,
+                        .motionY = mob->motionY,
+                        .motionZ = mob->motionZ,
+                        .rotationYaw = mob->rotationYaw,
+                        .rotationPitch = mob->rotationPitch,
+                        .health = mob->health,
+                        .maxHealth = mob->maxHealth,
                     });
                     entitiesToRemove.insert(mob);
                 }
@@ -891,15 +886,18 @@ void World::tick() {
                     const int cz = static_cast<int>(std::floor(boat->posZ)) >> 4;
                     if (cx != chunk->xPosition || cz != chunk->zPosition) continue;
 
-                    NBTCompound nbt;
-                    boat->writeToNBT(nbt);
-                    ByteBuffer buf;
-                    nbt.writeRoot(buf, "Boat");
                     chunk->pendingBoats.push_back({
-                        .nbtData = std::move(buf.data),
                         .posX = boat->posX,
                         .posY = boat->posY,
                         .posZ = boat->posZ,
+                        .motionX = boat->motionX,
+                        .motionY = boat->motionY,
+                        .motionZ = boat->motionZ,
+                        .rotationYaw = boat->rotationYaw,
+                        .rotationPitch = boat->rotationPitch,
+                        .timeSinceHit = boat->timeSinceHit,
+                        .damageTaken = boat->damageTaken,
+                        .forwardDirection = boat->forwardDirection,
                     });
                     entitiesToRemove.insert(boat);
                 }
@@ -2139,371 +2137,357 @@ void World::waitForPendingSaves() {
 }
 
 std::vector<uint8_t> World::compressChunkData(Chunk* chunk) {
-    NBTCompound level;
-    // Collect EntityItems belonging to this chunk before saving
-    level.setInt("xPos", chunk->xPosition);
-    level.setInt("zPos", chunk->zPosition);
-    level.setByte("TerrainPopulated", chunk->isTerrainPopulated ? 1 : 0);
-    level.setByteArray("Blocks", chunk->blocks, CHUNK_VOLUME);
-    level.setByteArray("Data", chunk->data.data_ptr, CHUNK_VOLUME / 2);
-    level.setByteArray("SkyLight", chunk->skylight.data_ptr, CHUNK_VOLUME / 2);
-    level.setByteArray("BlockLight", chunk->blocklight.data_ptr, CHUNK_VOLUME / 2);
-    level.setByteArray("HeightMap", chunk->heightMap, CHUNK_AREA);
+    AlphaChunkData chunkData{};
+    chunkData.x_pos = chunk->xPosition;
+    chunkData.z_pos = chunk->zPosition;
+    chunkData.last_update = worldTime;
 
-    // Save EntityItems that belong to this chunk
-    {
-        auto itemList = std::make_shared<NBTList>();
-        itemList->tagType = NBTTagType::TAG_Compound;
+    chunkData.blocks = chunk->blocks;
+    chunkData.blocks_len = CHUNK_VOLUME;
+    chunkData.blocks_capacity = 0;
 
-        // Items already serialized on unload
-        for (const auto& ed : chunk->pendingItems) {
-            auto tag = std::make_shared<NBTCompound>();
-            tag->setInt("id",    ed.itemID);
-            tag->setInt("count", ed.count);
-            tag->setInt("meta",  ed.metadata);
-            tag->setInt("age",   ed.age);
-            tag->setInt("delay", ed.pickupDelay);
-            tag->setDouble("x",  ed.posX);
-            tag->setDouble("y",  ed.posY);
-            tag->setDouble("z",  ed.posZ);
-            itemList->tags.push_back(tag);
-        }
+    chunkData.data = chunk->data.data_ptr;
+    chunkData.data_len = CHUNK_VOLUME / 2;
+    chunkData.data_capacity = 0;
 
-        // Live entities currently in world that belong to this chunk
-        for (const auto& e : entities_) {
-            auto* item = dynamic_cast<EntityItem*>(e.get());
-            if (!item || item->isDead) continue;
-            int cx = static_cast<int>(std::floor(item->posX)) >> 4;
-            int cz = static_cast<int>(std::floor(item->posZ)) >> 4;
-            if (cx != chunk->xPosition || cz != chunk->zPosition) continue;
-            auto tag = std::make_shared<NBTCompound>();
-            tag->setInt("id",    item->itemID);
-            tag->setInt("count", item->count);
-            tag->setInt("meta",  item->metadata);
-            tag->setInt("age",   item->age);
-            tag->setInt("delay", item->pickupDelay);
-            tag->setDouble("x",  item->posX);
-            tag->setDouble("y",  item->posY);
-            tag->setDouble("z",  item->posZ);
-            itemList->tags.push_back(tag);
-        }
+    chunkData.sky_light = chunk->skylight.data_ptr;
+    chunkData.sky_light_len = CHUNK_VOLUME / 2;
+    chunkData.sky_light_capacity = 0;
 
-        if (!itemList->tags.empty())
-            level.tags["Items"] = itemList;
-    }
+    chunkData.block_light = chunk->blocklight.data_ptr;
+    chunkData.block_light_len = CHUNK_VOLUME / 2;
+    chunkData.block_light_capacity = 0;
 
-    {
-        auto animalList = std::make_shared<NBTList>();
-        animalList->tagType = NBTTagType::TAG_Compound;
-        std::unordered_set<std::string> seenAnimals;
+    chunkData.height_map = chunk->heightMap;
+    chunkData.height_map_len = CHUNK_AREA;
+    chunkData.height_map_capacity = 0;
 
-        auto makeEntityKey = [](const std::string& id, double x, double y, double z) {
-            const int32_t fx = static_cast<int32_t>(std::floor(x * 32.0));
-            const int32_t fy = static_cast<int32_t>(std::floor(y * 32.0));
-            const int32_t fz = static_cast<int32_t>(std::floor(z * 32.0));
-            return id + "#" + std::to_string(fx) + ":" + std::to_string(fy) + ":" + std::to_string(fz);
-        };
+    chunkData.terrain_populated = chunk->isTerrainPopulated;
 
-        for (const auto& animalData : chunk->pendingAnimals) {
-            ByteBuffer buf(animalData.nbtData);
-            auto root = NBTCompound::readRoot(buf);
-            if (root) {
-                const std::string id = root->getString("id");
-                const std::string key = makeEntityKey(id, root->getDouble("PosX"), root->getDouble("PosY"), root->getDouble("PosZ"));
-                if (seenAnimals.insert(key).second) {
-                    animalList->tags.push_back(std::make_shared<NBTCompound>(*root));
-                }
-            }
-        }
+    std::vector<FfiTileEntityFurnaceData> furnaces;
+    std::vector<FfiTileEntityChestData> chests;
+    std::vector<FfiTileEntitySignData> signs;
 
-        for (const auto& e : entities_) {
-            auto* animal = dynamic_cast<EntityAnimals*>(e.get());
-            if (!animal || animal->isDead) continue;
-            const int cx = static_cast<int>(std::floor(animal->posX)) >> 4;
-            const int cz = static_cast<int>(std::floor(animal->posZ)) >> 4;
-            if (cx != chunk->xPosition || cz != chunk->zPosition) continue;
-
-            const std::string key = makeEntityKey(animal->getEntityStringId(), animal->posX, animal->posY, animal->posZ);
-            if (!seenAnimals.insert(key).second) continue;
-            auto tag = std::make_shared<NBTCompound>();
-            animal->writeToNBT(*tag);
-            animalList->tags.push_back(tag);
-        }
-
-        if (!animalList->tags.empty()) {
-            level.tags["Animals"] = animalList;
-        }
-    }
-
-    {
-        auto monsterList = std::make_shared<NBTList>();
-        monsterList->tagType = NBTTagType::TAG_Compound;
-        std::unordered_set<std::string> seenMonsters;
-
-        auto makeEntityKey = [](const std::string& id, double x, double y, double z) {
-            const int32_t fx = static_cast<int32_t>(std::floor(x * 32.0));
-            const int32_t fy = static_cast<int32_t>(std::floor(y * 32.0));
-            const int32_t fz = static_cast<int32_t>(std::floor(z * 32.0));
-            return id + "#" + std::to_string(fx) + ":" + std::to_string(fy) + ":" + std::to_string(fz);
-        };
-
-        for (const auto& mobData : chunk->pendingMonsters) {
-            ByteBuffer buf(mobData.nbtData);
-            auto root = NBTCompound::readRoot(buf);
-            if (root) {
-                const std::string id = root->getString("id");
-                const std::string key = makeEntityKey(id, root->getDouble("PosX"), root->getDouble("PosY"), root->getDouble("PosZ"));
-                if (seenMonsters.insert(key).second) {
-                    monsterList->tags.push_back(std::make_shared<NBTCompound>(*root));
-                }
-            }
-        }
-
-        for (const auto& e : entities_) {
-            auto* mob = dynamic_cast<EntityMob*>(e.get());
-            if (!mob || mob->isDead) continue;
-            const int cx = static_cast<int>(std::floor(mob->posX)) >> 4;
-            const int cz = static_cast<int>(std::floor(mob->posZ)) >> 4;
-            if (cx != chunk->xPosition || cz != chunk->zPosition) continue;
-
-            const std::string key = makeEntityKey(mob->getEntityStringId(), mob->posX, mob->posY, mob->posZ);
-            if (!seenMonsters.insert(key).second) continue;
-            auto tag = std::make_shared<NBTCompound>();
-            mob->writeToNBT(*tag);
-            monsterList->tags.push_back(tag);
-        }
-
-        if (!monsterList->tags.empty()) {
-            level.tags["Monsters"] = monsterList;
-        }
-    }
-
-    {
-        auto boatList = std::make_shared<NBTList>();
-        boatList->tagType = NBTTagType::TAG_Compound;
-        std::unordered_set<std::string> seenBoats;
-
-        auto makeBoatKey = [](double x, double y, double z) {
-            const int32_t fx = static_cast<int32_t>(std::floor(x * 32.0));
-            const int32_t fy = static_cast<int32_t>(std::floor(y * 32.0));
-            const int32_t fz = static_cast<int32_t>(std::floor(z * 32.0));
-            return std::to_string(fx) + ":" + std::to_string(fy) + ":" + std::to_string(fz);
-        };
-
-        for (const auto& boatData : chunk->pendingBoats) {
-            ByteBuffer buf(boatData.nbtData);
-            auto root = NBTCompound::readRoot(buf);
-            if (!root) continue;
-            const std::string key = makeBoatKey(root->getDouble("PosX"), root->getDouble("PosY"), root->getDouble("PosZ"));
-            if (!seenBoats.insert(key).second) continue;
-            boatList->tags.push_back(std::make_shared<NBTCompound>(*root));
-        }
-
-        for (const auto& e : entities_) {
-            auto* boat = dynamic_cast<EntityBoat*>(e.get());
-            if (!boat || boat->isDead) continue;
-            const int cx = static_cast<int>(std::floor(boat->posX)) >> 4;
-            const int cz = static_cast<int>(std::floor(boat->posZ)) >> 4;
-            if (cx != chunk->xPosition || cz != chunk->zPosition) continue;
-
-            const std::string key = makeBoatKey(boat->posX, boat->posY, boat->posZ);
-            if (!seenBoats.insert(key).second) continue;
-            auto tag = std::make_shared<NBTCompound>();
-            boat->writeToNBT(*tag);
-            boatList->tags.push_back(tag);
-        }
-
-        if (!boatList->tags.empty()) {
-            level.tags["Boats"] = boatList;
-        }
-    }
-
-    // Save TileEntities
-    std::vector<std::shared_ptr<NBTTag>> tileEntityList;
     for (const auto& [key, te] : chunk->getTileEntities()) {
-        if (te) {
-            auto teCompound = std::make_shared<NBTCompound>();
-            te->writeToNBT(*teCompound);
-            tileEntityList.push_back(teCompound);
+        if (auto* f = dynamic_cast<TileEntityFurnace*>(te)) {
+            FfiTileEntityFurnaceData data{};
+            data.x = f->xCoord; data.y = f->yCoord; data.z = f->zCoord;
+            data.state = f->state_;
+            furnaces.push_back(data);
+        } else if (auto* c = dynamic_cast<TileEntityChest*>(te)) {
+            FfiTileEntityChestData data{};
+            data.x = c->xCoord; data.y = c->yCoord; data.z = c->zCoord;
+            data.state = c->state_;
+            chests.push_back(data);
+        } else if (auto* s = dynamic_cast<TileEntitySign*>(te)) {
+            FfiTileEntitySignData data{};
+            data.x = s->xCoord; data.y = s->yCoord; data.z = s->zCoord;
+            data.state = s->state_;
+            signs.push_back(data);
         }
     }
-    
-    if (!tileEntityList.empty()) {
-        auto listTag = std::make_shared<NBTList>();
-        listTag->tags = tileEntityList;
-        listTag->tagType = NBTTagType::TAG_Compound;
-        level.tags["TileEntities"] = listTag;
+
+    chunkData.furnaces = furnaces.data(); chunkData.furnaces_count = furnaces.size();
+    chunkData.chests = chests.data(); chunkData.chests_count = chests.size();
+    chunkData.signs = signs.data(); chunkData.signs_count = signs.size();
+
+    std::vector<FfiEntityItemData> items;
+    std::vector<FfiEntityAnimalData> animals;
+    std::vector<FfiEntityMonsterData> monsters;
+    std::vector<FfiEntityBoatData> boats;
+    std::vector<std::string> stringCache;
+
+    for (const auto& ed : chunk->pendingItems) {
+        items.push_back({ed.itemID, ed.count, ed.metadata, ed.age, ed.pickupDelay, ed.posX, ed.posY, ed.posZ});
     }
-
-    NBTCompound root;
-    root.setCompound("Level", std::make_shared<NBTCompound>(level));
-
-    ByteBuffer buf;
-    root.writeRoot(buf, "");
-
-    if (useLegacyStorage_) {
-        return RustBridge::gzipCompress(buf.data, 6);
+    for (const auto& e : entities_) {
+        auto* item = dynamic_cast<EntityItem*>(e.get());
+        if (!item || item->isDead) continue;
+        int cx = static_cast<int>(std::floor(item->posX)) >> 4;
+        int cz = static_cast<int>(std::floor(item->posZ)) >> 4;
+        if (cx != chunk->xPosition || cz != chunk->zPosition) continue;
+        items.push_back({item->itemID, item->count, item->metadata, item->age, item->pickupDelay, item->posX, item->posY, item->posZ});
     }
-    return RustBridge::zstdCompress(buf.data, 1);
+    chunkData.items = items.data(); chunkData.items_count = items.size();
+
+    auto makeEntityKey = [](const std::string& id, double x, double y, double z) {
+        const int32_t fx = static_cast<int32_t>(std::floor(x * 32.0));
+        const int32_t fy = static_cast<int32_t>(std::floor(y * 32.0));
+        const int32_t fz = static_cast<int32_t>(std::floor(z * 32.0));
+        return id + "#" + std::to_string(fx) + ":" + std::to_string(fy) + ":" + std::to_string(fz);
+    };
+
+    std::unordered_set<std::string> seenAnimals;
+    for (const auto& ad : chunk->pendingAnimals) {
+        const std::string key = makeEntityKey(ad.id, ad.posX, ad.posY, ad.posZ);
+        if (seenAnimals.insert(key).second) {
+            stringCache.push_back(ad.id);
+            animals.push_back({
+                stringCache.back().c_str(), ad.posX, ad.posY, ad.posZ,
+                ad.motionX, ad.motionY, ad.motionZ,
+                ad.rotationYaw, ad.rotationPitch,
+                ad.health, ad.maxHealth,
+                ad.saddled, ad.sheared, ad.eggLayTime
+            });
+        }
+    }
+    for (const auto& e : entities_) {
+        auto* animal = dynamic_cast<EntityAnimals*>(e.get());
+        if (!animal || animal->isDead) continue;
+        int cx = static_cast<int>(std::floor(animal->posX)) >> 4;
+        int cz = static_cast<int>(std::floor(animal->posZ)) >> 4;
+        if (cx != chunk->xPosition || cz != chunk->zPosition) continue;
+
+        stringCache.push_back(animal->getEntityStringId());
+        const std::string key = makeEntityKey(stringCache.back(), animal->posX, animal->posY, animal->posZ);
+        if (!seenAnimals.insert(key).second) continue;
+
+        bool saddled = false; bool sheared = false; int eggLayTime = 0;
+        if (auto* pig = dynamic_cast<EntityPig*>(animal)) saddled = pig->saddled;
+        if (auto* sheep = dynamic_cast<EntitySheep*>(animal)) sheared = sheep->sheared;
+        if (auto* chicken = dynamic_cast<EntityChicken*>(animal)) eggLayTime = chicken->eggLayTime;
+
+        animals.push_back({
+            stringCache.back().c_str(), animal->posX, animal->posY, animal->posZ,
+            animal->motionX, animal->motionY, animal->motionZ,
+            animal->rotationYaw, animal->rotationPitch,
+            animal->health, animal->maxHealth,
+            saddled, sheared, eggLayTime
+        });
+    }
+    chunkData.animals = animals.data(); chunkData.animals_count = animals.size();
+
+    std::unordered_set<std::string> seenMonsters;
+    for (const auto& md : chunk->pendingMonsters) {
+        const std::string key = makeEntityKey(md.id, md.posX, md.posY, md.posZ);
+        if (seenMonsters.insert(key).second) {
+            stringCache.push_back(md.id);
+            monsters.push_back({
+                stringCache.back().c_str(), md.posX, md.posY, md.posZ,
+                md.motionX, md.motionY, md.motionZ,
+                md.rotationYaw, md.rotationPitch,
+                md.health, md.maxHealth
+            });
+        }
+    }
+    for (const auto& e : entities_) {
+        auto* mob = dynamic_cast<EntityMob*>(e.get());
+        if (!mob || mob->isDead) continue;
+        int cx = static_cast<int>(std::floor(mob->posX)) >> 4;
+        int cz = static_cast<int>(std::floor(mob->posZ)) >> 4;
+        if (cx != chunk->xPosition || cz != chunk->zPosition) continue;
+
+        stringCache.push_back(mob->getEntityStringId());
+        const std::string key = makeEntityKey(stringCache.back(), mob->posX, mob->posY, mob->posZ);
+        if (!seenMonsters.insert(key).second) continue;
+
+        monsters.push_back({
+            stringCache.back().c_str(), mob->posX, mob->posY, mob->posZ,
+            mob->motionX, mob->motionY, mob->motionZ,
+            mob->rotationYaw, mob->rotationPitch,
+            mob->health, mob->maxHealth
+        });
+    }
+    chunkData.monsters = monsters.data(); chunkData.monsters_count = monsters.size();
+
+    std::unordered_set<std::string> seenBoats;
+    for (const auto& bd : chunk->pendingBoats) {
+        const std::string key = makeEntityKey("Boat", bd.posX, bd.posY, bd.posZ);
+        if (seenBoats.insert(key).second) {
+            boats.push_back({
+                bd.posX, bd.posY, bd.posZ,
+                bd.motionX, bd.motionY, bd.motionZ,
+                bd.rotationYaw, bd.rotationPitch,
+                bd.timeSinceHit, bd.damageTaken, bd.forwardDirection
+            });
+        }
+    }
+    for (const auto& e : entities_) {
+        auto* boat = dynamic_cast<EntityBoat*>(e.get());
+        if (!boat || boat->isDead) continue;
+        int cx = static_cast<int>(std::floor(boat->posX)) >> 4;
+        int cz = static_cast<int>(std::floor(boat->posZ)) >> 4;
+        if (cx != chunk->xPosition || cz != chunk->zPosition) continue;
+
+        const std::string key = makeEntityKey("Boat", boat->posX, boat->posY, boat->posZ);
+        if (!seenBoats.insert(key).second) continue;
+
+        boats.push_back({
+            boat->posX, boat->posY, boat->posZ,
+            boat->motionX, boat->motionY, boat->motionZ,
+            boat->rotationYaw, boat->rotationPitch,
+            boat->timeSinceHit, boat->damageTaken, boat->forwardDirection
+        });
+    }
+    chunkData.boats = boats.data(); chunkData.boats_count = boats.size();
+
+    AlphaBuffer result = alpha_chunk_nbt_serialize(&chunkData, !useLegacyStorage_);
+    if (!result.data || result.len == 0) {
+        alpha_buffer_free(result);
+        return {};
+    }
+    std::vector<uint8_t> bytes(result.data, result.data + result.len);
+    alpha_buffer_free(result);
+    return bytes;
 }
 
 void World::decompressChunkData(Chunk* chunk, const std::vector<uint8_t>& data,
                                 std::vector<std::unique_ptr<TileEntity>>* detachedTileEntities) {
     if (data.size() < 4) return;
 
-    std::vector<uint8_t> outBuf;
-
-    // Detect format by magic: zstd frame starts with 0xFD2FB528 (little-endian)
     uint32_t magic;
     std::memcpy(&magic, data.data(), 4);
-    if (magic == ZSTD_MAGIC) {
-        outBuf = RustBridge::zstdDecompress(data);
-    } else {
-        outBuf = RustBridge::gzipDecompress(data);
+    bool isZstd = (magic == ZSTD_MAGIC);
+
+    AlphaChunkData* result = alpha_chunk_nbt_deserialize(
+        data.data(), data.size(), isZstd,
+        chunk->xPosition, chunk->zPosition
+    );
+    if (!result) return;
+
+    chunk->isTerrainPopulated = result->terrain_populated;
+    std::copy(result->blocks, result->blocks + result->blocks_len, chunk->blocks);
+    std::copy(result->data, result->data + result->data_len, chunk->data.data_ptr);
+    std::copy(result->sky_light, result->sky_light + result->sky_light_len, chunk->skylight.data_ptr);
+    std::copy(result->block_light, result->block_light + result->block_light_len, chunk->blocklight.data_ptr);
+    std::copy(result->height_map, result->height_map + result->height_map_len, chunk->heightMap);
+
+    bool hmEmpty = true;
+    for (size_t i = 0; i < result->height_map_len; ++i) {
+        if (result->height_map[i] != 0) { hmEmpty = false; break; }
     }
-    if (outBuf.empty()) return;
 
-    ByteBuffer buf(std::move(outBuf));
-    auto root = NBTCompound::readRoot(buf);
-    if (!root) return;
-
-    auto level = root->getCompound("Level");
-    if (!level) return;
-
-    chunk->isTerrainPopulated = level->getByte("TerrainPopulated") != 0;
-    auto blocksVec = level->getByteArray("Blocks");
-    std::copy(blocksVec.begin(), blocksVec.end(), chunk->blocks);
-    auto dataVec = level->getByteArray("Data");
-    std::copy(dataVec.begin(), dataVec.end(), chunk->data.data_ptr);
-    auto skyVec = level->getByteArray("SkyLight");
-    std::copy(skyVec.begin(), skyVec.end(), chunk->skylight.data_ptr);
-    auto blVec = level->getByteArray("BlockLight");
-    std::copy(blVec.begin(), blVec.end(), chunk->blocklight.data_ptr);
-    auto hmVec = level->getByteArray("HeightMap");
-    std::copy(hmVec.begin(), hmVec.end(), chunk->heightMap);
     chunk->pendingItems.clear();
     chunk->pendingAnimals.clear();
     chunk->pendingMonsters.clear();
     chunk->pendingBoats.clear();
 
     // Load TileEntities
-    auto tileEntitiesTag = level->tags.find("TileEntities");
-    if (tileEntitiesTag != level->tags.end()) {
-        auto listTag = std::dynamic_pointer_cast<NBTList>(tileEntitiesTag->second);
-        if (listTag) {
-            for (const auto& tag : listTag->tags) {
-                auto teCompound = std::dynamic_pointer_cast<NBTCompound>(tag);
-                if (teCompound) {
-                    auto te = TileEntity::createFromNBT(*teCompound);
-                    if (te) {
-                        if (detachedTileEntities) {
-                            chunk->addTileEntity(te.get());
-                            detachedTileEntities->push_back(std::move(te));
-                        } else {
-                            te->worldObj = this;
-                            int x = te->xCoord;
-                            int y = te->yCoord;
-                            int z = te->zCoord;
-                            std::shared_lock lock(tileEntitiesMutex_);
-                            auto key = getTileEntityKey(x, y, z);
-                            if (!tileEntities_.contains(key)) {
-                                chunk->addTileEntity(te.get());
-                                tileEntities_[key] = std::move(te);
-                            }
-                        }
-                    }
+    if (result->furnaces && result->furnaces_count > 0) {
+        for (size_t i = 0; i < result->furnaces_count; ++i) {
+            auto* f = new TileEntityFurnace();
+            f->worldObj = this; f->xCoord = result->furnaces[i].x; f->yCoord = result->furnaces[i].y; f->zCoord = result->furnaces[i].z;
+            f->state_ = result->furnaces[i].state;
+            if (detachedTileEntities) {
+                chunk->addTileEntity(f);
+                detachedTileEntities->push_back(std::unique_ptr<TileEntity>(f));
+            } else {
+                auto key = getTileEntityKey(f->xCoord, f->yCoord, f->zCoord);
+                std::shared_lock lock(tileEntitiesMutex_);
+                if (!tileEntities_.contains(key)) {
+                    chunk->addTileEntity(f);
+                    tileEntities_[key] = std::unique_ptr<TileEntity>(f);
+                } else {
+                    delete f;
+                }
+            }
+        }
+    }
+    if (result->chests && result->chests_count > 0) {
+        for (size_t i = 0; i < result->chests_count; ++i) {
+            auto* c = new TileEntityChest();
+            c->worldObj = this; c->xCoord = result->chests[i].x; c->yCoord = result->chests[i].y; c->zCoord = result->chests[i].z;
+            c->state_ = result->chests[i].state;
+            if (detachedTileEntities) {
+                chunk->addTileEntity(c);
+                detachedTileEntities->push_back(std::unique_ptr<TileEntity>(c));
+            } else {
+                auto key = getTileEntityKey(c->xCoord, c->yCoord, c->zCoord);
+                std::shared_lock lock(tileEntitiesMutex_);
+                if (!tileEntities_.contains(key)) {
+                    chunk->addTileEntity(c);
+                    tileEntities_[key] = std::unique_ptr<TileEntity>(c);
+                } else {
+                    delete c;
+                }
+            }
+        }
+    }
+    if (result->signs && result->signs_count > 0) {
+        for (size_t i = 0; i < result->signs_count; ++i) {
+            auto* s = new TileEntitySign();
+            s->worldObj = this; s->xCoord = result->signs[i].x; s->yCoord = result->signs[i].y; s->zCoord = result->signs[i].z;
+            s->state_ = result->signs[i].state;
+            if (detachedTileEntities) {
+                chunk->addTileEntity(s);
+                detachedTileEntities->push_back(std::unique_ptr<TileEntity>(s));
+            } else {
+                auto key = getTileEntityKey(s->xCoord, s->yCoord, s->zCoord);
+                std::shared_lock lock(tileEntitiesMutex_);
+                if (!tileEntities_.contains(key)) {
+                    chunk->addTileEntity(s);
+                    tileEntities_[key] = std::unique_ptr<TileEntity>(s);
+                } else {
+                    delete s;
                 }
             }
         }
     }
 
     // Load EntityItems
-    auto itemsTag = level->tags.find("Items");
-    if (itemsTag != level->tags.end()) {
-        auto listTag = std::dynamic_pointer_cast<NBTList>(itemsTag->second);
-        if (listTag) {
-            for (const auto& tag : listTag->tags) {
-                auto t = std::dynamic_pointer_cast<NBTCompound>(tag);
-                if (!t) continue;
-                ChunkEntityData ed;
-                ed.itemID      = t->getInt("id");
-                ed.count       = t->getInt("count");
-                ed.metadata    = t->getInt("meta");
-                ed.age         = t->getInt("age");
-                ed.pickupDelay = t->getInt("delay");
-                ed.posX        = t->getDouble("x");
-                ed.posY        = t->getDouble("y");
-                ed.posZ        = t->getDouble("z");
-                if (ed.age < 6000)
-                    chunk->pendingItems.push_back(ed);
-            }
+    if (result->items && result->items_count > 0) {
+        for (size_t i = 0; i < result->items_count; ++i) {
+            ChunkEntityData ed;
+            ed.itemID      = result->items[i].item_id;
+            ed.count       = result->items[i].count;
+            ed.metadata    = result->items[i].meta;
+            ed.age         = result->items[i].age;
+            ed.pickupDelay = result->items[i].delay;
+            ed.posX        = result->items[i].x;
+            ed.posY        = result->items[i].y;
+            ed.posZ        = result->items[i].z;
+            if (ed.age < 6000)
+                chunk->pendingItems.push_back(ed);
         }
     }
 
-    auto animalsTag = level->tags.find("Animals");
-    if (animalsTag != level->tags.end()) {
-        auto listTag = std::dynamic_pointer_cast<NBTList>(animalsTag->second);
-        if (listTag) {
-            for (const auto& tag : listTag->tags) {
-                auto animalTag = std::dynamic_pointer_cast<NBTCompound>(tag);
-                if (!animalTag) continue;
-                ByteBuffer buf;
-                animalTag->writeRoot(buf, animalTag->getString("id"));
-                chunk->pendingAnimals.push_back({
-                    .entityId = animalTag->getString("id"),
-                    .nbtData = std::move(buf.data),
-                    .posX = animalTag->getDouble("PosX"),
-                    .posY = animalTag->getDouble("PosY"),
-                    .posZ = animalTag->getDouble("PosZ"),
-                });
-            }
+    if (result->animals && result->animals_count > 0) {
+        for (size_t i = 0; i < result->animals_count; ++i) {
+            const auto& a = result->animals[i];
+            ChunkAnimalData ad;
+            ad.id = a.id ? a.id : "";
+            ad.posX = a.x; ad.posY = a.y; ad.posZ = a.z;
+            ad.motionX = a.motion_x; ad.motionY = a.motion_y; ad.motionZ = a.motion_z;
+            ad.rotationYaw = a.rotation_yaw; ad.rotationPitch = a.rotation_pitch;
+            ad.health = a.health; ad.maxHealth = a.max_health;
+            ad.saddled = a.saddled; ad.sheared = a.sheared; ad.eggLayTime = a.egg_lay_time;
+            chunk->pendingAnimals.push_back(ad);
         }
     }
 
-    auto monstersTag = level->tags.find("Monsters");
-    if (monstersTag != level->tags.end()) {
-        auto listTag = std::dynamic_pointer_cast<NBTList>(monstersTag->second);
-        if (listTag) {
-            for (const auto& tag : listTag->tags) {
-                auto mobTag = std::dynamic_pointer_cast<NBTCompound>(tag);
-                if (!mobTag) continue;
-                ByteBuffer buf;
-                mobTag->writeRoot(buf, mobTag->getString("id"));
-                chunk->pendingMonsters.push_back({
-                    .entityId = mobTag->getString("id"),
-                    .nbtData = std::move(buf.data),
-                    .posX = mobTag->getDouble("PosX"),
-                    .posY = mobTag->getDouble("PosY"),
-                    .posZ = mobTag->getDouble("PosZ"),
-                });
-            }
+    if (result->monsters && result->monsters_count > 0) {
+        for (size_t i = 0; i < result->monsters_count; ++i) {
+            const auto& m = result->monsters[i];
+            ChunkAnimalData md;
+            md.id = m.id ? m.id : "";
+            md.posX = m.x; md.posY = m.y; md.posZ = m.z;
+            md.motionX = m.motion_x; md.motionY = m.motion_y; md.motionZ = m.motion_z;
+            md.rotationYaw = m.rotation_yaw; md.rotationPitch = m.rotation_pitch;
+            md.health = m.health; md.maxHealth = m.max_health;
+            chunk->pendingMonsters.push_back(md);
         }
     }
 
-    auto boatsTag = level->tags.find("Boats");
-    if (boatsTag != level->tags.end()) {
-        auto listTag = std::dynamic_pointer_cast<NBTList>(boatsTag->second);
-        if (listTag) {
-            for (const auto& tag : listTag->tags) {
-                auto boatTag = std::dynamic_pointer_cast<NBTCompound>(tag);
-                if (!boatTag) continue;
-                ByteBuffer buf;
-                boatTag->writeRoot(buf, "Boat");
-                chunk->pendingBoats.push_back({
-                    .nbtData = std::move(buf.data),
-                    .posX = boatTag->getDouble("PosX"),
-                    .posY = boatTag->getDouble("PosY"),
-                    .posZ = boatTag->getDouble("PosZ"),
-                });
-            }
+    if (result->boats && result->boats_count > 0) {
+        for (size_t i = 0; i < result->boats_count; ++i) {
+            const auto& b = result->boats[i];
+            ChunkBoatData bd;
+            bd.posX = b.x; bd.posY = b.y; bd.posZ = b.z;
+            bd.motionX = b.motion_x; bd.motionY = b.motion_y; bd.motionZ = b.motion_z;
+            bd.rotationYaw = b.rotation_yaw; bd.rotationPitch = b.rotation_pitch;
+            bd.timeSinceHit = b.time_since_hit; bd.damageTaken = b.damage_taken; bd.forwardDirection = b.forward_direction;
+            if (bd.forwardDirection == 0) bd.forwardDirection = 1;
+            chunk->pendingBoats.push_back(bd);
         }
     }
 
-    if (hmVec.empty()) {
+    if (hmEmpty) {
         std::fill(chunk->heightMap, chunk->heightMap + CHUNK_AREA, 0);
         chunk->generateHeightMap();
         chunk->generateSkylightMap();
     }
+
+    alpha_chunk_data_free(result);
 }
 
 void World::spawnEntityInWorld(std::unique_ptr<Entity> entity) {
