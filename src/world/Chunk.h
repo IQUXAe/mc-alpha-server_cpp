@@ -30,14 +30,20 @@ struct ChunkEntityData {
 };
 
 struct ChunkAnimalData {
-    std::string entityId;
-    std::vector<uint8_t> nbtData;
+    std::string id;
     double posX, posY, posZ;
+    double motionX, motionY, motionZ;
+    float rotationYaw, rotationPitch;
+    int16_t health, maxHealth;
+    bool saddled = false, sheared = false;
+    int eggLayTime = 0;
 };
 
 struct ChunkBoatData {
-    std::vector<uint8_t> nbtData;
     double posX, posY, posZ;
+    double motionX, motionY, motionZ;
+    float rotationYaw, rotationPitch;
+    int timeSinceHit, damageTaken, forwardDirection;
 };
 
 class Chunk {
@@ -47,6 +53,15 @@ public:
     World* worldObj;
 
     bool isTerrainPopulated = false;
+    // std::atomic<bool> provides an implicit `operator=(bool)` that
+    // performs an atomic store with sequentially-consistent semantics, so
+    // direct `chunk->isModified = true` is safe from any thread.
+    // Reads should still use `.load()` for clarity, but `if (!chunk->isModified)`
+    // also works via the contextual-bool conversion. The atomicity matters
+    // because:
+    //   * Async chunk build thread (ChunkProviderGenerate) sets dirty after decoration
+    //   * Save thread reads dirty to skip clean chunks
+    //   * World::tick loads + clears dirty during the auto-save window
     std::atomic<bool> isModified{false};
 
     // EntityItems waiting to be spawned when the chunk is loaded

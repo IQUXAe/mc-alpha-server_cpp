@@ -32,7 +32,6 @@
 #include "../core/AxisAlignedBB.h"
 // PathEntity is forward-declared; Pathfinder.h included only in World.cpp
 class PathEntity;
-#include "../core/NBT.h"
 #include "../forward.h"
 #include <thread>
 #include <mutex>
