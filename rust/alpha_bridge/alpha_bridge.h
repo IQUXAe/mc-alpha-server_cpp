@@ -211,72 +211,105 @@ bool alpha_generate_big_tree(
     int32_t z
 );
 
-// Opaque types for NBT
-typedef struct NbtCompound NbtCompound;
-typedef struct NbtList NbtList;
+// ItemStack and TileEntity types (shared by ChunkLoader)
+typedef struct FfiItemStack {
+    int32_t stack_size;
+    int32_t animations_to_go;
+    int32_t item_id;
+    int32_t item_damage;
+} FfiItemStack;
 
-// NBT FFI Functions
-NbtCompound* alpha_nbt_compound_create();
-void alpha_nbt_compound_free(NbtCompound* ptr);
-void alpha_nbt_compound_set_byte(NbtCompound* comp, const char* name, int8_t val);
-void alpha_nbt_compound_set_short(NbtCompound* comp, const char* name, int16_t val);
-void alpha_nbt_compound_set_int(NbtCompound* comp, const char* name, int32_t val);
-void alpha_nbt_compound_set_long(NbtCompound* comp, const char* name, int64_t val);
-void alpha_nbt_compound_set_float(NbtCompound* comp, const char* name, float val);
-void alpha_nbt_compound_set_double(NbtCompound* comp, const char* name, double val);
-void alpha_nbt_compound_set_string(NbtCompound* comp, const char* name, const char* val);
-void alpha_nbt_compound_set_byte_array(NbtCompound* comp, const char* name, const uint8_t* val_ptr, size_t val_len);
-void alpha_nbt_compound_set_compound(NbtCompound* comp, const char* name, NbtCompound* child);
-void alpha_nbt_compound_set_list(NbtCompound* comp, const char* name, NbtList* child);
+typedef struct FfiFurnaceState {
+    FfiItemStack slots[3];
+    int16_t burn_time;
+    int16_t cook_time;
+    int16_t current_item_burn_time;
+} FfiFurnaceState;
 
-uint8_t alpha_nbt_compound_get_tag_type(const NbtCompound* comp, const char* name);
-int8_t alpha_nbt_compound_get_byte(const NbtCompound* comp, const char* name);
-int16_t alpha_nbt_compound_get_short(const NbtCompound* comp, const char* name);
-int32_t alpha_nbt_compound_get_int(const NbtCompound* comp, const char* name);
-int64_t alpha_nbt_compound_get_long(const NbtCompound* comp, const char* name);
-float alpha_nbt_compound_get_float(const NbtCompound* comp, const char* name);
-double alpha_nbt_compound_get_double(const NbtCompound* comp, const char* name);
-AlphaBuffer alpha_nbt_compound_get_string(const NbtCompound* comp, const char* name);
-AlphaBuffer alpha_nbt_compound_get_byte_array(const NbtCompound* comp, const char* name);
-NbtCompound* alpha_nbt_compound_get_compound(const NbtCompound* comp, const char* name);
-NbtList* alpha_nbt_compound_get_list(const NbtCompound* comp, const char* name);
-AlphaBuffer alpha_nbt_compound_get_keys(const NbtCompound* comp);
-NbtCompound* alpha_nbt_compound_clone(const NbtCompound* ptr);
-NbtList* alpha_nbt_list_clone(const NbtList* ptr);
-void alpha_nbt_compound_remove(NbtCompound* comp, const char* name);
-bool alpha_nbt_compound_has_key(const NbtCompound* comp, const char* name);
+typedef struct FfiTileEntityFurnaceData {
+    int32_t x;
+    int32_t y;
+    int32_t z;
+    FfiFurnaceState state;
+} FfiTileEntityFurnaceData;
 
-NbtList* alpha_nbt_list_create(uint8_t tag_type);
-void alpha_nbt_list_free(NbtList* ptr);
-uint8_t alpha_nbt_list_get_type(const NbtList* list);
-size_t alpha_nbt_list_get_size(const NbtList* list);
-void alpha_nbt_list_set_type(NbtList* list, uint8_t tag_type);
+typedef struct FfiChestState {
+    FfiItemStack slots[27];
+} FfiChestState;
 
-void alpha_nbt_list_add_byte(NbtList* list, int8_t val);
-void alpha_nbt_list_add_short(NbtList* list, int16_t val);
-void alpha_nbt_list_add_int(NbtList* list, int32_t val);
-void alpha_nbt_list_add_long(NbtList* list, int64_t val);
-void alpha_nbt_list_add_float(NbtList* list, float val);
-void alpha_nbt_list_add_double(NbtList* list, double val);
-void alpha_nbt_list_add_string(NbtList* list, const char* val);
-void alpha_nbt_list_add_byte_array(NbtList* list, const uint8_t* val_ptr, size_t val_len);
-void alpha_nbt_list_add_compound(NbtList* list, NbtCompound* child);
-void alpha_nbt_list_add_list(NbtList* list, NbtList* child);
+typedef struct FfiTileEntityChestData {
+    int32_t x;
+    int32_t y;
+    int32_t z;
+    FfiChestState state;
+} FfiTileEntityChestData;
 
-int8_t alpha_nbt_list_get_byte(const NbtList* list, size_t idx);
-int16_t alpha_nbt_list_get_short(const NbtList* list, size_t idx);
-int32_t alpha_nbt_list_get_int(const NbtList* list, size_t idx);
-int64_t alpha_nbt_list_get_long(const NbtList* list, size_t idx);
-float alpha_nbt_list_get_float(const NbtList* list, size_t idx);
-double alpha_nbt_list_get_double(const NbtList* list, size_t idx);
-AlphaBuffer alpha_nbt_list_get_string(const NbtList* list, size_t idx);
-AlphaBuffer alpha_nbt_list_get_byte_array(const NbtList* list, size_t idx);
-NbtCompound* alpha_nbt_list_get_compound(const NbtList* list, size_t idx);
-NbtList* alpha_nbt_list_get_list(const NbtList* list, size_t idx);
+typedef struct FfiSignState {
+    uint8_t lines[4][16];
+} FfiSignState;
 
-AlphaBuffer alpha_nbt_compound_serialize_root(const NbtCompound* comp, const char* name);
-NbtCompound* alpha_nbt_compound_deserialize_root(const uint8_t* data, size_t len, char** out_name, size_t* out_bytes_read);
-void alpha_nbt_free_name(char* name);
+typedef struct FfiTileEntitySignData {
+    int32_t x;
+    int32_t y;
+    int32_t z;
+    FfiSignState state;
+} FfiTileEntitySignData;
+
+typedef struct FfiEntityItemData {
+    int32_t item_id;
+    int32_t count;
+    int32_t meta;
+    int32_t age;
+    int32_t delay;
+    double x;
+    double y;
+    double z;
+} FfiEntityItemData;
+
+typedef struct FfiEntityAnimalData {
+    const char* id;
+    double x;
+    double y;
+    double z;
+    double motion_x;
+    double motion_y;
+    double motion_z;
+    float rotation_yaw;
+    float rotation_pitch;
+    int16_t health;
+    int16_t max_health;
+    bool saddled;
+    bool sheared;
+    int32_t egg_lay_time;
+} FfiEntityAnimalData;
+
+typedef struct FfiEntityMonsterData {
+    const char* id;
+    double x;
+    double y;
+    double z;
+    double motion_x;
+    double motion_y;
+    double motion_z;
+    float rotation_yaw;
+    float rotation_pitch;
+    int16_t health;
+    int16_t max_health;
+} FfiEntityMonsterData;
+
+typedef struct FfiEntityBoatData {
+    double x;
+    double y;
+    double z;
+    double motion_x;
+    double motion_y;
+    double motion_z;
+    float rotation_yaw;
+    float rotation_pitch;
+    int32_t time_since_hit;
+    int32_t damage_taken;
+    int32_t forward_direction;
+} FfiEntityBoatData;
 
 // ChunkLoader FFI
 typedef struct AlphaChunkData {
@@ -299,15 +332,19 @@ typedef struct AlphaChunkData {
     size_t height_map_len;
     size_t height_map_capacity;
     bool terrain_populated;
-    NbtCompound** tile_entities;
-    size_t tile_entities_count;
-    NbtCompound** items;
+    FfiTileEntityFurnaceData* furnaces;
+    size_t furnaces_count;
+    FfiTileEntityChestData* chests;
+    size_t chests_count;
+    FfiTileEntitySignData* signs;
+    size_t signs_count;
+    FfiEntityItemData* items;
     size_t items_count;
-    NbtCompound** animals;
+    FfiEntityAnimalData* animals;
     size_t animals_count;
-    NbtCompound** monsters;
+    FfiEntityMonsterData* monsters;
     size_t monsters_count;
-    NbtCompound** boats;
+    FfiEntityBoatData* boats;
     size_t boats_count;
 } AlphaChunkData;
 
@@ -337,27 +374,24 @@ AlphaChunkData* alpha_chunk_loader_load(
     int chunk_x,
     int chunk_z
 );
+AlphaBuffer alpha_chunk_nbt_serialize(
+    const AlphaChunkData* chunk_data,
+    bool use_zstd
+);
+AlphaChunkData* alpha_chunk_nbt_deserialize(
+    const uint8_t* data,
+    size_t len,
+    bool is_zstd,
+    int chunk_x,
+    int chunk_z
+);
 
 // ItemStack FFI
-typedef struct FfiItemStack {
-    int32_t stack_size;
-    int32_t animations_to_go;
-    int32_t item_id;
-    int32_t item_damage;
-} FfiItemStack;
-
 FfiItemStack item_stack_create(int32_t item_id, int32_t stack_size, int32_t item_damage);
 FfiItemStack item_stack_copy(const FfiItemStack* stack);
 bool item_stack_damage(FfiItemStack* stack, int32_t damage, int32_t max_damage);
 
 // TileEntityFurnace FFI
-typedef struct FfiFurnaceState {
-    FfiItemStack slots[3];
-    int16_t burn_time;
-    int16_t cook_time;
-    int16_t current_item_burn_time;
-} FfiFurnaceState;
-
 typedef struct FurnaceTickResult {
     bool changed;
     bool needs_block_update;
@@ -367,17 +401,9 @@ FfiFurnaceState furnace_create(void);
 FurnaceTickResult furnace_tick(FfiFurnaceState* state, int32_t fuel_burn_time_from_cpp);
 
 // TileEntityChest FFI
-typedef struct FfiChestState {
-    FfiItemStack slots[27];
-} FfiChestState;
-
 FfiChestState chest_create(void);
 
 // TileEntitySign FFI
-typedef struct FfiSignState {
-    uint8_t lines[4][16];
-} FfiSignState;
-
 FfiSignState sign_create(void);
 void sign_set_line(FfiSignState* state, int32_t line, const char* text);
 

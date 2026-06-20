@@ -11,25 +11,13 @@ class Material;
 
 namespace RustBridge {
 
-struct FfiItemStack {
-    int32_t stackSize;
-    int32_t animationsToGo;
-    int32_t itemID;
-    int32_t itemDamage;
-};
-static_assert(std::is_standard_layout_v<FfiItemStack>, "FfiItemStack must be standard layout");
+using FfiItemStack = ::FfiItemStack;
 
 FfiItemStack itemStackCreate(int32_t itemID, int32_t stackSize, int32_t itemDamage);
 FfiItemStack itemStackCopy(const FfiItemStack* stack);
 bool itemStackDamage(FfiItemStack* stack, int32_t damage, int32_t maxDamage);
 
-struct FfiFurnaceState {
-    FfiItemStack slots[3];
-    int16_t burnTime;
-    int16_t cookTime;
-    int16_t currentItemBurnTime;
-};
-static_assert(std::is_standard_layout_v<FfiFurnaceState>, "FfiFurnaceState must be standard layout");
+using FfiFurnaceState = ::FfiFurnaceState;
 
 struct FurnaceTickResult {
     bool changed;
@@ -41,17 +29,11 @@ static_assert(alignof(FurnaceTickResult) == 1, "FurnaceTickResult must have byte
 FfiFurnaceState furnaceCreate();
 FurnaceTickResult furnaceTick(FfiFurnaceState* state, int32_t fuelBurnTime);
 
-struct FfiChestState {
-    FfiItemStack slots[27];
-};
-static_assert(std::is_standard_layout_v<FfiChestState>, "FfiChestState must be standard layout");
+using FfiChestState = ::FfiChestState;
 
 FfiChestState chestCreate();
 
-struct FfiSignState {
-    uint8_t lines[4][16];
-};
-static_assert(std::is_standard_layout_v<FfiSignState>, "FfiSignState must be standard layout");
+using FfiSignState = ::FfiSignState;
 
 FfiSignState signCreate();
 void signSetLine(FfiSignState* state, int32_t line, const char* text);
