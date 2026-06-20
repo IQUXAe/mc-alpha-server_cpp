@@ -630,34 +630,52 @@ pub unsafe extern "C" fn rust_session_check(
         Err(_) => return false,
     };
 
+    // NOTE: Mojang's legacy session.minecraft.net endpoint has been shut down
+    // since 2020. This online-mode authentication path is therefore non-functional
+    // by default. Operators in 2026+ should either:
+    //   * set online-mode=false in server.properties (recommended for offline LAN setups)
+    //   * replace the URL below with a custom authentication backend
+    //     (e.g. a Yggdrasil-compatible proxy) before relying on this code path.
     let url = format!(
         "https://session.minecraft.net/game/checkserver.jsp?user={}&serverId={}",
         urlencoding(username),
         urlencoding(server_id)
     );
 
-    match ureq::get(&url).call() {
-        Ok(response) => {
-            let body = match response.into_string() {
-                Ok(b) => b,
-                Err(_) => return false,
-            };
-            let trimmed = body.trim();
-            let c_str = match CString::new(trimmed) {
-                Ok(s) => s,
-                Err(_) => return false,
-            };
-            let bytes = c_str.as_bytes_with_nul();
-            let len = std::cmp::min(bytes.len(), out_max);
-            if len == 0 {
-                return false;
-            }
-            std::ptr::copy_nonoverlapping(bytes.as_ptr() as *const c_char, out_buf, len);
-            out_buf.add(len - 1).write(0);
-            trimmed == "YES"
+    let body = match ureq::get(&url)
+        .timeout(std::time::Duration::from_secs(5))
+        .call()
+    {
+        Ok(response) => match response.into_string() {
+            Ok(b) => b,
+            Err(_) => return false,
+        },
+        Err(_) => return false,
+    };
+
+    let trimmed = body.trim();
+    let is_yes = trimmed == "YES";
+
+    // NUL-terminate safely: copy min(len+1, out_max) bytes, always write NUL
+    // even when the result is truncated. The previous implementation wrote the
+    // terminator at byte index (len-1), truncating one character; and on
+    // out_max==1 produced an empty string while returning trimmed == "YES",
+    // making the C++ caller mis-read "YES" as a real success.
+    if !out_buf.is_null() && out_max >= 1 {
+        let bytes = trimmed.as_bytes();
+        // Reserve 1 byte for NUL; clamp body length to (out_max - 1).
+        let copy_len = std::cmp::min(bytes.len(), out_max.saturating_sub(1));
+        if copy_len > 0 {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr() as *const c_char, out_buf, copy_len);
         }
-        Err(_) => false,
+        // Always write NUL-terminator into the last byte of the buffer.
+        *out_buf.add(copy_len) = 0;
     }
+
+    // Only return success when we actually had room for "YES" in the output
+    // and the trimmed body matches. Otherwise callers see empty string and
+    // interpret that as a missing reply.
+    is_yes && out_max >= 4
 }
 
 fn urlencoding(s: &str) -> String {
