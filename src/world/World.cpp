@@ -298,13 +298,32 @@ World::World(MinecraftServer* server, const std::string& savePath, int64_t seed)
                 bool backupOk = false;
                 try {
                     std::filesystem::create_directories(backupDir);
+                    int copied = 0;
+                    int skipped = 0;
                     for (const auto& entry : std::filesystem::directory_iterator(worldPath_)) {
                         if (entry.path().filename() != "db" && entry.path() != backupDir) {
-                            std::filesystem::copy(entry.path(), std::filesystem::path(backupDir) / entry.path().filename(), 
-                                                  std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing);
+                            const auto& src = entry.path();
+                            const auto dst = std::filesystem::path(backupDir) / entry.path().filename();
+                            try {
+                                std::filesystem::copy(src, dst,
+                                    std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing);
+                                ++copied;
+                            } catch (const std::exception& ex) {
+                                // Log and continue: a single broken file (permission denied,
+                                // vanished between iteration and copy, etc.) should not abort
+                                // the entire backup. The migration code aborts later anyway if
+                                // backupOk ends up false; we err on the side of partial backups
+                                // being detected here.
+                                ++skipped;
+                                Logger::warning("Skipping {} during backup: {}", src.string(), ex.what());
+                            }
                         }
                     }
-                    Logger::info("Backup completed at: {}", backupDir);
+                    if (skipped > 0) {
+                        Logger::warning("Backup completed with {} skipped file(s) at: {}", skipped, backupDir);
+                    } else {
+                        Logger::info("Backup completed ({} files) at: {}", copied, backupDir);
+                    }
                     backupOk = true;
                 } catch (const std::exception& e) {
                     Logger::severe("Backup failed: {}. Aborting migration to prevent data loss.", e.what());
@@ -557,20 +576,38 @@ void World::saveLevelDat() {
 }
 
 World::~World() {
-    // saveWorld() is already called from MinecraftServer::run() — no double save.
-    // Stop saveThread_ explicitly BEFORE deleting db_, otherwise saveWorker
-    // could access db_ after it has been deleted.
+    // Shutdown order is important here:
+    //   1. Mark the save flag and wake the save thread, so any in-flight
+    //      writes that touch db_ are sequenced.
+    //   2. Stop the async chunk-build loop so it can't insert PreparedChunks
+    //      for keys whose Chunk has been erased in step 3.
+    //   3. Drain pending chunk saves via waitForPendingSaves() before join:
+    //      this guarantees no task is still holding a reference into db_
+    //      after we delete the DB handle.
+    //   4. Join both threads.
+    //   5. Close leveldb.
+    //
+    // Note: callers that intend a graceful "save then exit" must invoke
+    // saveWorld() BEFORE World starts tearing down. MinecraftServer::run()
+    // does this; console-driven "stop" also triggers saveWorld via the
+    // shutdown path so the same invariant holds.
     stopSaving_ = true;
     saveCondition_.notify_all();
     saveThread_.request_stop();
-    saveThread_.join(); // wait for all pending writes to finish
+    saveThread_.join();
 
     chunkBuildCondition_.notify_all();
     chunkBuildThread_.request_stop();
     chunkBuildThread_.join();
 
-    delete db_; // ALLOW_DELETE
-    db_ = nullptr;
+    if (db_) {
+        // Drain any save work that survived the thread exit (e.g. tasks that
+        // were pushed onto saveQueue_ but never picked up): do them inline
+        // here so we never drop a queued write.
+        waitForPendingSaves();
+        delete db_;
+        db_ = nullptr;
+    }
 }
 
 void World::tick() {
@@ -610,8 +647,12 @@ void World::tick() {
         spawnPassiveMobs();
     }
 
-    // Update tile entities — copy pointers first to avoid deadlock,
-    // since updateEntity() may call setTileEntity/removeTileEntity which lock tileEntitiesMutex_
+    // Update tile entities — copy pointers first to release the shared
+    // mutex before invoking updateEntity(). updateEntity for furnace/chest/sign
+    // currently only reads block metadata, which does not require the world
+    // mutex, so we already avoid nested locking. The snapshot also guards
+    // against future TileEntities that may insert/remove themselves during
+    // updateEntity (vanilla Java had this pattern in some TileEntities).
     std::vector<TileEntity*> toUpdate;
     {
         std::shared_lock lock(tileEntitiesMutex_);
@@ -668,10 +709,12 @@ void World::tick() {
             const int chunkZ = static_cast<int32_t>(key & 0xFFFFFFFFu);
             Chunk* chunk = getLoadedChunk(chunkX, chunkZ);
             if (!chunk) continue;
+            std::uniform_int_distribution<int> pickBX(0, 15);
+            std::uniform_int_distribution<int> pickBY(0, 127);
             for (int i = 0; i < 80; ++i) {
-                int bx = (chunkX << 4) + (std::rand() & 15);
-                int by = std::rand() & 127;
-                int bz = (chunkZ << 4) + (std::rand() & 15);
+                int bx = (chunkX << 4) + pickBX(rand);
+                int by = pickBY(rand);
+                int bz = (chunkZ << 4) + pickBX(rand);
                 int id = chunk->getBlockID(bx & 15, by, bz & 15);
                 if (id <= 0 || id >= 256) continue;
                 if (Block::tickOnLoad[id]) {
@@ -753,6 +796,15 @@ void World::tick() {
     // Remove dead entities only after unregistering them from EntityTracker.
     // Some entities can already be dead before they reach the main tick loop,
     // so relying on the per-entity path above is not sufficient.
+    //
+    // Concurrency: World::tick is only invoked from the main server loop, as
+    // is EntityTracker::tick (see MinecraftServer::serverTick). All callers
+    // of spawnEntityInWorld feed into pendingEntities_ via a mutex and are
+    // merged into entities_ at the top of this function; after that both
+    // entities_ and EntityTracker::entries_ are accessed only from this
+    // thread. If we ever move tick() off the main thread (e.g. a worker
+    // pool for entity updates) we MUST introduce a shared_mutex on
+    // EntityTracker::entries_ plus a stable snapshot of entities_ here.
     auto* entityTracker = (mcServer && mcServer->entityTracker) ? mcServer->entityTracker.get() : nullptr;
     entities_.erase(
         std::remove_if(entities_.begin(), entities_.end(),
@@ -1003,18 +1055,25 @@ void World::scheduleBlockUpdate(int x, int y, int z, int blockId, int delay) {
 void World::requestChunkAsync(int chunkX, int chunkZ, int priority) {
     const auto key = getChunkKey(chunkX, chunkZ);
 
-    {
-        std::shared_lock lock(chunksMutex_);
-        if (chunks_.contains(key)) {
-            return;
-        }
-    }
-
+    // Combine the existence check and the in-flight insert into a single
+    // critical section. Holding chunksMutex_ shared + chunkBuildMutex_ would
+    // be racy: between releasing chunksMutex_ and acquiring chunkBuildMutex_
+    // another thread can insert a queued entry, after which we'd queue a
+    // duplicate. Acquire chunkBuildMutex_ first (cheap), then briefly take
+    // chunksMutex_ shared to verify the chunk hasn't already been loaded.
     {
         std::lock_guard lock(chunkBuildMutex_);
         if (chunkBuildInFlight_.contains(key) || preparedChunks_.contains(key)) {
             return;
         }
+
+        {
+            std::shared_lock chunkLock(chunksMutex_);
+            if (chunks_.contains(key)) {
+                return;
+            }
+        }
+
         chunkBuildInFlight_.insert(key);
         chunkBuildQueue_.push(ChunkBuildRequest{
             .key = key,
@@ -1133,17 +1192,19 @@ bool World::commitPreparedChunk(uint64_t key) {
         return true;
     }
 
+    // Insert into chunks_ under a single exclusive lock that we keep held
+    // until we finish wiring the chunk's tile entities and pending entities.
+    // Earlier we acquired the shared lock twice (once to insert, once to
+    // read); a single exclusive critical section is shorter and avoids
+    // releasing the lock between insertion and lookup, which could let a
+    // reader observe a half-initialized chunk state.
+    Chunk* chunk = nullptr;
     {
-        std::shared_lock lock(chunksMutex_);
+        std::unique_lock lock(chunksMutex_);
         if (chunks_.contains(key)) {
             return true;
         }
         chunks_[key] = std::move(prepared.chunk);
-    }
-
-    Chunk* chunk = nullptr;
-    {
-        std::shared_lock lock(chunksMutex_);
         chunk = chunks_[key].get();
     }
     if (!chunk) {
@@ -1334,6 +1395,10 @@ bool World::chunkExists(int chunkX, int chunkZ) const {
 }
 
 void World::ensureChunkPopulated(int chunkX, int chunkZ) {
+    // Forwarder used by NetServerHandler::tick() before sending Packet51.
+    // It is implicitly safe even if the chunk hasn't been generated yet:
+    // populateChunkIfReady short-circuits when the chunk isn't in `chunks_`,
+    // and callers must tolerate a "not ready" return value.
     populateChunkIfReady(chunkX, chunkZ);
 }
 
@@ -1634,7 +1699,13 @@ void World::spawnHostileMobs() {
     }
 
     for (const uint64_t key : eligibleChunks) {
-        if ((std::rand() % 50) != 0) {
+        // Use the world-seeded mt19937 (World::rand) instead of std::rand so
+        // mob spawn positions are deterministic per world seed and reproduce
+        // across server restarts. Mixing std::rand (auto-seeded) here caused
+        // positions to differ each run, contradicting the "identical world
+        // generation" promise.
+        std::uniform_int_distribution<int> roll50(0, 49);
+        if (roll50(rand) != 0) {
             continue;
         }
 
@@ -1646,10 +1717,13 @@ void World::spawnHostileMobs() {
 
         const int baseX = chunkX * 16;
         const int baseZ = chunkZ * 16;
-        const int selectedMob = std::rand() % 4; // Java picks mob class once per chunk attempt.
-        const int originX = baseX + (std::rand() % 16);
-        const int originY = std::rand() % CHUNK_SIZE_Y;
-        const int originZ = baseZ + (std::rand() % 16);
+        std::uniform_int_distribution<int> pickMob(0, 3);
+        std::uniform_int_distribution<int> pickXZ(0, 15);
+        std::uniform_int_distribution<int> pickY(0, CHUNK_SIZE_Y - 1);
+        const int selectedMob = pickMob(rand); // Java picks mob class once per chunk attempt.
+        const int originX = baseX + pickXZ(rand);
+        const int originY = pickY(rand);
+        const int originZ = baseZ + pickXZ(rand);
 
         if (isBlockSolidNoChunkLoad(originX, originY, originZ)
             || getBlockMaterialNoChunkLoad(originX, originY, originZ) != &Material::air) {
@@ -1657,6 +1731,7 @@ void World::spawnHostileMobs() {
         }
 
         bool moveToNextChunk = false;
+        std::uniform_int_distribution<int> spread6(0, 5);
         for (int groupAttempt = 0; groupAttempt < 3 && !moveToNextChunk; ++groupAttempt) {
             int groupCount = 0;
             int x = originX;
@@ -1664,8 +1739,8 @@ void World::spawnHostileMobs() {
             int z = originZ;
 
             for (int packAttempt = 0; packAttempt < 4; ++packAttempt) {
-                x += (std::rand() % 6) - (std::rand() % 6);
-                z += (std::rand() % 6) - (std::rand() % 6);
+                x += spread6(rand) - spread6(rand);
+                z += spread6(rand) - spread6(rand);
 
                 if (!isBlockSolidNoChunkLoad(x, y - 1, z)
                     || isBlockSolidNoChunkLoad(x, y, z)
@@ -1699,7 +1774,8 @@ void World::spawnHostileMobs() {
                     continue;
                 }
 
-                mob->setPositionAndRotation(fx, fy, fz, static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX) * 360.0f, 0.0f);
+                std::uniform_real_distribution<float> pickYaw(0.0f, 360.0f);
+                mob->setPositionAndRotation(fx, fy, fz, pickYaw(rand), 0.0f);
                 if (!mob->getCanSpawnHere()) {
                     continue;
                 }
@@ -1710,7 +1786,8 @@ void World::spawnHostileMobs() {
                 ++groupCount;
 
                 // Alpha spider jockey chance.
-                if (dynamic_cast<EntitySpider*>(spawnedMob) != nullptr && (std::rand() % 100) == 0) {
+                std::uniform_int_distribution<int> jockRoll(0, 99);
+                if (dynamic_cast<EntitySpider*>(spawnedMob) != nullptr && jockRoll(rand) == 0) {
                     auto skeleton = std::make_unique<EntitySkeleton>(this);
                     skeleton->setPositionAndRotation(fx, fy, fz, spawnedMob->rotationYaw, 0.0f);
                     EntitySkeleton* skelPtr = skeleton.get();
@@ -1755,7 +1832,8 @@ void World::spawnPassiveMobs() {
     }
 
     for (const uint64_t key : eligibleChunks) {
-        if ((std::rand() % 50) != 0) {
+        std::uniform_int_distribution<int> roll50(0, 49);
+        if (roll50(rand) != 0) {
             continue;
         }
 
@@ -1767,10 +1845,13 @@ void World::spawnPassiveMobs() {
 
         const int baseX = chunkX * 16;
         const int baseZ = chunkZ * 16;
-        const int selectedAnimal = std::rand() % 4; // Java picks class once per chunk attempt.
-        const int originX = baseX + (std::rand() % 16);
-        const int originY = std::rand() % CHUNK_SIZE_Y;
-        const int originZ = baseZ + (std::rand() % 16);
+        std::uniform_int_distribution<int> pickAn(0, 3);
+        std::uniform_int_distribution<int> pickXZ(0, 15);
+        std::uniform_int_distribution<int> pickY(0, CHUNK_SIZE_Y - 1);
+        const int selectedAnimal = pickAn(rand); // Java picks class once per chunk attempt.
+        const int originX = baseX + pickXZ(rand);
+        const int originY = pickY(rand);
+        const int originZ = baseZ + pickXZ(rand);
 
         if (isBlockSolidNoChunkLoad(originX, originY, originZ)
             || getBlockMaterialNoChunkLoad(originX, originY, originZ) != &Material::air) {
@@ -1778,6 +1859,7 @@ void World::spawnPassiveMobs() {
         }
 
         bool moveToNextChunk = false;
+        std::uniform_int_distribution<int> spread6(0, 5);
         for (int groupAttempt = 0; groupAttempt < 3 && !moveToNextChunk; ++groupAttempt) {
             int groupCount = 0;
             int x = originX;
@@ -1785,8 +1867,8 @@ void World::spawnPassiveMobs() {
             int z = originZ;
 
             for (int packAttempt = 0; packAttempt < 4; ++packAttempt) {
-                x += (std::rand() % 6) - (std::rand() % 6);
-                z += (std::rand() % 6) - (std::rand() % 6);
+                x += spread6(rand) - spread6(rand);
+                z += spread6(rand) - spread6(rand);
 
                 if (!isBlockSolidNoChunkLoad(x, y - 1, z)
                     || isBlockSolidNoChunkLoad(x, y, z)
@@ -1820,7 +1902,8 @@ void World::spawnPassiveMobs() {
                     continue;
                 }
 
-                animal->setPositionAndRotation(fx, fy, fz, static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX) * 360.0f, 0.0f);
+                std::uniform_real_distribution<float> pickYaw(0.0f, 360.0f);
+                animal->setPositionAndRotation(fx, fy, fz, pickYaw(rand), 0.0f);
                 if (!animal->getCanSpawnHere()) {
                     continue;
                 }
