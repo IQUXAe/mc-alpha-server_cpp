@@ -380,15 +380,15 @@ void NetServerHandler::handleUseEntity(Packet7UseEntity& pkt) {
         }
 
         if (auto* boat = dynamic_cast<EntityBoat*>(target)) {
-            if (boat->riddenByEntity && boat->riddenByEntity != player_) {
-                if (dynamic_cast<EntityPlayerMP*>(boat->riddenByEntity)) {
+            if (Entity* boatRider = boat->getRiddenByEntity(); boatRider && boatRider != player_) {
+                if (dynamic_cast<EntityPlayerMP*>(boatRider)) {
                     return;
                 }
-                boat->riddenByEntity->mountEntity(nullptr);
+                boatRider->mountEntity(nullptr);
             }
-            player_->mountEntity(player_->ridingEntity == boat ? nullptr : boat);
-            if (player_->ridingEntity) {
-                player_->ridingEntity->updateRiderPosition();
+            player_->mountEntity(player_->getRidingEntity() == boat ? nullptr : boat);
+            if (Entity* myVehicle = player_->getRidingEntity()) {
+                myVehicle->updateRiderPosition();
             }
         }
         return;
@@ -691,7 +691,7 @@ void NetServerHandler::handleFlying(Packet10Flying& pkt) {
     float yaw = pkt.rotating ? pkt.yaw : player_->rotationYaw;
     float pitch = pkt.rotating ? pkt.pitch : player_->rotationPitch;
 
-    if (player_->ridingEntity) {
+    if (Entity* vehicle = player_->getRidingEntity()) {
         player_->rotationYaw = yaw;
         player_->rotationPitch = pitch;
         player_->onGround = pkt.onGround;
@@ -702,7 +702,7 @@ void NetServerHandler::handleFlying(Packet10Flying& pkt) {
             player_->motionX = pkt.x;
             player_->motionZ = pkt.z;
         }
-        player_->ridingEntity->updateRiderPosition();
+        vehicle->updateRiderPosition();
         lastX_ = player_->posX;
         lastY_ = player_->posY;
         lastZ_ = player_->posZ;
