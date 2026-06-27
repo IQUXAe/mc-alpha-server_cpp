@@ -1676,7 +1676,7 @@ void World::spawnHostileMobs() {
         return;
     }
 
-    std::unordered_set<uint64_t> eligibleChunks;
+    std::vector<uint64_t> eligibleChunks;
     constexpr int chunkRadius = 8;
     for (auto* player : mcServer->configManager->playerEntities) {
         if (!player) continue;
@@ -1684,7 +1684,7 @@ void World::spawnHostileMobs() {
         const int chunkZ = MathHelper::floor_double(player->posZ / 16.0);
         for (int dx = -chunkRadius; dx <= chunkRadius; ++dx) {
             for (int dz = -chunkRadius; dz <= chunkRadius; ++dz) {
-                eligibleChunks.insert(getChunkKey(chunkX + dx, chunkZ + dz));
+                eligibleChunks.push_back(getChunkKey(chunkX + dx, chunkZ + dz));
             }
         }
     }
@@ -1692,6 +1692,9 @@ void World::spawnHostileMobs() {
     if (eligibleChunks.empty()) {
         return;
     }
+
+    std::sort(eligibleChunks.begin(), eligibleChunks.end());
+    eligibleChunks.erase(std::unique(eligibleChunks.begin(), eligibleChunks.end()), eligibleChunks.end());
 
     const int maxCreatures = 100 * static_cast<int>(eligibleChunks.size()) / 256;
     if (countHostileMobs() > maxCreatures) {
@@ -1809,7 +1812,7 @@ void World::spawnPassiveMobs() {
         return;
     }
 
-    std::unordered_set<uint64_t> eligibleChunks;
+    std::vector<uint64_t> eligibleChunks;
     constexpr int chunkRadius = 8;
     for (auto* player : mcServer->configManager->playerEntities) {
         if (!player) continue;
@@ -1817,7 +1820,7 @@ void World::spawnPassiveMobs() {
         const int chunkZ = MathHelper::floor_double(player->posZ / 16.0);
         for (int dx = -chunkRadius; dx <= chunkRadius; ++dx) {
             for (int dz = -chunkRadius; dz <= chunkRadius; ++dz) {
-                eligibleChunks.insert(getChunkKey(chunkX + dx, chunkZ + dz));
+                eligibleChunks.push_back(getChunkKey(chunkX + dx, chunkZ + dz));
             }
         }
     }
@@ -1825,6 +1828,9 @@ void World::spawnPassiveMobs() {
     if (eligibleChunks.empty()) {
         return;
     }
+
+    std::sort(eligibleChunks.begin(), eligibleChunks.end());
+    eligibleChunks.erase(std::unique(eligibleChunks.begin(), eligibleChunks.end()), eligibleChunks.end());
 
     const int maxCreatures = 20 * static_cast<int>(eligibleChunks.size()) / 256;
     if (countPassiveAnimals() > maxCreatures) {
