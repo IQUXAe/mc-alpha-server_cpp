@@ -10,6 +10,7 @@
 #include "block/Block.h"
 #include "core/Item.h"
 #include "../rust/alpha_bridge/alpha_bridge.h"
+#include "core/RustBridge.h"
 
 
 #include <chrono>
@@ -97,7 +98,8 @@ bool MinecraftServer::initialize() {
         } catch (...) {
             // String seed - use Java's String.hashCode() algorithm
             // Java: s[0]*31^(n-1) + s[1]*31^(n-2) + ... + s[n-1]
-            int64_t hash = 0;
+            // Java uses 32-bit signed int overflow
+            int32_t hash = 0;
             for (char c : levelSeed) {
                 hash = hash * 31 + static_cast<int8_t>(c);
             }
@@ -444,7 +446,7 @@ void MinecraftServer::handleCommand(const std::string& cmd) {
                     spawnX,
                     spawnY,
                     spawnZ,
-                    static_cast<float>(std::rand() % 360),
+                    RustBridge::rngNextFloat() * 360.0f,
                     0.0f);
                 worldMngr->spawnEntityInWorld(std::move(entity));
                 ++spawned;

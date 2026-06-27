@@ -4,10 +4,10 @@
 #include "EntityMobs.h"
 #include "EntityAnimals.h"
 #include "../MinecraftServer.h"
+#include "../core/RustBridge.h"
 #include "../network/packets/AllPackets.h"
 #include "../world/World.h"
 
-#include <cstdlib>
 #include <cmath>
 #include <memory>
 
@@ -17,7 +17,7 @@ constexpr int kRespawnInvulnerabilityTicks = 60;
 constexpr int kSwingAnimationTicks = 7;
 
 double randomDropVelocity() {
-    return (static_cast<double>(std::rand()) / static_cast<double>(RAND_MAX) - 0.5) * 0.2;
+    return (RustBridge::rngNextDouble() - 0.5) * 0.2;
 }
 
 } // namespace
@@ -49,7 +49,7 @@ void EntityPlayerMP::onDeath() {
         auto entity = std::make_unique<EntityItem>(stack->itemID, stack->stackSize, stack->itemDamage);
         entity->setPosition(posX, posY + 0.5, posZ);
         entity->motionX = randomDropVelocity();
-        entity->motionY = 0.2 + static_cast<double>(std::rand()) / static_cast<double>(RAND_MAX) * 0.1;
+        entity->motionY = 0.2 + RustBridge::rngNextDouble() * 0.1;
         entity->motionZ = randomDropVelocity();
         entity->pickupDelay = 40;
         worldObj->spawnEntityInWorld(std::move(entity));
