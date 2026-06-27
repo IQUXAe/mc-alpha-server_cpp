@@ -42,20 +42,23 @@ public:
     int dimension = 0;
     int fireResistance = 1;
     bool suppressMoveFallState = false;
-    Entity* ridingEntity = nullptr;
-    Entity* riddenByEntity = nullptr;
+    int32_t ridingEntityId = -1;
+    int32_t riddenByEntityId = -1;
 
     World* worldObj = nullptr;
+
+    Entity* getRidingEntity()   const;
+    Entity* getRiddenByEntity() const;
 
     Entity() : entityId(nextEntityId.fetch_add(1)) {}
     virtual ~Entity() = default;
 
     virtual void tick() {
-        if (ridingEntity && ridingEntity->isDead) {
-            ridingEntity = nullptr;
+        if (Entity* r = getRidingEntity(); r && r->isDead) {
+            ridingEntityId = -1;
         }
-        if (riddenByEntity && riddenByEntity->isDead) {
-            riddenByEntity = nullptr;
+        if (Entity* r = getRiddenByEntity(); r && r->isDead) {
+            riddenByEntityId = -1;
         }
         prevPosX = posX;
         prevPosY = posY;

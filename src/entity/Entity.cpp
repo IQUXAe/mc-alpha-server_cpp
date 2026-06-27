@@ -8,6 +8,14 @@
 
 std::atomic<int32_t> Entity::nextEntityId{1};
 
+Entity* Entity::getRidingEntity() const {
+    return ridingEntityId >= 0 && worldObj ? worldObj->getEntityById(ridingEntityId) : nullptr;
+}
+
+Entity* Entity::getRiddenByEntity() const {
+    return riddenByEntityId >= 0 && worldObj ? worldObj->getEntityById(riddenByEntityId) : nullptr;
+}
+
 void Entity::moveEntity(double dx, double dy, double dz) {
     if (noClip) {
         setPosition(posX + dx, posY + dy, posZ + dz);
@@ -131,46 +139,48 @@ void Entity::applyEntityCollision(Entity* other) {
 }
 
 void Entity::updateRiderPosition() {
-    if (!riddenByEntity) {
-        return;
+    if (Entity* rider = getRiddenByEntity()) {
+        rider->setPosition(posX, posY + getMountedYOffset(), posZ);
     }
-    riddenByEntity->setPosition(posX, posY + getMountedYOffset(), posZ);
 }
 
 void Entity::updateRidden() {
-    if (!ridingEntity) {
-        return;
-    }
-    if (ridingEntity->isDead) {
+    Entity* vehicle = getRidingEntity();
+    if (!vehicle) return;
+    if (vehicle->isDead) {
         mountEntity(nullptr);
         return;
     }
     motionX = 0.0;
     motionY = 0.0;
     motionZ = 0.0;
-    ridingEntity->updateRiderPosition();
+    vehicle->updateRiderPosition();
 }
 
 void Entity::mountEntity(Entity* vehicle) {
-    if (ridingEntity == vehicle) {
-        if (vehicle && vehicle->riddenByEntity == this) {
-            vehicle->riddenByEntity = nullptr;
+    Entity* currentVehicle = getRidingEntity();
+
+    if (currentVehicle == vehicle) {
+        if (vehicle && vehicle->riddenByEntityId == entityId) {
+            vehicle->riddenByEntityId = -1;
         }
-        ridingEntity = nullptr;
+        ridingEntityId = -1;
         return;
     }
 
-    if (ridingEntity && ridingEntity->riddenByEntity == this) {
-        ridingEntity->riddenByEntity = nullptr;
+    if (currentVehicle && currentVehicle->riddenByEntityId == entityId) {
+        currentVehicle->riddenByEntityId = -1;
     }
 
-    if (vehicle && vehicle->riddenByEntity && vehicle->riddenByEntity != this) {
-        vehicle->riddenByEntity->ridingEntity = nullptr;
+    if (vehicle && vehicle->riddenByEntityId >= 0 && vehicle->riddenByEntityId != entityId) {
+        if (Entity* currentRider = vehicle->getRiddenByEntity()) {
+            currentRider->ridingEntityId = -1;
+        }
     }
 
-    ridingEntity = vehicle;
+    ridingEntityId = vehicle ? vehicle->entityId : -1;
     if (vehicle) {
-        vehicle->riddenByEntity = this;
+        vehicle->riddenByEntityId = entityId;
     }
 }
 

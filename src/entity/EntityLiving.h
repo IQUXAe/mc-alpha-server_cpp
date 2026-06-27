@@ -23,10 +23,10 @@ public:
     bool isSneaking = false;
 
     virtual void onDeath() {
-        if (riddenByEntity) {
-            riddenByEntity->mountEntity(nullptr);
+        if (Entity* rider = getRiddenByEntity()) {
+            rider->mountEntity(nullptr);
         }
-        if (ridingEntity) {
+        if (getRidingEntity()) {
             mountEntity(nullptr);
         }
         if (worldObj) {

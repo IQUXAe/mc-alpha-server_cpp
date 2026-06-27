@@ -86,8 +86,8 @@ public:
         damageTaken += amount * 10;
 
         if (damageTaken > 40) {
-            if (riddenByEntity) {
-                riddenByEntity->mountEntity(nullptr);
+            if (Entity* rider = getRiddenByEntity()) {
+                rider->mountEntity(nullptr);
             }
             dropMaterials();
             isDead = true;
@@ -109,16 +109,18 @@ public:
 
         // Alpha boats are player-driven; if a mob somehow became a rider
         // (edge case from custom server logic), eject it to avoid stuck boats.
-        if (riddenByEntity && !dynamic_cast<EntityPlayerMP*>(riddenByEntity)) {
-            riddenByEntity->mountEntity(nullptr);
+        if (Entity* rider = getRiddenByEntity()) {
+            if (!dynamic_cast<EntityPlayerMP*>(rider)) {
+                rider->mountEntity(nullptr);
+            }
         }
 
         const double waterFraction = computeWaterFraction();
         motionY += 0.04 * (waterFraction * 2.0 - 1.0);
 
-        if (riddenByEntity) {
-            motionX += riddenByEntity->motionX * 0.2;
-            motionZ += riddenByEntity->motionZ * 0.2;
+        if (Entity* rider = getRiddenByEntity()) {
+            motionX += rider->motionX * 0.2;
+            motionZ += rider->motionZ * 0.2;
         }
 
         motionX = std::clamp(motionX, -0.4, 0.4);
@@ -134,8 +136,8 @@ public:
 
         const double horizontalSpeed = std::sqrt(motionX * motionX + motionZ * motionZ);
         if (collidedHorizontally && horizontalSpeed > 0.15) {
-            if (riddenByEntity) {
-                riddenByEntity->mountEntity(nullptr);
+            if (Entity* rider = getRiddenByEntity()) {
+                rider->mountEntity(nullptr);
             }
             dropMaterials();
             isDead = true;
@@ -161,27 +163,28 @@ public:
         std::vector<Entity*> nearbyEntities;
         worldObj->getEntitiesWithinAABBExcludingEntity(this, boundingBox.expand(0.2, 0.0, 0.2), nearbyEntities);
         for (Entity* entity : nearbyEntities) {
-            if (entity && entity != riddenByEntity && dynamic_cast<EntityBoat*>(entity)) {
+            if (entity && entity != getRiddenByEntity() && dynamic_cast<EntityBoat*>(entity)) {
                 entity->applyEntityCollision(this);
             }
         }
 
-        if (riddenByEntity && riddenByEntity->isDead) {
-            riddenByEntity = nullptr;
+        if (Entity* rider = getRiddenByEntity(); rider && rider->isDead) {
+            riddenByEntityId = -1;
         }
 
         updateRiderPosition();
     }
 
     void updateRiderPosition() override {
-        if (!riddenByEntity) {
+        Entity* rider = getRiddenByEntity();
+        if (!rider) {
             return;
         }
 
         const double yawRadians = static_cast<double>(rotationYaw) * std::numbers::pi / 180.0;
         const double offsetX = std::cos(yawRadians) * 0.4;
         const double offsetZ = std::sin(yawRadians) * 0.4;
-        riddenByEntity->setPosition(posX + offsetX, posY + 0.35, posZ + offsetZ);
+        rider->setPosition(posX + offsetX, posY + 0.35, posZ + offsetZ);
     }
 
 private:
