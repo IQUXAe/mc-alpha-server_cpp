@@ -99,11 +99,11 @@ void ServerConfigurationManager::playerLoggedIn(EntityPlayerMP* player) {
 }
 
 void ServerConfigurationManager::playerLoggedOut(EntityPlayerMP* player) {
-    if (player && player->ridingEntity) {
+    if (player && player->getRidingEntity()) {
         player->mountEntity(nullptr);
     }
-    if (player && player->riddenByEntity) {
-        player->riddenByEntity->mountEntity(nullptr);
+    if (player && player->getRiddenByEntity()) {
+        player->getRiddenByEntity()->mountEntity(nullptr);
     }
 
     if (mcServer_->entityTracker) mcServer_->entityTracker->removeEntity(player);
