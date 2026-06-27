@@ -67,4 +67,9 @@ std::vector<uint8_t> zlibDecompress(const std::vector<uint8_t>& input);
 std::vector<uint8_t> encodeLevelDat(const LevelDatData& level);
 bool decodeLevelDat(const std::vector<uint8_t>& input, LevelDatData& outLevel);
 
+// Thread-safe RNG — backed by Rust's global Mutex<JavaRandom> seeded from /dev/urandom.
+int32_t rngNextInt(int32_t bound);
+float   rngNextFloat();
+double  rngNextDouble();
+
 } // namespace RustBridge

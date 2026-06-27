@@ -730,6 +730,11 @@ typedef struct AlphaBlockProperties {
 
 AlphaBlockProperties alpha_block_properties_get(uint32_t id);
 
+// Thread-safe RNG backed by Rust's global Mutex<JavaRandom> seeded from /dev/urandom.
+int32_t alpha_rng_next_int(int32_t bound);
+float   alpha_rng_next_float(void);
+double  alpha_rng_next_double(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,6 +1,56 @@
+use std::sync::{Mutex, OnceLock};
+
 pub const MULT: u64 = 0x5DEECE66D;
 pub const ADD: u64 = 0xB;
 pub const MASK: u64 = (1 << 48) - 1;
+
+fn global_rng() -> &'static Mutex<JavaRandom> {
+    static RNG: OnceLock<Mutex<JavaRandom>> = OnceLock::new();
+    RNG.get_or_init(|| {
+        let seed = match get_seed_from_os() {
+            Some(s) => s,
+            None => {
+                let pid = std::process::id() as i64;
+                let time = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos() as i64;
+                pid.wrapping_mul(0x9E3779B97F4A7C15u64 as i64).wrapping_add(time)
+            }
+        };
+        Mutex::new(JavaRandom::new(seed))
+    })
+}
+
+fn get_seed_from_os() -> Option<i64> {
+    let mut buf = [0u8; 8];
+    let ret = unsafe {
+        libc::getrandom(buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0)
+    };
+    if ret == buf.len() as isize {
+        Some(i64::from_ne_bytes(buf))
+    } else {
+        None
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn alpha_rng_next_int(bound: i32) -> i32 {
+    let mut rng = global_rng().lock().unwrap();
+    rng.next_int_bound(bound)
+}
+
+#[no_mangle]
+pub extern "C" fn alpha_rng_next_float() -> f32 {
+    let mut rng = global_rng().lock().unwrap();
+    rng.next_float()
+}
+
+#[no_mangle]
+pub extern "C" fn alpha_rng_next_double() -> f64 {
+    let mut rng = global_rng().lock().unwrap();
+    rng.next_double()
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct JavaRandom {

@@ -23,6 +23,18 @@ std::vector<uint8_t> fromRustBuffer(AlphaBuffer buffer) {
 
 namespace RustBridge {
 
+int32_t rngNextInt(int32_t bound) {
+    return ::alpha_rng_next_int(bound);
+}
+
+float rngNextFloat() {
+    return ::alpha_rng_next_float();
+}
+
+double rngNextDouble() {
+    return ::alpha_rng_next_double();
+}
+
 FfiItemStack itemStackCreate(int32_t itemID, int32_t stackSize, int32_t itemDamage) {
     FfiItemStack result;
     ::FfiItemStack raw = ::item_stack_create(itemID, stackSize, itemDamage);
