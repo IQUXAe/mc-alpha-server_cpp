@@ -10,10 +10,11 @@
 #include <memory>
 
 class MinecraftServer;
+class World;
 
 // Mirrors Java's EntityTrackerEntry
 struct TrackerEntry {
-    Entity* entity;
+    int32_t entityId;
     int trackingRange;   // max distance in blocks
     int updateRate;      // ticks between updates
     bool sendVelocity;
@@ -35,36 +36,27 @@ struct TrackerEntry {
     // Players currently receiving updates for this entity
     std::unordered_set<EntityPlayerMP*> trackingPlayers;
 
-    TrackerEntry(Entity* e, int range, int rate, bool vel)
-        : entity(e), trackingRange(range), updateRate(rate), sendVelocity(vel) {
-        lastFixedX = (int)(e->posX * 32.0);
-        lastFixedY = (int)(e->posY * 32.0);
-        lastFixedZ = (int)(e->posZ * 32.0);
-        lastYawByte   = static_cast<int8_t>(static_cast<int>(std::floor(e->rotationYaw   * 256.0f / 360.0f)) & 0xFF);
-        lastPitchByte = static_cast<int8_t>(static_cast<int>(std::floor(e->rotationPitch * 256.0f / 360.0f)) & 0xFF);
-        lastMountedEntityId = e->ridingEntity ? e->ridingEntity->entityId : -1;
-        if (auto* living = dynamic_cast<EntityLiving*>(e)) {
-            lastHealth = living->health;
-        }
-    }
+    TrackerEntry(Entity* e, int range, int rate, bool vel);
+
+    Entity* resolve(World* world) const { return world ? world->getEntityById(entityId) : nullptr; }
 
     // Build the initial spawn packet for this entity
-    std::unique_ptr<Packet> makeSpawnPacket() const;
+    std::unique_ptr<Packet> makeSpawnPacket(const Entity* entity) const;
 
     // Send this entry's spawn packet + initial state to one player
-    void sendSpawnTo(EntityPlayerMP* player);
+    void sendSpawnTo(EntityPlayerMP* player, const Entity* entity);
 
     // Broadcast a packet to all tracking players
     void broadcast(std::unique_ptr<Packet> pkt) const;
 
     // Broadcast to all tracking players AND to the entity itself if it's a player
-    void broadcastIncludingSelf(std::unique_ptr<Packet> pkt) const;
+    void broadcastIncludingSelf(const Entity* entity, std::unique_ptr<Packet> pkt) const;
 
     // Check/update which players should track this entry
-    void updateTracking(const std::vector<EntityPlayerMP*>& allPlayers);
+    void updateTracking(const Entity* entity, const std::vector<EntityPlayerMP*>& allPlayers);
 
     // Send movement/look/held-item updates to all tracking players
-    void sendUpdates();
+    void sendUpdates(const Entity* entity);
 };
 
 class EntityTracker {
