@@ -3,11 +3,12 @@
 #include "../entity/Entity.h"
 #include "../entity/EntityArrow.h"
 #include "../entity/EntityPlayerMP.h"
-#include "../network/packets/AllPackets.h"
+#include "../network/RustPackets.h"
 
 #include <unordered_map>
 #include <unordered_set>
 #include <memory>
+#include <optional>
 
 class MinecraftServer;
 class World;
@@ -41,16 +42,16 @@ struct TrackerEntry {
     Entity* resolve(World* world) const { return world ? world->getEntityById(entityId) : nullptr; }
 
     // Build the initial spawn packet for this entity
-    std::unique_ptr<Packet> makeSpawnPacket(const Entity* entity) const;
+    std::optional<RustPacket> makeSpawnPacket(const Entity* entity) const;
 
     // Send this entry's spawn packet + initial state to one player
     void sendSpawnTo(EntityPlayerMP* player, const Entity* entity);
 
     // Broadcast a packet to all tracking players
-    void broadcast(std::unique_ptr<Packet> pkt) const;
+    void broadcast(const RustPacket& pkt) const;
 
     // Broadcast to all tracking players AND to the entity itself if it's a player
-    void broadcastIncludingSelf(const Entity* entity, std::unique_ptr<Packet> pkt) const;
+    void broadcastIncludingSelf(const Entity* entity, const RustPacket& pkt) const;
 
     // Check/update which players should track this entry
     void updateTracking(const Entity* entity, const std::vector<EntityPlayerMP*>& allPlayers);
@@ -71,10 +72,10 @@ public:
     Entity* getEntityById(int entityId) const;
 
     // Broadcast a packet from an entity to all players tracking it
-    void broadcastPacket(Entity* entity, std::unique_ptr<Packet> pkt);
+    void broadcastPacket(Entity* entity, const RustPacket& pkt);
 
     // Broadcast including the entity's own connection (e.g. arm animation)
-    void broadcastPacketIncludingSelf(Entity* entity, std::unique_ptr<Packet> pkt);
+    void broadcastPacketIncludingSelf(Entity* entity, const RustPacket& pkt);
 
     // When a new player logs in, send them all currently tracked entities
     void sendAllToPlayer(EntityPlayerMP* player);

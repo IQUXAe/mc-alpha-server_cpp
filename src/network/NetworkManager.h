@@ -1,10 +1,10 @@
 #pragma once
 
-#include "Packet.h"
 #include "NetHandler.h"
-#include "packets/AllPackets.h"
+#include "RustPackets.h"
 #include "../core/Logger.h"
-#include "../../rust/alpha_bridge/alpha_bridge.h"
+#include "../core/ByteBuffer.h"
+#include "alpha_bridge.h"
 
 #include <string>
 #include <memory>
@@ -28,17 +28,14 @@ public:
 
     void setNetHandler(NetHandler* handler) { netHandler_ = handler; }
 
-    void addToSendQueue(std::unique_ptr<Packet> pkt) {
-        if (!rustManager_ || !pkt) return;
-        RustPacket ffiPacket{};
-        if (pkt->toFfi(ffiPacket)) {
-            rust_network_manager_send_packet(rustManager_, &ffiPacket, pkt->isChunkDataPacket);
-            return;
-        }
-        ByteBuffer buf;
-        buf.writeUByte(static_cast<uint8_t>(pkt->getPacketId()));
-        pkt->writePacketData(buf);
-        rust_network_manager_send(rustManager_, buf.data.data(), buf.data.size(), pkt->isChunkDataPacket);
+    void sendPacket(const RustPacket& pkt, bool isChunkData = false) {
+        if (!rustManager_) return;
+        rust_network_manager_send_packet(rustManager_, &pkt, isChunkData);
+    }
+
+    void sendRaw(const uint8_t* data, size_t len, bool isChunkData = false) {
+        if (!rustManager_) return;
+        rust_network_manager_send(rustManager_, data, len, isChunkData);
     }
 
     void processReadPackets() {
@@ -49,24 +46,28 @@ public:
             return;
         }
 
-        std::vector<std::unique_ptr<Packet>> toProcess;
-
-        // Poll incoming packets from Rust
         bool polledAny = false;
         RustPacket* ffiPacket = nullptr;
+        size_t packetCount = 0;
+        constexpr size_t kMaxPacketsPerTick = 50;
+
         while ((ffiPacket = rust_network_manager_poll_parsed(rustManager_)) != nullptr) {
             polledAny = true;
-            try {
-                auto pkt = Packet::createFromFfi(ffiPacket);
-                if (!pkt) {
-                    throw std::runtime_error("Bad packet id " + std::to_string(ffiPacket->packet_id));
-                }
-                toProcess.push_back(std::move(pkt));
-            } catch (const std::exception& e) {
-                Logger::warning("Failed to parse packet ID {}: {}", ffiPacket->packet_id, e.what());
-                shutdown("Packet parsing error: " + std::string(e.what()));
+            if (!netHandler_) {
                 rust_network_manager_free_packet(ffiPacket);
-                break;
+                shutdown("Missing network handler");
+                return;
+            }
+            if (++packetCount > kMaxPacketsPerTick) {
+                rust_network_manager_free_packet(ffiPacket);
+                shutdown("Rate limit exceeded");
+                return;
+            }
+            try {
+                netHandler_->processPacket(*ffiPacket);
+            } catch (const std::exception& e) {
+                Logger::warning("Failed to process packet: {} - {}", ffiPacket->packet_id, e.what());
+                netHandler_->handleErrorMessage("Packet processing error: " + std::string(e.what()));
             }
             rust_network_manager_free_packet(ffiPacket);
         }
@@ -79,27 +80,6 @@ public:
             }
         } else {
             timeSinceLastRead_ = 0;
-        }
-
-        constexpr size_t kMaxPacketsPerTick = 50;
-        if (toProcess.size() > kMaxPacketsPerTick) {
-            shutdown("Rate limit exceeded");
-            return;
-        }
-
-        for (auto& pkt : toProcess) {
-            if (!netHandler_) {
-                shutdown("Missing network handler");
-                return;
-            }
-            try {
-                pkt->processPacket(*netHandler_);
-            } catch (const std::exception& e) {
-                Logger::warning("Failed to process packet: {} - {}", pkt->getPacketId(), e.what());
-                if (netHandler_) {
-                    netHandler_->handleErrorMessage("Packet processing error: " + std::string(e.what()));
-                }
-            }
         }
 
         if (rust_network_manager_is_terminating(rustManager_)) {

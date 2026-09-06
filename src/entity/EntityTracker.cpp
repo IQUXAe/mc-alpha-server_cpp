@@ -38,7 +38,7 @@ TrackerEntry::TrackerEntry(Entity* e, int range, int rate, bool vel)
     }
 }
 
-std::unique_ptr<Packet> TrackerEntry::makeSpawnPacket(const Entity* entity) const {
+std::optional<RustPacket> TrackerEntry::makeSpawnPacket(const Entity* entity) const {
     int fx = (int)(entity->posX * 32.0);
     int fy = (int)(entity->posY * 32.0);
     int fz = (int)(entity->posZ * 32.0);
@@ -46,90 +46,65 @@ std::unique_ptr<Packet> TrackerEntry::makeSpawnPacket(const Entity* entity) cons
     int pitch = static_cast<int>(std::floor(entity->rotationPitch * 256.0f / 360.0f)) & 0xFF;
 
     if (auto* p = dynamic_cast<const EntityPlayerMP*>(entity)) {
-        auto pkt = std::make_unique<Packet20NamedEntitySpawn>();
-        pkt->entityId    = entity->entityId;
-        pkt->name        = p->username;
-        pkt->x           = fx;
-        pkt->y           = fy;
-        pkt->z           = fz;
-        pkt->rotation    = (int8_t)(yaw   & 0xFF);
-        pkt->pitch       = (int8_t)(pitch & 0xFF);
-        pkt->currentItem = (int16_t)lastHeldItemId;
-        return pkt;
+        return RustPackets::namedEntitySpawn(
+            entity->entityId,
+            p->username,
+            fx, fy, fz,
+            static_cast<int8_t>(yaw & 0xFF),
+            static_cast<int8_t>(pitch & 0xFF),
+            lastHeldItemId
+        );
     }
 
     if (auto* item = dynamic_cast<const EntityItem*>(entity)) {
-        auto pkt = std::make_unique<Packet21PickupSpawn>();
-        pkt->entityId = entity->entityId;
-        pkt->itemId   = (int16_t)item->itemID;
-        pkt->count    = (int8_t)item->count;
-        pkt->x        = fx;
-        pkt->y        = fy;
-        pkt->z        = fz;
-        pkt->rotation = 0;
-        pkt->pitch    = 0;
-        pkt->roll     = 0;
-        return pkt;
+        return RustPackets::pickupSpawn(
+            entity->entityId,
+            item->itemID,
+            item->count,
+            fx, fy, fz,
+            0, 0, 0
+        );
     }
 
     if (auto* arrow = dynamic_cast<const EntityArrow*>(entity)) {
-        auto pkt = std::make_unique<Packet23VehicleSpawn>();
-        pkt->entityId = arrow->entityId;
-        pkt->type = 60;
-        pkt->x = fx;
-        pkt->y = fy;
-        pkt->z = fz;
-        return pkt;
+        return RustPackets::vehicleSpawn(arrow->entityId, 60, fx, fy, fz);
     }
 
     if (auto* boat = dynamic_cast<const EntityBoat*>(entity)) {
-        auto pkt = std::make_unique<Packet23VehicleSpawn>();
-        pkt->entityId = boat->entityId;
-        pkt->type = 1;
-        pkt->x = fx;
-        pkt->y = fy;
-        pkt->z = fz;
-        return pkt;
+        return RustPackets::vehicleSpawn(boat->entityId, 1, fx, fy, fz);
     }
 
     if (auto* living = dynamic_cast<const EntityLiving*>(entity)) {
-        auto pkt = std::make_unique<Packet24MobSpawn>();
-        pkt->entityId = entity->entityId;
-        pkt->type     = static_cast<int8_t>(living->getMobTypeId());
-        pkt->x        = fx;
-        pkt->y        = fy;
-        pkt->z        = fz;
-        pkt->yaw      = static_cast<int8_t>(yaw & 0xFF);
-        pkt->pitch    = static_cast<int8_t>(pitch & 0xFF);
-        return pkt;
+        return RustPackets::mobSpawn(
+            entity->entityId,
+            static_cast<uint8_t>(living->getMobTypeId()),
+            fx, fy, fz,
+            static_cast<int8_t>(yaw & 0xFF),
+            static_cast<int8_t>(pitch & 0xFF)
+        );
     }
 
     // Fallback: generic pig spawn so the client stays stable for unknown entities.
-    auto pkt = std::make_unique<Packet24MobSpawn>();
-    pkt->entityId = entity->entityId;
-    pkt->type     = 90; // pig
-    pkt->x        = fx;
-    pkt->y        = fy;
-    pkt->z        = fz;
-    pkt->yaw      = (int8_t)(yaw   & 0xFF);
-    pkt->pitch    = (int8_t)(pitch & 0xFF);
-    return pkt;
+    return RustPackets::mobSpawn(
+        entity->entityId,
+        90, // pig
+        fx, fy, fz,
+        static_cast<int8_t>(yaw & 0xFF),
+        static_cast<int8_t>(pitch & 0xFF)
+    );
 }
 
 void TrackerEntry::sendSpawnTo(EntityPlayerMP* player, const Entity* entity) {
     if (!player || !player->netHandler) return;
     auto spawnPkt = makeSpawnPacket(entity);
-    if (spawnPkt) player->netHandler->sendPacket(std::move(spawnPkt));
+    if (spawnPkt) player->netHandler->sendPacket(*spawnPkt);
     if (Entity* vehicle = entity->getRidingEntity()) {
-        auto attachPkt = std::make_unique<Packet39AttachEntity>();
-        attachPkt->entityId = entity->entityId;
-        attachPkt->vehicleEntityId = vehicle->entityId;
-        player->netHandler->sendPacket(std::move(attachPkt));
+        player->netHandler->sendPacket(RustPackets::attachEntity(entity->entityId, vehicle->entityId));
     }
 
     // Send velocity for items/projectiles
     if (sendVelocity && (entity->motionX != 0 || entity->motionY != 0 || entity->motionZ != 0)) {
-        player->netHandler->sendPacket(std::make_unique<Packet28EntityVelocity>(
+        player->netHandler->sendPacket(RustPackets::velocity(
             entity->entityId, entity->motionX, entity->motionY, entity->motionZ));
     }
 
@@ -137,10 +112,10 @@ void TrackerEntry::sendSpawnTo(EntityPlayerMP* player, const Entity* entity) {
     if (auto* living = dynamic_cast<const EntityLiving*>(entity)) {
         if (living->isSneaking)
             player->netHandler->sendPacket(
-                std::make_unique<Packet18ArmAnimation>(entity->entityId, 104));
+                RustPackets::armAnimation(entity->entityId, 104));
         if (living->fire > 0)
             player->netHandler->sendPacket(
-                std::make_unique<Packet18ArmAnimation>(entity->entityId, 102));
+                RustPackets::armAnimation(entity->entityId, 102));
         lastHealth = living->health;
     }
 
@@ -153,16 +128,16 @@ void TrackerEntry::sendSpawnTo(EntityPlayerMP* player, const Entity* entity) {
     lastPitchByte = static_cast<int8_t>(static_cast<int>(std::floor(entity->rotationPitch * 256.0f / 360.0f)) & 0xFF);
 }
 
-void TrackerEntry::broadcast(std::unique_ptr<Packet> pkt) const {
+void TrackerEntry::broadcast(const RustPacket& pkt) const {
     for (auto* p : trackingPlayers) {
-        if (p && p->netHandler) p->netHandler->sendPacket(pkt->clone());
+        if (p && p->netHandler) p->netHandler->sendPacket(pkt);
     }
 }
 
-void TrackerEntry::broadcastIncludingSelf(const Entity* entity, std::unique_ptr<Packet> pkt) const {
-    broadcast(pkt->clone());
+void TrackerEntry::broadcastIncludingSelf(const Entity* entity, const RustPacket& pkt) const {
+    broadcast(pkt);
     if (auto* p = dynamic_cast<const EntityPlayerMP*>(entity)) {
-        if (p->netHandler) p->netHandler->sendPacket(std::move(pkt));
+        if (p->netHandler) p->netHandler->sendPacket(pkt);
     }
 }
 
@@ -184,7 +159,7 @@ void TrackerEntry::updateTracking(const Entity* entity, const std::vector<Entity
         } else if ((!inRange || !chunkLoaded) && alreadyTracking) {
             trackingPlayers.erase(player);
             player->netHandler->sendPacket(
-                std::make_unique<Packet29DestroyEntity>(entity->entityId));
+                RustPackets::destroyEntity(entity->entityId));
         }
     }
 }
@@ -216,31 +191,31 @@ void TrackerEntry::sendUpdates(const Entity* entity) {
             lastMotionX = entity->motionX;
             lastMotionY = entity->motionY;
             lastMotionZ = entity->motionZ;
-            broadcast(std::make_unique<Packet28EntityVelocity>(
+            broadcast(RustPackets::velocity(
                 entity->entityId, entity->motionX, entity->motionY, entity->motionZ));
         }
     }
 
-    std::unique_ptr<Packet> movePkt;
+    RustPacket movePkt;
     if (dx >= -128 && dx < 128 && dy >= -128 && dy < 128 && dz >= -128 && dz < 128) {
         if (moved && turned)
-            movePkt = std::make_unique<Packet33RelEntityMoveLook>(
+            movePkt = RustPackets::relEntityMoveLook(
                 entity->entityId, (int8_t)dx, (int8_t)dy, (int8_t)dz,
                 (int8_t)yaw, (int8_t)pitch);
         else if (moved)
-            movePkt = std::make_unique<Packet31RelEntityMove>(
+            movePkt = RustPackets::relEntityMove(
                 entity->entityId, (int8_t)dx, (int8_t)dy, (int8_t)dz);
         else if (turned)
-            movePkt = std::make_unique<Packet32EntityLook>(
+            movePkt = RustPackets::entityLook(
                 entity->entityId, (int8_t)yaw, (int8_t)pitch);
         else
-            movePkt = std::make_unique<Packet30Entity>(entity->entityId);
+            movePkt = RustPackets::entity(entity->entityId);
     } else {
-        movePkt = std::make_unique<Packet34EntityTeleport>(
+        movePkt = RustPackets::entityTeleport(
             entity->entityId, fx, fy, fz, (int8_t)yaw, (int8_t)pitch);
     }
 
-    broadcast(std::move(movePkt));
+    broadcast(movePkt);
 
     if (moved || turned) {
         lastFixedX = fx; lastFixedY = fy; lastFixedZ = fz;
@@ -252,10 +227,7 @@ void TrackerEntry::sendUpdates(const Entity* entity) {
         int heldId = mp->netHandler ? mp->netHandler->getHeldItemId() : 0;
         if (heldId != lastHeldItemId) {
             lastHeldItemId = heldId;
-            auto pkt = std::make_unique<Packet16BlockItemSwitch>();
-            pkt->entityId = entity->entityId;
-            pkt->itemId   = (int16_t)heldId;
-            broadcast(std::move(pkt));
+            broadcast(RustPackets::blockItemSwitch(entity->entityId, heldId));
         }
     }
 
@@ -263,20 +235,20 @@ void TrackerEntry::sendUpdates(const Entity* entity) {
     if (auto* living = dynamic_cast<const EntityLiving*>(entity)) {
         if (lastHealth >= 0 && living->health != lastHealth) {
             if (living->health < lastHealth && living->health > 0) {
-                broadcast(std::make_unique<Packet38EntityStatus>(entity->entityId, 2));
+                broadcast(RustPackets::entityStatus(entity->entityId, 2));
             }
             lastHealth = living->health;
         }
 
         if (living->isSneaking != lastSneaking) {
             lastSneaking = living->isSneaking;
-            broadcastIncludingSelf(entity, std::make_unique<Packet18ArmAnimation>(
+            broadcastIncludingSelf(entity, RustPackets::armAnimation(
                 entity->entityId, lastSneaking ? 104 : 105));
         }
         const bool isBurning = living->fire > 0;
         if (isBurning != lastBurning) {
             lastBurning = isBurning;
-            broadcastIncludingSelf(entity, std::make_unique<Packet18ArmAnimation>(
+            broadcastIncludingSelf(entity, RustPackets::armAnimation(
                 entity->entityId, isBurning ? 102 : 103));
         }
     }
@@ -284,10 +256,7 @@ void TrackerEntry::sendUpdates(const Entity* entity) {
     const int32_t mountedEntityId = entity->getRidingEntity() ? entity->getRidingEntity()->entityId : -1;
     if (mountedEntityId != lastMountedEntityId) {
         lastMountedEntityId = mountedEntityId;
-        auto mountPkt = std::make_unique<Packet39AttachEntity>();
-        mountPkt->entityId = entity->entityId;
-        mountPkt->vehicleEntityId = mountedEntityId;
-        broadcastIncludingSelf(entity, std::move(mountPkt));
+        broadcastIncludingSelf(entity, RustPackets::attachEntity(entity->entityId, mountedEntityId));
     }
 }
 
@@ -370,7 +339,7 @@ void EntityTracker::removeEntity(Entity* entity) {
     World* world = mcServer_->worldMngr.get();
     if (Entity* tracked = it->second->resolve(world)) {
         it->second->broadcast(
-            std::make_unique<Packet29DestroyEntity>(tracked->entityId));
+            RustPackets::destroyEntity(tracked->entityId));
     }
 
     entries_.erase(it);
@@ -403,14 +372,14 @@ void EntityTracker::tick() {
     }
 }
 
-void EntityTracker::broadcastPacket(Entity* entity, std::unique_ptr<Packet> pkt) {
+void EntityTracker::broadcastPacket(Entity* entity, const RustPacket& pkt) {
     auto it = entries_.find(entity->entityId);
-    if (it != entries_.end()) it->second->broadcast(std::move(pkt));
+    if (it != entries_.end()) it->second->broadcast(pkt);
 }
 
-void EntityTracker::broadcastPacketIncludingSelf(Entity* entity, std::unique_ptr<Packet> pkt) {
+void EntityTracker::broadcastPacketIncludingSelf(Entity* entity, const RustPacket& pkt) {
     auto it = entries_.find(entity->entityId);
-    if (it != entries_.end()) it->second->broadcastIncludingSelf(entity, std::move(pkt));
+    if (it != entries_.end()) it->second->broadcastIncludingSelf(entity, pkt);
 }
 
 void EntityTracker::sendAllToPlayer(EntityPlayerMP* player) {

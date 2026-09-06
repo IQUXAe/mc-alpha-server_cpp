@@ -13,6 +13,7 @@
 #include "../core/Item.h"
 #include "../core/Material.h"
 #include "../core/NBT.h"
+#include "../core/ByteBuffer.h"
 #include "../core/Logger.h"
 #include "../core/RustBridge.h"
 
@@ -123,7 +124,7 @@ void broadcastVelocityIfNeeded(MinecraftServer* server, Entity& entity,
     }
 
     server->entityTracker->broadcastPacketIncludingSelf(
-        &entity, std::make_unique<Packet28EntityVelocity>(
+        &entity, RustPackets::velocity(
             entity.entityId, entity.motionX, entity.motionY, entity.motionZ));
 }
 
@@ -153,7 +154,7 @@ void NetServerHandler::tick() {
     netManager_->processReadPackets();
     if (disconnected) return;
     if (++tickCounter_ % 20 == 0) {
-        sendPacket(std::make_unique<Packet0KeepAlive>());
+        sendPacket(RustPackets::keepAlive());
     }
 
     int cx = static_cast<int>(std::floor(player_->posX)) >> 4;
@@ -180,7 +181,7 @@ void NetServerHandler::tick() {
         for (int64_t key : toRemove) {
             int sx = static_cast<int>(static_cast<uint32_t>(key & 0xFFFFFFFF));
             int sz = static_cast<int>(static_cast<uint32_t>((key >> 32) & 0xFFFFFFFF));
-            sendPacket(std::make_unique<Packet50PreChunk>(sx, sz, false));
+            sendPacket(RustPackets::preChunk(sx, sz, false));
             if (sentChunks_.erase(key) > 0 && mcServer_ && mcServer_->configManager) {
                 mcServer_->configManager->removePlayerFromChunk(player_, key);
             }
@@ -267,8 +268,8 @@ void NetServerHandler::tick() {
         auto* chunk = mcServer_->worldMngr->getChunk(px, pz, false);
 
         if (chunk && chunk->isTerrainPopulated) {
-            sendPacket(std::make_unique<Packet50PreChunk>(px, pz, true));
-            sendPacket(std::make_unique<Packet51MapChunk>(px * 16, 0, pz * 16, 16, 128, 16, chunk->getChunkData()));
+            sendPacket(RustPackets::preChunk(px, pz, true));
+            sendMapChunk(px * 16, 0, pz * 16, 16, 128, 16, chunk->getChunkData());
 
             // Debug: verify container blocks exist at TileEntity positions
             for (const auto& [key, te] : chunk->getTileEntities()) {
@@ -305,7 +306,7 @@ bool NetServerHandler::shouldBypassReadTimeout() const {
     return player_ && (player_->isDead || player_->health <= 0);
 }
 
-void NetServerHandler::handleRespawn(Packet9Respawn&) {
+void NetServerHandler::handleRespawn() {
     if (player_->health > 0) {
         return;
     }
@@ -337,24 +338,24 @@ void NetServerHandler::handleRespawn(Packet9Respawn&) {
         tracker->addEntity(player_);
     }
 
-    sendPacket(std::make_unique<Packet9Respawn>());
-    sendPacket(std::make_unique<Packet8UpdateHealth>(player_->health));
+    sendPacket(RustPackets::respawn());
+    sendPacket(RustPackets::updateHealth(player_->health));
     teleport(spawnX, spawnY, spawnZ, 0.0f, 0.0f);
     sendInventory();
 }
 
-void NetServerHandler::handleUseEntity(Packet7UseEntity& pkt) {
+void NetServerHandler::handleUseEntity(const RustPacket7UseEntity& pkt) {
     if (!mcServer_ || !mcServer_->entityTracker) {
         return;
     }
 
-    if (pkt.playerEntityId != player_->entityId) {
+    if (pkt.player_entity_id != player_->entityId) {
         return;
     }
 
     syncHeldItemSelection();
 
-    Entity* target = mcServer_->entityTracker->getEntityById(pkt.targetEntityId);
+    Entity* target = mcServer_->entityTracker->getEntityById(pkt.target_entity_id);
     if (!target || target == player_ || target->isDead || !target->canBeCollidedWith()) {
         return;
     }
@@ -373,7 +374,7 @@ void NetServerHandler::handleUseEntity(Packet7UseEntity& pkt) {
         return;
     }
 
-    if (!pkt.isLeftClick) {
+    if (!pkt.is_left_click) {
         // Try entity interaction first (e.g. cow milking, pig saddling)
         if (target->interact(player_)) {
             return;
@@ -434,17 +435,31 @@ void NetServerHandler::kick(const std::string& reason) {
     if (disconnected) return;
     Logger::info("Disconnecting {}: {}", player_->username, reason);
     player_->savedHeldItemId = heldItemId_;
-    sendPacket(std::make_unique<Packet255KickDisconnect>(reason));
+    sendPacket(RustPackets::kickDisconnect(reason));
     netManager_->serverShutdown();
     disconnected = true;
 
     mcServer_->configManager->broadcastPacket(
-        std::make_unique<Packet3Chat>("\u00a7e" + player_->username + " left the game."));
+        RustPackets::chat("\u00a7e" + player_->username + " left the game."));
     mcServer_->configManager->playerLoggedOut(player_);
 }
 
-void NetServerHandler::sendPacket(std::unique_ptr<Packet> pkt) {
-    netManager_->addToSendQueue(std::move(pkt));
+void NetServerHandler::sendPacket(const RustPacket& pkt) {
+    netManager_->sendPacket(pkt);
+}
+
+void NetServerHandler::sendMapChunk(int x, int y, int z, int sizeX, int sizeY, int sizeZ, const std::vector<uint8_t>& compressedData) {
+    ByteBuffer buf;
+    buf.writeUByte(51);
+    buf.writeInt(x);
+    buf.writeShort(static_cast<int16_t>(y));
+    buf.writeInt(z);
+    buf.writeByte(static_cast<int8_t>(sizeX - 1));
+    buf.writeByte(static_cast<int8_t>(sizeY - 1));
+    buf.writeByte(static_cast<int8_t>(sizeZ - 1));
+    buf.writeInt(static_cast<int32_t>(compressedData.size()));
+    buf.writeBytes(compressedData);
+    netManager_->sendRaw(buf.data.data(), buf.data.size(), true);
 }
 
 void NetServerHandler::sendTileEntityPacket(TileEntity* te) {
@@ -457,13 +472,7 @@ void NetServerHandler::sendTileEntityPacket(TileEntity* te) {
     std::vector<uint8_t> compressed = RustBridge::gzipCompress(rawBuf.data);
     if (compressed.empty()) return;
 
-    auto pkt59 = std::make_unique<Packet59ComplexEntity>();
-    pkt59->x = te->xCoord;
-    pkt59->y = static_cast<int16_t>(te->yCoord);
-    pkt59->z = te->zCoord;
-    pkt59->nbtData = std::move(compressed);
-
-    sendPacket(std::move(pkt59));
+    sendPacket(RustPackets::complexEntity(te->xCoord, static_cast<int16_t>(te->yCoord), te->zCoord, compressed.data(), compressed.size()));
 }
 
 void NetServerHandler::teleport(double x, double y, double z, float yaw, float pitch) {
@@ -474,34 +483,29 @@ void NetServerHandler::teleport(double x, double y, double z, float yaw, float p
     player_->setPosition(x, y, z);
     player_->rotationYaw = yaw;
     player_->rotationPitch = pitch;
-    sendPacket(std::make_unique<Packet13PlayerLookMove>(x, y + 1.6200000047683716, y, z, yaw, pitch, false));
+    sendPacket(RustPackets::playerLookMove(x, y + 1.6200000047683716, y, z, yaw, pitch, false));
 }
 
 void NetServerHandler::sendInventory() {
-    // Exactly mirrors Java's NetServerHandler.func_40_d()
-    // Sends Packet5 for each inventory section: type -1=main, -2=crafting, -3=armor
-    
-    auto buildPacket = [](int type, const std::vector<std::unique_ptr<ItemStack>>& stacks) {
-        auto pkt = std::make_unique<Packet5PlayerInventory>();
-        pkt->type = type;
-        pkt->slots.resize(stacks.size());
+    auto sendSection = [this](int type, const std::vector<std::unique_ptr<ItemStack>>& stacks) {
+        std::vector<FfiSlotData> ffiSlots(stacks.size());
         for (size_t i = 0; i < stacks.size(); i++) {
             if (stacks[i] && stacks[i]->stackSize > 0) {
-                pkt->slots[i].itemId = static_cast<int16_t>(stacks[i]->itemID);
-                pkt->slots[i].count = static_cast<int8_t>(stacks[i]->stackSize);
-                pkt->slots[i].damage = static_cast<int16_t>(stacks[i]->itemDamage);
+                ffiSlots[i].item_id = static_cast<int16_t>(stacks[i]->itemID);
+                ffiSlots[i].count = static_cast<int8_t>(stacks[i]->stackSize);
+                ffiSlots[i].damage = static_cast<int16_t>(stacks[i]->itemDamage);
             } else {
-                pkt->slots[i].itemId = -1;
-                pkt->slots[i].count = 0;
-                pkt->slots[i].damage = 0;
+                ffiSlots[i].item_id = -1;
+                ffiSlots[i].count = 0;
+                ffiSlots[i].damage = 0;
             }
         }
-        return pkt;
+        sendPacket(RustPackets::playerInventory(type, static_cast<int16_t>(ffiSlots.size()), ffiSlots.data()));
     };
     
-    sendPacket(buildPacket(-1, player_->inventory.mainInventory));
-    sendPacket(buildPacket(-2, player_->inventory.craftingInventory));
-    sendPacket(buildPacket(-3, player_->inventory.armorInventory));
+    sendSection(-1, player_->inventory.mainInventory);
+    sendSection(-2, player_->inventory.craftingInventory);
+    sendSection(-3, player_->inventory.armorInventory);
 }
 
 int NetServerHandler::getHeldItemId() const {
@@ -595,8 +599,8 @@ void NetServerHandler::sendChunks() {
 
 // ======= Packet handlers =======
 
-void NetServerHandler::handleChat(Packet3Chat& pkt) {
-    std::string msg = pkt.message;
+void NetServerHandler::handleChat(const RustPacket3Chat& pkt) {
+    std::string msg = pkt.message ? pkt.message : "";
     if (msg.size() > 100) msg = msg.substr(0, 100);
 
     if (msg.starts_with("/")) {
@@ -605,7 +609,7 @@ void NetServerHandler::handleChat(Packet3Chat& pkt) {
     } else {
         std::string fullMsg = "<" + player_->username + "> " + msg;
         Logger::info("[CHAT] {}", fullMsg);
-        mcServer_->configManager->broadcastPacket(std::make_unique<Packet3Chat>(fullMsg));
+        mcServer_->configManager->broadcastPacket(RustPackets::chat(fullMsg));
     }
 }
 
@@ -634,12 +638,12 @@ void NetServerHandler::handleCommand(const std::string& msg) {
 
     try {
         if (!isOp && (cmd == "give" || cmd == "tp")) {
-            sendPacket(std::make_unique<Packet3Chat>("You do not have permission to use this command"));
+            sendPacket(RustPackets::chat("You do not have permission to use this command"));
             return;
         }
         if (cmd == "give") {
             if (args.size() < 2) {
-                sendPacket(std::make_unique<Packet3Chat>("Usage: /give <itemId> [count] [damage]"));
+                sendPacket(RustPackets::chat("Usage: /give <itemId> [count] [damage]"));
                 return;
             }
             int itemId = toInt(args[1]);
@@ -649,11 +653,11 @@ void NetServerHandler::handleCommand(const std::string& msg) {
 
         // Validate: blocks must exist in blocksList, items must be < 32000
         if (itemId <= 0 || itemId >= 32000) {
-            sendPacket(std::make_unique<Packet3Chat>("Invalid item id"));
+            sendPacket(RustPackets::chat("Invalid item id"));
             return;
         }
         if (itemId < 256 && Block::blocksList[itemId] == nullptr) {
-            sendPacket(std::make_unique<Packet3Chat>("Unknown block id: " + std::to_string(itemId)));
+            sendPacket(RustPackets::chat("Unknown block id: " + std::to_string(itemId)));
             return;
         }
 
@@ -661,26 +665,26 @@ void NetServerHandler::handleCommand(const std::string& msg) {
         entity->setPosition(player_->posX, player_->posY, player_->posZ);
         entity->motionX = entity->motionY = entity->motionZ = 0.0;
         mcServer_->worldMngr->spawnEntityInWorld(std::move(entity));
-        sendPacket(std::make_unique<Packet3Chat>("Gave " + std::to_string(count) + "x " + std::to_string(itemId)));
+        sendPacket(RustPackets::chat("Gave " + std::to_string(count) + "x " + std::to_string(itemId)));
     } else if (cmd == "tp") {
         if (args.size() < 4) {
-            sendPacket(std::make_unique<Packet3Chat>("Usage: /tp <x> <y> <z>"));
+            sendPacket(RustPackets::chat("Usage: /tp <x> <y> <z>"));
             return;
         }
         double tx = toDouble(args[1]);
         double ty = toDouble(args[2]);
         double tz = toDouble(args[3]);
         teleport(tx, ty, tz, player_->rotationYaw, player_->rotationPitch);
-        sendPacket(std::make_unique<Packet3Chat>("Teleported to " + std::to_string(tx) + ", " + std::to_string(ty) + ", " + std::to_string(tz)));
+        sendPacket(RustPackets::chat("Teleported to " + std::to_string(tx) + ", " + std::to_string(ty) + ", " + std::to_string(tz)));
     } else {
-        sendPacket(std::make_unique<Packet3Chat>("Unknown command: " + cmd));
+        sendPacket(RustPackets::chat("Unknown command: " + cmd));
     }
     } catch (const std::exception&) {
-        sendPacket(std::make_unique<Packet3Chat>("Invalid command arguments"));
+        sendPacket(RustPackets::chat("Invalid command arguments"));
     }
 }
 
-void NetServerHandler::handleFlying(Packet10Flying& pkt) {
+void NetServerHandler::processMovement(double x, double y, double stance, double z, float yaw, float pitch, bool moving, bool rotating, bool onGround) {
     if (!hasMoved_) {
         lastX_ = player_->posX;
         lastY_ = player_->posY;
@@ -688,19 +692,19 @@ void NetServerHandler::handleFlying(Packet10Flying& pkt) {
         hasMoved_ = true;
     }
 
-    float yaw = pkt.rotating ? pkt.yaw : player_->rotationYaw;
-    float pitch = pkt.rotating ? pkt.pitch : player_->rotationPitch;
+    float finalYaw = rotating ? yaw : player_->rotationYaw;
+    float finalPitch = rotating ? pitch : player_->rotationPitch;
 
     if (Entity* vehicle = player_->getRidingEntity()) {
-        player_->rotationYaw = yaw;
-        player_->rotationPitch = pitch;
-        player_->onGround = pkt.onGround;
+        player_->rotationYaw = finalYaw;
+        player_->rotationPitch = finalPitch;
+        player_->onGround = onGround;
         player_->motionX = 0.0;
         player_->motionY = 0.0;
         player_->motionZ = 0.0;
-        if (pkt.moving && pkt.y == -999.0 && pkt.stance == -999.0) {
-            player_->motionX = pkt.x;
-            player_->motionZ = pkt.z;
+        if (moving && y == -999.0 && stance == -999.0) {
+            player_->motionX = x;
+            player_->motionZ = z;
         }
         vehicle->updateRiderPosition();
         lastX_ = player_->posX;
@@ -709,23 +713,23 @@ void NetServerHandler::handleFlying(Packet10Flying& pkt) {
         return;
     }
 
-    if (pkt.moving && pkt.y == -999.0 && pkt.stance == -999.0) {
-        pkt.moving = false;
+    if (moving && y == -999.0 && stance == -999.0) {
+        moving = false;
     }
 
     const double baseX = lastX_;
     const double baseY = lastY_;
     const double baseZ = lastZ_;
 
-    player_->setPositionAndRotation(baseX, baseY, baseZ, yaw, pitch);
+    player_->setPositionAndRotation(baseX, baseY, baseZ, finalYaw, finalPitch);
     player_->motionX = 0.0;
     player_->motionY = 0.0;
     player_->motionZ = 0.0;
 
-    if (!pkt.moving) {
-        player_->rotationYaw = yaw;
-        player_->rotationPitch = pitch;
-        player_->onGround = pkt.onGround;
+    if (!moving) {
+        player_->rotationYaw = finalYaw;
+        player_->rotationPitch = finalPitch;
+        player_->onGround = onGround;
         lastX_ = player_->posX;
         lastY_ = player_->posY;
         lastZ_ = player_->posZ;
@@ -736,11 +740,11 @@ void NetServerHandler::handleFlying(Packet10Flying& pkt) {
         .from_x = baseX,
         .from_y = baseY,
         .from_z = baseZ,
-        .to_x = pkt.x,
-        .to_y = pkt.y,
-        .to_z = pkt.z,
-        .stance = pkt.stance,
-        .on_ground = pkt.onGround,
+        .to_x = x,
+        .to_y = y,
+        .to_z = z,
+        .stance = stance,
+        .on_ground = onGround,
         .is_in_water = (player_->isInWater != 0),
         .fall_distance = player_->fallDistance,
     };
@@ -759,19 +763,19 @@ void NetServerHandler::handleFlying(Packet10Flying& pkt) {
         return;
     }
     if (checkRes.status == 4) {
-        teleport(baseX, baseY, baseZ, yaw, pitch);
+        teleport(baseX, baseY, baseZ, finalYaw, finalPitch);
         return;
     }
 
-    const double moveX = pkt.x - baseX;
-    const double moveY = pkt.y - baseY;
-    const double moveZ = pkt.z - baseZ;
+    const double moveX = x - baseX;
+    const double moveY = y - baseY;
+    const double moveZ = z - baseZ;
 
     player_->suppressMoveFallState = true;
     player_->moveEntity(moveX, moveY, moveZ);
     player_->suppressMoveFallState = false;
-    player_->rotationYaw = yaw;
-    player_->rotationPitch = pitch;
+    player_->rotationYaw = finalYaw;
+    player_->rotationPitch = finalPitch;
 
     const RustBridge::FfiMovementInput fallCheck{
         .from_x = baseX,
@@ -780,8 +784,8 @@ void NetServerHandler::handleFlying(Packet10Flying& pkt) {
         .to_x = player_->posX,
         .to_y = player_->posY,
         .to_z = player_->posZ,
-        .stance = pkt.stance,
-        .on_ground = pkt.onGround,
+        .stance = stance,
+        .on_ground = onGround,
         .is_in_water = (player_->isInWater != 0),
         .fall_distance = player_->fallDistance,
     };
@@ -791,41 +795,29 @@ void NetServerHandler::handleFlying(Packet10Flying& pkt) {
     }
     player_->fallDistance = fallRes.new_fall_distance;
 
-    player_->onGround = pkt.onGround;
+    player_->onGround = onGround;
     lastX_ = player_->posX;
     lastY_ = player_->posY;
     lastZ_ = player_->posZ;
 }
 
-void NetServerHandler::handlePlayerPosition(Packet11PlayerPosition& pkt) {
-    Packet10Flying flying;
-    flying.x = pkt.x; flying.y = pkt.y; flying.z = pkt.z;
-    flying.stance = pkt.stance;
-    flying.onGround = pkt.onGround;
-    flying.moving = true;
-    handleFlying(flying);
+void NetServerHandler::handleFlying(const RustPacket10Flying& pkt) {
+    processMovement(0.0, 0.0, 0.0, 0.0, 0.0f, 0.0f, false, false, pkt.on_ground);
 }
 
-void NetServerHandler::handlePlayerLook(Packet12PlayerLook& pkt) {
-    Packet10Flying flying;
-    flying.yaw = pkt.yaw; flying.pitch = pkt.pitch;
-    flying.onGround = pkt.onGround;
-    flying.rotating = true;
-    handleFlying(flying);
+void NetServerHandler::handlePlayerPosition(const RustPacket11PlayerPosition& pkt) {
+    processMovement(pkt.x, pkt.y, pkt.stance, pkt.z, 0.0f, 0.0f, true, false, pkt.on_ground);
 }
 
-void NetServerHandler::handlePlayerLookMove(Packet13PlayerLookMove& pkt) {
-    Packet10Flying flying;
-    flying.x = pkt.x; flying.y = pkt.y; flying.z = pkt.z;
-    flying.stance = pkt.stance;
-    flying.yaw = pkt.yaw; flying.pitch = pkt.pitch;
-    flying.onGround = pkt.onGround;
-    flying.moving = true;
-    flying.rotating = true;
-    handleFlying(flying);
+void NetServerHandler::handlePlayerLook(const RustPacket12PlayerLook& pkt) {
+    processMovement(0.0, 0.0, 0.0, 0.0, pkt.yaw, pkt.pitch, false, true, pkt.on_ground);
 }
 
-void NetServerHandler::handleBlockDig(Packet14BlockDig& pkt) {
+void NetServerHandler::handlePlayerLookMove(const RustPacket13PlayerLookMove& pkt) {
+    processMovement(pkt.x, pkt.y, pkt.stance, pkt.z, pkt.yaw, pkt.pitch, true, true, pkt.on_ground);
+}
+
+void NetServerHandler::handleBlockDig(const RustPacket14BlockDig& pkt) {
     syncHeldItemSelection();
 
     bool isOp = mcServer_->configManager->isOp(player_->username);
@@ -885,14 +877,14 @@ void NetServerHandler::handleBlockDig(Packet14BlockDig& pkt) {
         double dY = player_->posY - (y + 0.5);
         double dZ = player_->posZ - (z + 0.5);
         if (dX * dX + dY * dY + dZ * dZ < 256.0) {
-            sendPacket(std::make_unique<Packet53BlockChange>(x, y, z, 
+            sendPacket(RustPackets::blockChange(x, y, z, 
                 mcServer_->worldMngr->getBlockId(x, y, z), 
                 mcServer_->worldMngr->getBlockMetadata(x, y, z)));
         }
     }
 }
 
-void NetServerHandler::handlePlace(Packet15Place& pkt) {
+void NetServerHandler::handlePlace(const RustPacket15Place& pkt) {
     bool isOp = mcServer_->configManager->isOp(player_->username);
     
     if (pkt.direction == -1) {
@@ -923,13 +915,13 @@ void NetServerHandler::handlePlace(Packet15Place& pkt) {
             }
 
             ItemStack* itemstack = nullptr;
-            if (pkt.itemId >= 0) {
+            if (pkt.item_id >= 0) {
                 ItemStack* held = player_->inventory.getCurrentItem();
-                if (held && held->itemID == pkt.itemId && held->stackSize > 0) {
+                if (held && held->itemID == pkt.item_id && held->stackSize > 0) {
                     itemstack = held;
                 } else {
                     for (auto& s : player_->inventory.mainInventory) {
-                        if (s && s->itemID == pkt.itemId && s->stackSize > 0) { itemstack = s.get(); break; }
+                        if (s && s->itemID == pkt.item_id && s->stackSize > 0) { itemstack = s.get(); break; }
                     }
                 }
             }
@@ -990,7 +982,7 @@ void NetServerHandler::handlePlace(Packet15Place& pkt) {
         }
         
         // Always send block update at clicked position (rollback for client if rejected)
-        sendPacket(std::make_unique<Packet53BlockChange>(x, y, z,
+        sendPacket(RustPackets::blockChange(x, y, z,
             mcServer_->worldMngr->getBlockId(x, y, z),
             mcServer_->worldMngr->getBlockMetadata(x, y, z)));
         
@@ -1003,19 +995,19 @@ void NetServerHandler::handlePlace(Packet15Place& pkt) {
         else if (direction == 4) --nx;
         else if (direction == 5) ++nx;
         
-        sendPacket(std::make_unique<Packet53BlockChange>(nx, ny, nz,
+        sendPacket(RustPackets::blockChange(nx, ny, nz,
             mcServer_->worldMngr->getBlockId(nx, ny, nz),
             mcServer_->worldMngr->getBlockMetadata(nx, ny, nz)));
     }
 }
 
-void NetServerHandler::handleBlockItemSwitch(Packet16BlockItemSwitch& pkt) {
+void NetServerHandler::handleBlockItemSwitch(const RustPacket16BlockItemSwitch& pkt) {
     int lastSlot = static_cast<int>(player_->inventory.mainInventory.size()) - 1;
     player_->inventory.mainInventory[lastSlot].reset();
 
-    heldItemId_ = pkt.itemId;
+    heldItemId_ = pkt.item_id;
 
-    if (pkt.itemId == 0) {
+    if (pkt.item_id == 0) {
         heldItem_.reset();
         player_->inventory.currentItem = 0;
         return;
@@ -1024,7 +1016,7 @@ void NetServerHandler::handleBlockItemSwitch(Packet16BlockItemSwitch& pkt) {
     // Point currentItem at the real slot
     for (int i = 0; i < lastSlot; ++i) {
         auto* s = player_->inventory.mainInventory[i].get();
-        if (s && s->itemID == pkt.itemId) {
+        if (s && s->itemID == pkt.item_id) {
             heldItem_.reset();
             player_->inventory.currentItem = i;
             return;
@@ -1032,14 +1024,14 @@ void NetServerHandler::handleBlockItemSwitch(Packet16BlockItemSwitch& pkt) {
     }
 
     // Not in inventory yet — keep a fallback copy so attacking/mining still uses the selected item.
-    if (!heldItem_ || heldItem_->itemID != pkt.itemId) {
-        heldItem_ = std::make_unique<ItemStack>(pkt.itemId, 1, 0);
+    if (!heldItem_ || heldItem_->itemID != pkt.item_id) {
+        heldItem_ = std::make_unique<ItemStack>(pkt.item_id, 1, 0);
     }
     player_->inventory.currentItem = lastSlot;
     player_->inventory.mainInventory[lastSlot].reset(); // non-owning, managed by heldItem_
 }
 
-void NetServerHandler::handleArmAnimation(Packet18ArmAnimation& pkt) {
+void NetServerHandler::handleArmAnimation(const RustPacket18ArmAnimation& pkt) {
     if (pkt.animate == 1) {
         player_->swingItem();
     } else if (pkt.animate == 104) {
@@ -1049,17 +1041,18 @@ void NetServerHandler::handleArmAnimation(Packet18ArmAnimation& pkt) {
     }
 }
 
-void NetServerHandler::handleKickDisconnect(Packet255KickDisconnect& pkt) {
+void NetServerHandler::handleKickDisconnect(const RustPacket255KickDisconnect& /*pkt*/) {
     netManager_->shutdown("Quitting");
 }
 
-void NetServerHandler::handlePlayerInventory(Packet5PlayerInventory& pkt) {
+void NetServerHandler::handlePlayerInventory(const RustPacket5PlayerInventory& pkt) {
     auto applySlots = [](std::vector<std::unique_ptr<ItemStack>>& inv,
-                         const std::vector<Packet5PlayerInventory::SlotData>& slots, int skipSlot) {
-        size_t count = std::min(slots.size(), inv.size());
+                         const FfiSlotData* slots, int16_t itemCount, int skipSlot) {
+        if (!slots || itemCount <= 0) return;
+        size_t count = std::min(static_cast<size_t>(itemCount), inv.size());
         for (size_t i = 0; i < count; i++) {
             if ((int)i == skipSlot) continue;
-            int16_t id = slots[i].itemId;
+            int16_t id = slots[i].item_id;
             if (id >= 0 && id < 32000) {
                 Item* item = Item::itemsList[id];
                 int16_t dmg = (item && item->maxDamage > 0) ? slots[i].damage : 0;
@@ -1072,7 +1065,7 @@ void NetServerHandler::handlePlayerInventory(Packet5PlayerInventory& pkt) {
 
     if (pkt.type == -1) {
         int lastSlot = static_cast<int>(player_->inventory.mainInventory.size()) - 1;
-        applySlots(player_->inventory.mainInventory, pkt.slots, lastSlot);
+        applySlots(player_->inventory.mainInventory, pkt.slots, pkt.item_count, lastSlot);
         if (heldItemId_ > 0) {
             bool found = false;
             for (int i = 0; i < lastSlot; ++i) {
@@ -1091,13 +1084,13 @@ void NetServerHandler::handlePlayerInventory(Packet5PlayerInventory& pkt) {
             }
         }
     } else if (pkt.type == -2)
-        applySlots(player_->inventory.craftingInventory, pkt.slots, -1);
+        applySlots(player_->inventory.craftingInventory, pkt.slots, pkt.item_count, -1);
     else if (pkt.type == -3)
-        applySlots(player_->inventory.armorInventory, pkt.slots, -1);
+        applySlots(player_->inventory.armorInventory, pkt.slots, pkt.item_count, -1);
 }
 
-void NetServerHandler::handlePickupSpawn(Packet21PickupSpawn& pkt) {
-    if (pkt.itemId <= 0 || pkt.count <= 0) return;
+void NetServerHandler::handlePickupSpawn(const RustPacket21PickupSpawn& pkt) {
+    if (pkt.item_id <= 0 || pkt.count <= 0) return;
 
     // The client sends Packet21 when dropping an item.
     // If the GUI is closed, Q drops the currently held item.
@@ -1105,7 +1098,7 @@ void NetServerHandler::handlePickupSpawn(Packet21PickupSpawn& pkt) {
     ItemStack* held = player_->inventory.getCurrentItem();
     bool consumed = false;
 
-    if (held && held->itemID == pkt.itemId && held->stackSize > 0) {
+    if (held && held->itemID == pkt.item_id && held->stackSize > 0) {
         held->stackSize -= pkt.count;
         if (held->stackSize <= 0) {
             player_->inventory.mainInventory[player_->inventory.currentItem].reset();
@@ -1115,7 +1108,7 @@ void NetServerHandler::handlePickupSpawn(Packet21PickupSpawn& pkt) {
 
     if (!consumed) {
         for (auto& s : player_->inventory.mainInventory) {
-            if (s && s->itemID == pkt.itemId && s->stackSize > 0) {
+            if (s && s->itemID == pkt.item_id && s->stackSize > 0) {
                 s->stackSize -= pkt.count;
                 if (s->stackSize <= 0) {
                     s.reset();
@@ -1129,7 +1122,7 @@ void NetServerHandler::handlePickupSpawn(Packet21PickupSpawn& pkt) {
     double wy = pkt.y / 32.0;
     double wz = pkt.z / 32.0;
 
-    auto item = std::make_unique<EntityItem>(pkt.itemId, pkt.count, 0);
+    auto item = std::make_unique<EntityItem>(pkt.item_id, pkt.count, 0);
     item->setPosition(wx, wy, wz);
     item->motionX    = pkt.rotation / 128.0;
     item->motionY    = pkt.pitch    / 128.0;
@@ -1138,12 +1131,12 @@ void NetServerHandler::handlePickupSpawn(Packet21PickupSpawn& pkt) {
     mcServer_->worldMngr->spawnEntityInWorld(std::move(item));
 }
 
-void NetServerHandler::handleComplexEntity(Packet59ComplexEntity& pkt) {
-    if (pkt.nbtData.empty() || pkt.nbtData.size() > 65536) {
+void NetServerHandler::handleComplexEntity(const RustPacket59ComplexEntity& pkt) {
+    if (pkt.nbt_len == 0 || pkt.nbt_len > 65536 || !pkt.nbt_data) {
         return;
     }
 
-    std::vector<uint8_t> decompressed = RustBridge::gzipDecompress(pkt.nbtData);
+    std::vector<uint8_t> decompressed = RustBridge::gzipDecompress(pkt.nbt_data, pkt.nbt_len);
     if (decompressed.size() > 524288) return; // 512 KiB limit on decompressed NBT
     if (decompressed.empty()) {
         return;
@@ -1186,6 +1179,6 @@ void NetServerHandler::handleErrorMessage(const std::string& reason) {
     player_->savedHeldItemId = heldItemId_;
     disconnected = true;
     mcServer_->configManager->broadcastPacket(
-        std::make_unique<Packet3Chat>("\u00a7e" + player_->username + " left the game."));
+        RustPackets::chat("\u00a7e" + player_->username + " left the game."));
     mcServer_->configManager->playerLoggedOut(player_);
 }

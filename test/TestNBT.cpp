@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include "core/NBT.h"
-#include "network/Packet.h"
+#include "core/ByteBuffer.h"
 
 TEST(NBTTest, ByteRoundTrip) {
     NBTByte tag(42);

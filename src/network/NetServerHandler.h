@@ -2,7 +2,7 @@
 
 #include "NetHandler.h"
 #include "NetworkManager.h"
-#include "packets/AllPackets.h"
+#include "RustPackets.h"
 #include "../forward.h"
 
 #include <memory>
@@ -22,7 +22,8 @@ public:
 
     void tick();
     void kick(const std::string& reason);
-    void sendPacket(std::unique_ptr<Packet> pkt);
+    void sendPacket(const RustPacket& pkt);
+    void sendMapChunk(int x, int y, int z, int sizeX, int sizeY, int sizeZ, const std::vector<uint8_t>& compressedData);
     void sendTileEntityPacket(TileEntity* te);  // Send Packet59 for a TileEntity
     void teleport(double x, double y, double z, float yaw, float pitch);
     void sendChunks();
@@ -36,25 +37,26 @@ public:
     std::unordered_set<int64_t> sentChunks_;
 
     // NetHandler overrides
-    void handleChat(Packet3Chat& pkt) override;
-    void handleRespawn(Packet9Respawn& pkt) override;
-    void handleUseEntity(Packet7UseEntity& pkt) override;
-    void handleFlying(Packet10Flying& pkt) override;
-    void handlePlayerPosition(Packet11PlayerPosition& pkt) override;
-    void handlePlayerLook(Packet12PlayerLook& pkt) override;
-    void handlePlayerLookMove(Packet13PlayerLookMove& pkt) override;
-    void handleBlockDig(Packet14BlockDig& pkt) override;
-    void handlePlace(Packet15Place& pkt) override;
-    void handleBlockItemSwitch(Packet16BlockItemSwitch& pkt) override;
-    void handleArmAnimation(Packet18ArmAnimation& pkt) override;
-    void handleKickDisconnect(Packet255KickDisconnect& pkt) override;
-    void handlePlayerInventory(Packet5PlayerInventory& pkt) override;
-    void handlePickupSpawn(Packet21PickupSpawn& pkt) override;
-    void handleComplexEntity(Packet59ComplexEntity& pkt) override;
+    void handleChat(const RustPacket3Chat& pkt) override;
+    void handleRespawn() override;
+    void handleUseEntity(const RustPacket7UseEntity& pkt) override;
+    void handleFlying(const RustPacket10Flying& pkt) override;
+    void handlePlayerPosition(const RustPacket11PlayerPosition& pkt) override;
+    void handlePlayerLook(const RustPacket12PlayerLook& pkt) override;
+    void handlePlayerLookMove(const RustPacket13PlayerLookMove& pkt) override;
+    void handleBlockDig(const RustPacket14BlockDig& pkt) override;
+    void handlePlace(const RustPacket15Place& pkt) override;
+    void handleBlockItemSwitch(const RustPacket16BlockItemSwitch& pkt) override;
+    void handleArmAnimation(const RustPacket18ArmAnimation& pkt) override;
+    void handleKickDisconnect(const RustPacket255KickDisconnect& pkt) override;
+    void handlePlayerInventory(const RustPacket5PlayerInventory& pkt) override;
+    void handlePickupSpawn(const RustPacket21PickupSpawn& pkt) override;
+    void handleComplexEntity(const RustPacket59ComplexEntity& pkt) override;
     void handleErrorMessage(const std::string& reason) override;
     bool shouldBypassReadTimeout() const override;
 
 private:
+    void processMovement(double x, double y, double stance, double z, float yaw, float pitch, bool moving, bool rotating, bool onGround);
     void handleCommand(const std::string& msg);
     void syncHeldItemSelection();
     ItemStack* getSelectedItemStack();

@@ -5,7 +5,7 @@
 #include "EntityAnimals.h"
 #include "../MinecraftServer.h"
 #include "../core/RustBridge.h"
-#include "../network/packets/AllPackets.h"
+#include "../network/RustPackets.h"
 #include "../world/World.h"
 
 #include <cmath>
@@ -111,7 +111,7 @@ void EntityPlayerMP::attackEntityFrom(Entity* attacker, int amount) {
     inventory.damageArmor(combatResult.scaled_damage);
     EntityPlayer::attackEntityFrom(attacker, combatResult.damage_after_armor);
     if (netHandler) {
-        netHandler->sendPacket(std::make_unique<Packet8UpdateHealth>(health));
+        netHandler->sendPacket(RustPackets::updateHealth(health));
     }
 }
 
@@ -173,7 +173,7 @@ void EntityPlayerMP::swingItem() {
 
     if (mcServer && mcServer->entityTracker) {
         mcServer->entityTracker->broadcastPacket(
-            this, std::make_unique<Packet18ArmAnimation>(entityId, 1));
+            this, RustPackets::armAnimation(entityId, 1));
     }
 }
 

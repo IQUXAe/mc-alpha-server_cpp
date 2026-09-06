@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "network/Packet.h"
+#include "core/ByteBuffer.h"
 
 TEST(ByteBufferTest, WriteReadByte) {
     ByteBuffer buf;

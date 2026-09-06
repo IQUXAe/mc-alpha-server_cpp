@@ -668,6 +668,14 @@ typedef struct RustPacket22Collect {
     int32_t collector_entity_id;
 } RustPacket22Collect;
 
+typedef struct RustPacket23VehicleSpawn {
+    int32_t entity_id;
+    int8_t vehicle_type;
+    int32_t x;
+    int32_t y;
+    int32_t z;
+} RustPacket23VehicleSpawn;
+
 typedef struct RustPacket24MobSpawn {
     int32_t entity_id;
     uint8_t mob_type;
@@ -774,6 +782,7 @@ typedef union RustPacketUnion {
     RustPacket20NamedEntitySpawn named_entity_spawn;
     RustPacket21PickupSpawn pickup_spawn;
     RustPacket22Collect collect;
+    RustPacket23VehicleSpawn vehicle_spawn;
     RustPacket24MobSpawn mob_spawn;
     RustPacket28EntityVelocity entity_velocity;
     RustPacket29DestroyEntity destroy_entity;

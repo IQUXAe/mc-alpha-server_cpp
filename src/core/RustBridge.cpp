@@ -76,6 +76,10 @@ std::vector<uint8_t> gzipDecompress(const std::vector<uint8_t>& input) {
     return fromRustBuffer(alpha_gzip_decompress(input.data(), input.size()));
 }
 
+std::vector<uint8_t> gzipDecompress(const uint8_t* input, size_t len) {
+    return fromRustBuffer(alpha_gzip_decompress(input, len));
+}
+
 std::vector<uint8_t> zlibCompress(const std::vector<uint8_t>& input, int level) {
     return fromRustBuffer(alpha_zlib_compress(input.data(), input.size(), level));
 }

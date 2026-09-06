@@ -3,7 +3,7 @@
 // Forward declarations for all game classes to break circular dependencies
 
 class MinecraftServer;
-class Packet;
+struct RustPacket;
 class ByteBuffer;
 class NetHandler;
 class NetLoginHandler;
@@ -40,43 +40,3 @@ struct MovingObjectPosition;
 class Material;
 class PropertyManager;
 class ItemInWorldManager;
-
-// Packet forward declarations
-class Packet0KeepAlive;
-class Packet1Login;
-class Packet2Handshake;
-class Packet3Chat;
-class Packet4UpdateTime;
-class Packet5PlayerInventory;
-class Packet6SpawnPosition;
-class Packet7UseEntity;
-class Packet9Respawn;
-class Packet10Flying;
-class Packet11PlayerPosition;
-class Packet12PlayerLook;
-class Packet13PlayerLookMove;
-class Packet14BlockDig;
-class Packet15Place;
-class Packet16BlockItemSwitch;
-class Packet18ArmAnimation;
-class Packet20NamedEntitySpawn;
-class Packet21PickupSpawn;
-class Packet22Collect;
-class Packet23VehicleSpawn;
-class Packet24MobSpawn;
-class Packet28EntityVelocity;
-class Packet29DestroyEntity;
-class Packet30Entity;
-class Packet31RelEntityMove;
-class Packet32EntityLook;
-class Packet33RelEntityMoveLook;
-class Packet34EntityTeleport;
-class Packet38EntityStatus;
-class Packet39AttachEntity;
-class Packet50PreChunk;
-class Packet51MapChunk;
-class Packet52MultiBlockChange;
-class Packet53BlockChange;
-class Packet59ComplexEntity;
-class Packet60Explosion;
-class Packet255KickDisconnect;

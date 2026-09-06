@@ -7,6 +7,7 @@
 #include "../world/TileEntity.h"
 #include "../core/Logger.h"
 #include "../core/RustBridge.h"
+#include "../core/ByteBuffer.h"
 
 #include <fstream>
 #include <filesystem>
@@ -170,10 +171,10 @@ std::vector<EntityPlayerMP*> ServerConfigurationManager::getPlayersInChunk(int64
     return result;
 }
 
-void ServerConfigurationManager::broadcastPacket(std::unique_ptr<Packet> pkt) {
+void ServerConfigurationManager::broadcastPacket(const RustPacket& pkt) {
     for (auto* player : playerEntities) {
         if (player->netHandler) {
-            player->netHandler->sendPacket(pkt->clone());
+            player->netHandler->sendPacket(pkt);
         }
     }
 }
@@ -195,32 +196,28 @@ void ServerConfigurationManager::sendTileEntityToNearbyPlayers(int x, int y, int
     std::vector<EntityPlayerMP*> players = getPlayersInChunk(key);
     if (players.empty()) return;
 
+    RustPacket pkt = RustPackets::complexEntity(x, static_cast<int16_t>(y), z, compressed.data(), compressed.size());
     for (auto* player : players) {
         if (!player || !player->netHandler) continue;
-        auto pkt = std::make_unique<Packet59ComplexEntity>();
-        pkt->x = x;
-        pkt->y = static_cast<int16_t>(y);
-        pkt->z = z;
-        pkt->nbtData = compressed;
-        player->netHandler->sendPacket(std::move(pkt));
+        player->netHandler->sendPacket(pkt);
     }
 }
 
 void ServerConfigurationManager::broadcastChatMessage(const std::string& msg) {
-    broadcastPacket(std::make_unique<Packet3Chat>(msg));
+    broadcastPacket(RustPackets::chat(msg));
 }
 
-bool ServerConfigurationManager::sendPacketToPlayer(const std::string& username, std::unique_ptr<Packet> pkt) {
+bool ServerConfigurationManager::sendPacketToPlayer(const std::string& username, const RustPacket& pkt) {
     auto* player = getPlayerEntity(username);
     if (player && player->netHandler) {
-        player->netHandler->sendPacket(std::move(pkt));
+        player->netHandler->sendPacket(pkt);
         return true;
     }
     return false;
 }
 
 void ServerConfigurationManager::sendChatToPlayer(const std::string& username, const std::string& msg) {
-    sendPacketToPlayer(username, std::make_unique<Packet3Chat>(msg));
+    sendPacketToPlayer(username, RustPackets::chat(msg));
 }
 
 std::string ServerConfigurationManager::getPlayerList() const {

@@ -1,8 +1,7 @@
 #include "MinecraftServer.h"
 #include "core/MathHelper.h"
 #include "core/Logger.h"
-#include "network/Packet.h"
-#include "network/packets/AllPackets.h"
+#include "network/RustPackets.h"
 #include "entity/EntityPlayerMP.h"
 #include "entity/EntityAnimals.h"
 #include "entity/EntityMobs.h"
@@ -28,7 +27,6 @@ static std::string_view trimLeft(std::string_view s) {
 
 MinecraftServer::MinecraftServer() {
     MathHelper::init();
-    Packet::registerPackets();
 }
 
 MinecraftServer::~MinecraftServer() {
@@ -220,7 +218,7 @@ void MinecraftServer::serverTick() {
 
     // Send time update every 20 ticks (1 second) — time is incremented by World::tick()
     if (tickCounter_ % ServerConstants::TICKS_PER_SECOND == 0) {
-        configManager->broadcastPacket(std::make_unique<Packet4UpdateTime>(getWorldTime()));
+        configManager->broadcastPacket(RustPackets::updateTime(getWorldTime()));
     }
 
     if (worldMngr) {
@@ -459,7 +457,7 @@ void MinecraftServer::handleCommand(const std::string& cmd) {
         case ConsoleCommand_Say: {
             auto msg = fromFfi(parsed.arg1);
             Logger::info("[Server] {}", msg);
-            configManager->broadcastPacket(std::make_unique<Packet3Chat>("\u00a7d[Server] " + msg));
+            configManager->broadcastPacket(RustPackets::chat("\u00a7d[Server] " + msg));
             break;
         }
         case ConsoleCommand_Tell: {
@@ -467,7 +465,7 @@ void MinecraftServer::handleCommand(const std::string& cmd) {
             auto msg = fromFfi(parsed.arg2);
             Logger::info("[CONSOLE->{}] {}", target, msg);
             if (!configManager->sendPacketToPlayer(target,
-                    std::make_unique<Packet3Chat>("\u00a77CONSOLE whispers " + msg)))
+                    RustPackets::chat("\u00a77CONSOLE whispers " + msg)))
                 Logger::info("There's no player by that name online.");
             break;
         }

@@ -2,6 +2,7 @@
 
 #include "EntityLiving.h"
 #include "../network/NetServerHandler.h"
+#include "../network/RustPackets.h"
 #include "../server/ItemInWorldManager.h"
 #include "../core/InventoryPlayer.h"
 #include "../core/NBT.h"
@@ -70,7 +71,7 @@ public:
     void heal(int amount) override {
         EntityPlayer::heal(amount);
         if (netHandler) {
-            netHandler->sendPacket(std::make_unique<Packet8UpdateHealth>(health));
+            netHandler->sendPacket(RustPackets::updateHealth(health));
         }
     }
 
@@ -88,9 +89,9 @@ public:
         return inventory.canHarvestBlock(block);
     }
 
-    void sendPacket(std::unique_ptr<Packet> pkt) {
+    void sendPacket(const RustPacket& pkt) {
         if (netHandler) {
-            netHandler->sendPacket(std::move(pkt));
+            netHandler->sendPacket(pkt);
         }
     }
 

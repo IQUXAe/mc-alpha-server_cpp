@@ -3,19 +3,12 @@
 #include <cstdint>
 #include <string>
 #include <vector>
-#include <memory>
-#include <unordered_map>
-#include <functional>
 #include <stdexcept>
 #include <algorithm>
 #include <span>
 #include <bit>
-#include <arpa/inet.h>
 
-class NetHandler;
-struct RustPacket;
-
-// Big-endian byte buffer for Minecraft protocol I/O
+// Big-endian byte buffer for Minecraft protocol and NBT I/O
 class ByteBuffer {
 public:
     std::vector<uint8_t> data;
@@ -29,18 +22,21 @@ public:
 
     void writeShort(int16_t v) {
         auto u = static_cast<uint16_t>(v);
-        data.push_back(u >> 8); data.push_back(u & 0xFF);
+        data.push_back(static_cast<uint8_t>(u >> 8));
+        data.push_back(static_cast<uint8_t>(u & 0xFF));
     }
 
     void writeInt(int32_t v) {
         auto u = static_cast<uint32_t>(v);
-        data.push_back(u >> 24); data.push_back((u >> 16) & 0xFF);
-        data.push_back((u >> 8) & 0xFF); data.push_back(u & 0xFF);
+        data.push_back(static_cast<uint8_t>(u >> 24));
+        data.push_back(static_cast<uint8_t>((u >> 16) & 0xFF));
+        data.push_back(static_cast<uint8_t>((u >> 8) & 0xFF));
+        data.push_back(static_cast<uint8_t>(u & 0xFF));
     }
 
     void writeLong(int64_t v) {
         auto u = static_cast<uint64_t>(v);
-        for (int i = 56; i >= 0; i -= 8) data.push_back((u >> i) & 0xFF);
+        for (int i = 56; i >= 0; i -= 8) data.push_back(static_cast<uint8_t>((u >> i) & 0xFF));
     }
 
     void writeFloat(float v)   { writeInt(std::bit_cast<int32_t>(v)); }
@@ -102,7 +98,7 @@ public:
         if (len > maxLength) throw std::runtime_error("UTF length exceeds maximum");
         if (len == 0) return {};
         ensureReadable(static_cast<size_t>(len));
-        std::string s(reinterpret_cast<const char*>(&data[readPos]), static_cast<size_t>(len)); // NOLINT: byte buffer access
+        std::string s(reinterpret_cast<const char*>(&data[readPos]), static_cast<size_t>(len));
         readPos += static_cast<size_t>(len);
         return s;
     }
@@ -123,34 +119,4 @@ public:
     }
 
     [[nodiscard]] size_t remaining() const { return data.size() - readPos; }
-};
-
-// Base packet class
-class Packet {
-public:
-    bool isChunkDataPacket = false;
-
-    virtual ~Packet() = default;
-    virtual void readPacketData(ByteBuffer& buf) = 0;
-    virtual void writePacketData(ByteBuffer& buf) = 0;
-    virtual void processPacket(NetHandler& handler) = 0;
-    virtual int getPacketSize() = 0;
-    virtual std::unique_ptr<Packet> clone() const = 0;
-    virtual bool toFfi(struct RustPacket& out) const { return false; }
-
-    int getPacketId() const;
-
-    static void registerPackets();
-    static std::unique_ptr<Packet> createPacket(int id);
-    static std::unique_ptr<Packet> createFromFfi(const struct RustPacket* ffiPacket);
-
-    // Registry
-    static std::unordered_map<int, std::function<std::unique_ptr<Packet>()>> idToFactory;
-    static std::unordered_map<std::string, int> classToId;
-
-    template<typename T>
-    static void addMapping(int id) {
-        idToFactory[id] = []() -> std::unique_ptr<Packet> { return std::make_unique<T>(); };
-        classToId[typeid(T).name()] = id;
-    }
 };

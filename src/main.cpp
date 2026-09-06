@@ -90,13 +90,24 @@ void consoleLoop(std::stop_token stopToken, MinecraftServer& server) {
         }
 
         if (!useRawConsole || !terminalMode.active) {
-            if (!std::getline(std::cin, line)) {
+            char ch = '\0';
+            const ssize_t readBytes = ::read(STDIN_FILENO, &ch, 1);
+            if (readBytes == 0) {
                 Logger::info("Console input closed.");
                 return;
             }
-
-            if (!line.empty()) {
-                server.addCommand(line);
+            if (readBytes < 0) {
+                if (errno == EINTR || errno == EAGAIN) continue;
+                Logger::info("Console input closed.");
+                return;
+            }
+            if (ch == '\r' || ch == '\n') {
+                if (!line.empty()) {
+                    server.addCommand(line);
+                    line.clear();
+                }
+            } else {
+                line.push_back(ch);
             }
             continue;
         }

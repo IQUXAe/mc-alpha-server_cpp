@@ -2,7 +2,7 @@
 
 #include "NetHandler.h"
 #include "NetworkManager.h"
-#include "packets/AllPackets.h"
+#include "RustPackets.h"
 #include "../forward.h"
 
 #include <atomic>
@@ -16,6 +16,14 @@
 
 class MinecraftServer;
 
+struct LoginData {
+    int32_t protocolVersion = 0;
+    std::string username;
+    std::string password;
+    int64_t mapSeed = 0;
+    int8_t dimension = 0;
+};
+
 class NetLoginHandler : public NetHandler {
 public:
     std::unique_ptr<NetworkManager> netManager;
@@ -27,8 +35,8 @@ public:
     void kickUser(const std::string& reason);
 
     // NetHandler overrides
-    void handleHandshake(Packet2Handshake& pkt) override;
-    void handleLogin(Packet1Login& pkt) override;
+    void handleHandshake(const RustPacket2Handshake& pkt) override;
+    void handleLogin(const RustPacket1Login& pkt) override;
     void handleErrorMessage(const std::string& reason) override;
 
     std::string getUserAndIPString() const;
@@ -43,12 +51,12 @@ private:
     std::string username_;
     std::string serverId_;
     std::mutex stateMutex_;
-    std::optional<Packet1Login> pendingLogin_;
+    std::optional<LoginData> pendingLogin_;
     std::jthread loginVerifierThread_;
     bool verificationStarted_ = false;
 
-    void doLogin(Packet1Login& pkt);
-    void verifyLoginSession(Packet1Login pkt);
+    void doLogin(const LoginData& pkt);
+    void verifyLoginSession(LoginData pkt);
 
     static std::mt19937_64 rng_;
 };

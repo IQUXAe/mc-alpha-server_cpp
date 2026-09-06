@@ -2,7 +2,7 @@
 
 #include "../forward.h"
 #include "../entity/EntityPlayerMP.h"
-#include "../network/packets/AllPackets.h"
+#include "../network/RustPackets.h"
 
 #include <vector>
 #include <set>
@@ -30,7 +30,7 @@ public:
     void playerLoggedOut(EntityPlayerMP* player);
 
     // Broadcast a packet to all players
-    void broadcastPacket(std::unique_ptr<Packet> pkt);
+    void broadcastPacket(const RustPacket& pkt);
 
     // Send Packet59 to all players who have the chunk containing (x,y,z) loaded.
     // Matches Java: configManager.sentTileEntityToPlayer -> playerManager.func_541_a
@@ -47,7 +47,7 @@ public:
     void broadcastChatMessage(const std::string& msg);
 
     // Send to specific player
-    bool sendPacketToPlayer(const std::string& username, std::unique_ptr<Packet> pkt);
+    bool sendPacketToPlayer(const std::string& username, const RustPacket& pkt);
     void sendChatToPlayer(const std::string& username, const std::string& msg);
 
     // Player list

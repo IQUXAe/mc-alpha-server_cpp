@@ -35,7 +35,7 @@ NetLoginHandler::NetLoginHandler(MinecraftServer* server, int socketFd, const st
 }
 
 void NetLoginHandler::tryLogin() {
-    std::optional<Packet1Login> loginToProcess;
+    std::optional<LoginData> loginToProcess;
     {
         std::lock_guard lock(stateMutex_);
         if (pendingLogin_) {
@@ -68,7 +68,7 @@ void NetLoginHandler::kickUser(const std::string& reason) {
     try {
         Logger::info("Disconnecting {}: {}", getUserAndIPString(), reason);
         if (netManager) {
-            netManager->addToSendQueue(std::make_unique<Packet255KickDisconnect>(reason));
+            netManager->sendPacket(RustPackets::kickDisconnect(reason));
             netManager->serverShutdown();
         }
         finishedProcessing.store(true, std::memory_order_relaxed);
@@ -77,7 +77,7 @@ void NetLoginHandler::kickUser(const std::string& reason) {
     }
 }
 
-void NetLoginHandler::handleHandshake(Packet2Handshake& pkt) {
+void NetLoginHandler::handleHandshake(const RustPacket2Handshake& pkt) {
     if (mcServer_->isOnlineMode()) {
         // Generate server ID for auth
         std::uniform_int_distribution<int64_t> dist{std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max()};
@@ -88,19 +88,26 @@ void NetLoginHandler::handleHandshake(Packet2Handshake& pkt) {
             std::lock_guard lock(stateMutex_);
             serverId_ = ss.str();
         }
-        netManager->addToSendQueue(std::make_unique<Packet2Handshake>(serverId_));
+        netManager->sendPacket(RustPackets::handshake(serverId_));
     } else {
-        netManager->addToSendQueue(std::make_unique<Packet2Handshake>("-"));
+        netManager->sendPacket(RustPackets::handshake("-"));
     }
 }
 
-void NetLoginHandler::handleLogin(Packet1Login& pkt) {
-    while (!pkt.username.empty() && (pkt.username.back() == '\0' || pkt.username.back() == '\r' || pkt.username.back() == '\n' || pkt.username.back() == ' ')) {
-        pkt.username.pop_back();
+void NetLoginHandler::handleLogin(const RustPacket1Login& pkt) {
+    LoginData data;
+    data.protocolVersion = pkt.protocol_version;
+    data.username = pkt.username ? pkt.username : "";
+    data.password = pkt.password ? pkt.password : "";
+    data.mapSeed = pkt.map_seed;
+    data.dimension = pkt.dimension;
+
+    while (!data.username.empty() && (data.username.back() == '\0' || data.username.back() == '\r' || data.username.back() == '\n' || data.username.back() == ' ')) {
+        data.username.pop_back();
     }
-    username_ = pkt.username;
-    if (pkt.protocolVersion != 6) {
-        if (pkt.protocolVersion > 6) {
+    username_ = data.username;
+    if (data.protocolVersion != 6) {
+        if (data.protocolVersion > 6) {
             kickUser("Outdated server!");
         } else {
             kickUser("Outdated client!");
@@ -110,7 +117,7 @@ void NetLoginHandler::handleLogin(Packet1Login& pkt) {
 
     // In offline mode, login directly
     if (!mcServer_->isOnlineMode()) {
-        doLogin(pkt);
+        doLogin(data);
     } else {
         {
             std::lock_guard lock(stateMutex_);
@@ -121,13 +128,13 @@ void NetLoginHandler::handleLogin(Packet1Login& pkt) {
             verificationStarted_ = true;
         }
 
-        loginVerifierThread_ = std::jthread([this, pkt](std::stop_token) mutable {
-            verifyLoginSession(std::move(pkt));
+        loginVerifierThread_ = std::jthread([this, data](std::stop_token) mutable {
+            verifyLoginSession(std::move(data));
         });
     }
 }
 
-void NetLoginHandler::doLogin(Packet1Login& pkt) {
+void NetLoginHandler::doLogin(const LoginData& pkt) {
     auto player = mcServer_->configManager->login(this, pkt.username, pkt.password);
     if (player) {
         Logger::info("{} logged in with entity id {}", getUserAndIPString(), player->entityId);
@@ -135,16 +142,16 @@ void NetLoginHandler::doLogin(Packet1Login& pkt) {
         auto serverHandler = std::make_unique<NetServerHandler>(mcServer_, std::move(netManager), player);
 
         // Send login response
-        serverHandler->sendPacket(std::make_unique<Packet1Login>(
-            "", "", player->entityId, mcServer_->getWorldSeed(), mcServer_->getWorldDimension()));
+        serverHandler->sendPacket(RustPackets::login(
+            player->entityId, "", "", mcServer_->getWorldSeed(), mcServer_->getWorldDimension()));
 
         // Send spawn position
-        serverHandler->sendPacket(std::make_unique<Packet6SpawnPosition>(
+        serverHandler->sendPacket(RustPackets::spawnPosition(
             mcServer_->getSpawnX(), mcServer_->getSpawnY(), mcServer_->getSpawnZ()));
 
         // Broadcast join message
         mcServer_->configManager->broadcastPacket(
-            std::make_unique<Packet3Chat>("\u00a7e" + player->username + " joined the game."));
+            RustPackets::chat("\u00a7e" + player->username + " joined the game."));
 
         // Complete player login
         mcServer_->configManager->playerLoggedIn(player);
@@ -156,13 +163,13 @@ void NetLoginHandler::doLogin(Packet1Login& pkt) {
 
         // Send position
         serverHandler->teleport(player->posX, player->posY, player->posZ, player->rotationYaw, player->rotationPitch);
-        serverHandler->sendPacket(std::make_unique<Packet8UpdateHealth>(player->health));
+        serverHandler->sendPacket(RustPackets::updateHealth(player->health));
         
         // Send full inventory to client (Packet5) - exactly as Java's NetServerHandler.func_40_d()
         serverHandler->sendInventory();
         
         serverHandler->sendChunks();
-        serverHandler->sendPacket(std::make_unique<Packet4UpdateTime>(mcServer_->getWorldTime()));
+        serverHandler->sendPacket(RustPackets::updateTime(mcServer_->getWorldTime()));
 
         // Register connection (transfer ownership to NetworkListenThread)
         mcServer_->networkListenThread->addConnection(std::move(serverHandler));
@@ -184,7 +191,7 @@ std::string NetLoginHandler::getUserAndIPString() const {
     return ip;
 }
 
-void NetLoginHandler::verifyLoginSession(Packet1Login pkt) {
+void NetLoginHandler::verifyLoginSession(LoginData pkt) {
     try {
         std::string sid;
         {

@@ -232,6 +232,16 @@ pub struct RustPacket21PickupSpawn {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct RustPacket23VehicleSpawn {
+    pub entity_id: i32,
+    pub vehicle_type: i8,
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct RustPacket59ComplexEntity {
     pub x: i32,
     pub y: i16,
@@ -428,6 +438,7 @@ pub union RustPacketUnion {
     pub named_entity_spawn: RustPacket20NamedEntitySpawn,
     pub pickup_spawn: RustPacket21PickupSpawn,
     pub collect: RustPacket22Collect,
+    pub vehicle_spawn: RustPacket23VehicleSpawn,
     pub mob_spawn: RustPacket24MobSpawn,
     pub entity_velocity: RustPacket28EntityVelocity,
     pub destroy_entity: RustPacket29DestroyEntity,
@@ -1115,6 +1126,14 @@ pub fn encode_packet(pkt: &RustPacket, buf: &mut Vec<u8>) -> bool {
             22 => {
                 put_i32(buf, pkt.data.collect.collected_entity_id);
                 put_i32(buf, pkt.data.collect.collector_entity_id);
+                true
+            }
+            23 => {
+                put_i32(buf, pkt.data.vehicle_spawn.entity_id);
+                put_i8(buf, pkt.data.vehicle_spawn.vehicle_type);
+                put_i32(buf, pkt.data.vehicle_spawn.x);
+                put_i32(buf, pkt.data.vehicle_spawn.y);
+                put_i32(buf, pkt.data.vehicle_spawn.z);
                 true
             }
             24 => {

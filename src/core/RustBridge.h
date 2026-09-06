@@ -53,6 +53,7 @@ Material* materialFromId(uint8_t materialId);
 
 std::vector<uint8_t> gzipCompress(const std::vector<uint8_t>& input, int level = -1);
 std::vector<uint8_t> gzipDecompress(const std::vector<uint8_t>& input);
+std::vector<uint8_t> gzipDecompress(const uint8_t* input, size_t len);
 
 std::vector<uint8_t> zlibCompress(const std::vector<uint8_t>& input, int level = -1);
 

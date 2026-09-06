@@ -27,7 +27,7 @@
 #include "../entity/EntityPlayerMP.h"
 #include "../entity/EntityTracker.h"
 #include "../network/NetServerHandler.h"
-#include "../network/packets/AllPackets.h"
+#include "../network/RustPackets.h"
 #include "../core/AxisAlignedBB.h"
 #include "../MinecraftServer.h"
 #include "TileEntity.h"
@@ -763,11 +763,11 @@ void World::tick() {
                         int addedCount = initialCount - stack.stackSize;
 
                         if (addedCount > 0) {
-                            mcServer->configManager->broadcastPacket(std::make_unique<Packet22Collect>(item->entityId, player->entityId));
+                            mcServer->configManager->broadcastPacket(RustPackets::collect(item->entityId, player->entityId));
 
                             if (player->netHandler) {
                                 // Packet17: shows pickup animation and tells client to add item
-                                player->netHandler->sendPacket(std::make_unique<Packet17AddToInventory>(
+                                player->netHandler->sendPacket(RustPackets::addToInventory(
                                     static_cast<int16_t>(item->itemID),
                                     static_cast<int8_t>(addedCount),
                                     static_cast<int16_t>(item->metadata)));
@@ -1523,13 +1523,13 @@ void World::markBlockNeedsUpdate(int x, int y, int z) {
     auto players = mcServer->configManager->getPlayersInChunk(key);
     if (players.empty()) return;
 
-    auto pkt = std::make_unique<Packet53BlockChange>(x, static_cast<int8_t>(y), z,
-                            static_cast<int8_t>(getBlockId(x, y, z)),
-                            static_cast<int8_t>(getBlockMetadata(x, y, z)));
+    RustPacket pkt = RustPackets::blockChange(x, y, z,
+                            static_cast<uint8_t>(getBlockId(x, y, z)),
+                            static_cast<uint8_t>(getBlockMetadata(x, y, z)));
 
     for (auto* player : players) {
         if (!player || !player->netHandler) continue;
-        player->netHandler->sendPacket(pkt->clone());
+        player->netHandler->sendPacket(pkt);
     }
 }
 
@@ -2615,7 +2615,7 @@ void World::sendEntityStatus(Entity* entity, int8_t status) {
     }
 
     mcServer->configManager->broadcastPacket(
-        std::make_unique<Packet38EntityStatus>(entity->entityId, status));
+        RustPackets::entityStatus(entity->entityId, status));
 }
 
 

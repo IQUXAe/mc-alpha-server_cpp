@@ -5,7 +5,7 @@
 #include <map>
 #include <memory>
 #include <stdexcept>
-#include "../network/Packet.h"
+#include "ByteBuffer.h"
 
 enum class NBTTagType : uint8_t {
     TAG_End = 0,
