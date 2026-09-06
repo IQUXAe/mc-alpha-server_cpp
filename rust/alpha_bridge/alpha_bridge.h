@@ -442,6 +442,81 @@ FfiChestState chest_create(void);
 FfiSignState sign_create(void);
 void sign_set_line(FfiSignState* state, int32_t line, const char* text);
 
+// Player Combat FFI
+typedef struct FfiCombatResult {
+    int32_t damage_after_armor;
+    int32_t new_armor_damage_carry;
+    int32_t scaled_damage;
+} FfiCombatResult;
+
+FfiCombatResult alpha_combat_calculate_damage(
+    int32_t raw_damage,
+    bool attacker_is_player,
+    int32_t difficulty,
+    int32_t armor_value,
+    int32_t armor_damage_carry
+);
+int32_t alpha_combat_get_weapon_damage(int32_t item_id);
+
+// Player Movement FFI
+typedef struct FfiMovementInput {
+    double from_x;
+    double from_y;
+    double from_z;
+    double to_x;
+    double to_y;
+    double to_z;
+    double stance;
+    bool on_ground;
+    bool is_in_water;
+    float fall_distance;
+} FfiMovementInput;
+
+typedef struct FfiMovementResult {
+    uint8_t status;
+    float new_fall_distance;
+    int32_t fall_damage;
+    double move_sq;
+} FfiMovementResult;
+
+FfiMovementResult alpha_movement_validate(const FfiMovementInput* input);
+
+// Player Inventory & Crafting FFI
+int32_t alpha_inventory_max_stack_size(int32_t item_id);
+int32_t alpha_inventory_add_item(
+    FfiItemStack* slots,
+    size_t slots_len,
+    FfiItemStack* stack,
+    int32_t stack_limit
+);
+int32_t alpha_inventory_calc_armor(
+    const FfiItemStack* armor_slots,
+    size_t armor_len
+);
+void alpha_inventory_damage_armor(
+    FfiItemStack* armor_slots,
+    size_t armor_len,
+    int32_t damage_amount
+);
+FfiItemStack alpha_inventory_craft_2x2(const FfiItemStack* grid);
+void alpha_inventory_consume_craft_2x2(FfiItemStack* grid);
+
+// Player Mining FFI
+bool alpha_mining_can_harvest(int32_t block_id, int32_t held_item_id);
+float alpha_mining_get_str_vs_block(int32_t block_id, int32_t held_item_id);
+float alpha_mining_check_hardness(
+    int32_t block_id,
+    int32_t held_item_id,
+    bool in_water,
+    bool on_ground
+);
+int32_t alpha_mining_get_destroy_ticks(
+    int32_t block_id,
+    int32_t held_item_id,
+    bool in_water,
+    bool on_ground
+);
+
 // RustNetworkManager FFI
 typedef struct RustNetworkManager RustNetworkManager;
 

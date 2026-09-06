@@ -191,4 +191,56 @@ bool loadPlayerData(const std::string& filepath, AlphaPlayerData& outData) {
     return ::alpha_player_storage_load(filepath.c_str(), &outData);
 }
 
+int32_t inventoryMaxStackSize(int32_t itemId) {
+    return ::alpha_inventory_max_stack_size(itemId);
+}
+
+int32_t inventoryAddItem(FfiItemStack* slots, size_t slotsLen, FfiItemStack* stack, int32_t stackLimit) {
+    return ::alpha_inventory_add_item(slots, slotsLen, stack, stackLimit);
+}
+
+int32_t inventoryCalcArmor(const FfiItemStack* armorSlots, size_t armorLen) {
+    return ::alpha_inventory_calc_armor(armorSlots, armorLen);
+}
+
+void inventoryDamageArmor(FfiItemStack* armorSlots, size_t armorLen, int32_t damageAmount) {
+    ::alpha_inventory_damage_armor(armorSlots, armorLen, damageAmount);
+}
+
+FfiItemStack inventoryCraft2x2(const FfiItemStack* grid) {
+    return ::alpha_inventory_craft_2x2(grid);
+}
+
+void inventoryConsumeCraft2x2(FfiItemStack* grid) {
+    ::alpha_inventory_consume_craft_2x2(grid);
+}
+
+FfiCombatResult calculateCombatDamage(int32_t rawDamage, bool attackerIsPlayer, int32_t difficulty, int32_t armorValue, int32_t armorDamageCarry) {
+    return ::alpha_combat_calculate_damage(rawDamage, attackerIsPlayer, difficulty, armorValue, armorDamageCarry);
+}
+
+int32_t getWeaponDamage(int32_t itemId) {
+    return ::alpha_combat_get_weapon_damage(itemId);
+}
+
+FfiMovementResult validateMovement(const FfiMovementInput& input) {
+    return ::alpha_movement_validate(&input);
+}
+
+bool miningCanHarvest(int32_t blockId, int32_t heldItemId) {
+    return ::alpha_mining_can_harvest(blockId, heldItemId);
+}
+
+float miningGetStrVsBlock(int32_t blockId, int32_t heldItemId) {
+    return ::alpha_mining_get_str_vs_block(blockId, heldItemId);
+}
+
+float miningCheckHardness(int32_t blockId, int32_t heldItemId, bool inWater, bool onGround) {
+    return ::alpha_mining_check_hardness(blockId, heldItemId, inWater, onGround);
+}
+
+int32_t miningGetDestroyTicks(int32_t blockId, int32_t heldItemId, bool inWater, bool onGround) {
+    return ::alpha_mining_get_destroy_ticks(blockId, heldItemId, inWater, onGround);
+}
+
 } // namespace RustBridge

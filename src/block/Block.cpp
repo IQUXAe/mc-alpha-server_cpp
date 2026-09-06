@@ -1139,24 +1139,20 @@ void Block::dropBlockAsItemWithChance(World* world, int x, int y, int z, int met
 float Block::checkHardness(EntityPlayer* player) const {
     if (blockHardness < 0.0f) return 0.0f;
 
-    float str = 1.0f;
-    bool canHarvest = canHarvestBlock(player);
+    int heldId = 0;
+    bool inWater = false;
+    bool onGround = true;
 
     if (player) {
-        auto* mp = dynamic_cast<EntityPlayerMP*>(player);
-        if (mp) {
-            canHarvest = mp->inventory.canHarvestBlock(const_cast<Block*>(this));
+        if (auto* mp = dynamic_cast<EntityPlayerMP*>(player)) {
             ItemStack* held = mp->inventory.getCurrentItem();
-            if (held && held->itemID > 0 && held->itemID < 32000) {
-                Item* item = Item::itemsList[held->itemID];
-                if (auto* tool = dynamic_cast<ItemTool*>(item)) {
-                    float toolStr = tool->getStrVsBlock(blockID);
-                    if (toolStr > 1.0f) str = toolStr;
-                }
+            if (held && held->stackSize > 0 && held->itemID > 0) {
+                heldId = held->itemID;
             }
         }
+        inWater = player->isInWater;
+        onGround = player->onGround;
     }
 
-    return canHarvest ? str / blockHardness / 30.0f
-                      : 1.0f / blockHardness / 100.0f;
+    return RustBridge::miningCheckHardness(blockID, heldId, inWater, onGround);
 }

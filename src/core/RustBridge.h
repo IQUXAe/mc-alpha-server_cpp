@@ -78,4 +78,29 @@ int32_t rngNextInt(int32_t bound);
 float   rngNextFloat();
 double  rngNextDouble();
 
+using FfiCombatResult = ::FfiCombatResult;
+using FfiMovementInput = ::FfiMovementInput;
+using FfiMovementResult = ::FfiMovementResult;
+
+// Player Inventory & Crafting
+int32_t inventoryMaxStackSize(int32_t itemId);
+int32_t inventoryAddItem(FfiItemStack* slots, size_t slotsLen, FfiItemStack* stack, int32_t stackLimit = 64);
+int32_t inventoryCalcArmor(const FfiItemStack* armorSlots, size_t armorLen);
+void inventoryDamageArmor(FfiItemStack* armorSlots, size_t armorLen, int32_t damageAmount);
+FfiItemStack inventoryCraft2x2(const FfiItemStack* grid);
+void inventoryConsumeCraft2x2(FfiItemStack* grid);
+
+// Player Combat
+FfiCombatResult calculateCombatDamage(int32_t rawDamage, bool attackerIsPlayer, int32_t difficulty, int32_t armorValue, int32_t armorDamageCarry);
+int32_t getWeaponDamage(int32_t itemId);
+
+// Player Movement
+FfiMovementResult validateMovement(const FfiMovementInput& input);
+
+// Player Mining
+bool miningCanHarvest(int32_t blockId, int32_t heldItemId);
+float miningGetStrVsBlock(int32_t blockId, int32_t heldItemId);
+float miningCheckHardness(int32_t blockId, int32_t heldItemId, bool inWater, bool onGround);
+int32_t miningGetDestroyTicks(int32_t blockId, int32_t heldItemId, bool inWater, bool onGround);
+
 } // namespace RustBridge

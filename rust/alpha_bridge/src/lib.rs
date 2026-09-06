@@ -458,9 +458,10 @@ pub mod generator;
 pub mod pathfinder;
 pub mod commands;
 pub mod player_storage;
-
-
-
+pub mod player_inventory;
+pub mod player_combat;
+pub mod player_movement;
+pub mod player_mining;
 
 use crate::random::JavaRandom;
 use crate::noise::{NoiseGeneratorOctaves, NoiseGeneratorOctaves2};

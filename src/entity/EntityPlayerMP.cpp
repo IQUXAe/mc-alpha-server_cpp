@@ -91,27 +91,25 @@ void EntityPlayerMP::attackEntityFrom(Entity* attacker, int amount) {
 
     updateDeathMessage(attacker);
 
-    if (attacker && dynamic_cast<EntityPlayerMP*>(attacker) == nullptr) {
-        int difficulty = mcServer ? mcServer->getDifficulty() : 2;
-        if (difficulty <= 0) {
-            amount = 0;
-        } else if (difficulty == 1) {
-            amount = amount / 3 + 1;
-        } else if (difficulty >= 3) {
-            amount = amount * 3 / 2;
-        }
-    }
+    const bool attackerIsPlayer = (attacker && dynamic_cast<EntityPlayerMP*>(attacker) != nullptr);
+    const int difficulty = mcServer ? mcServer->getDifficulty() : 2;
+    const int armor = inventory.getTotalArmorValue();
 
-    if (amount <= 0) {
+    const auto combatResult = RustBridge::calculateCombatDamage(
+        amount,
+        attackerIsPlayer,
+        difficulty,
+        armor,
+        armorDamageCarry
+    );
+
+    if (combatResult.scaled_damage <= 0) {
         return;
     }
 
-    const int armor = inventory.getTotalArmorValue();
-    const int scaledDamage = amount * (25 - armor) + armorDamageCarry;
-    const int damageAfterArmor = scaledDamage / 25;
-    armorDamageCarry = scaledDamage % 25;
-    inventory.damageArmor(amount);
-    EntityPlayer::attackEntityFrom(attacker, damageAfterArmor);
+    armorDamageCarry = combatResult.new_armor_damage_carry;
+    inventory.damageArmor(combatResult.scaled_damage);
+    EntityPlayer::attackEntityFrom(attacker, combatResult.damage_after_armor);
     if (netHandler) {
         netHandler->sendPacket(std::make_unique<Packet8UpdateHealth>(health));
     }

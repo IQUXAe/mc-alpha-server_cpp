@@ -69,43 +69,42 @@ public:
 
     int addItemsToInventory(ItemStack* stack) {
         if (!stack || stack->stackSize <= 0) return 0;
-        int maxStack = stack->getMaxStackSize();
-        bool stackable = maxStack > 1;
-
-        if (stackable) {
-            while (stack->stackSize > 0) {
-                int slot = getFirstPartialMatchingStack(stack->itemID, stack->itemDamage);
-                if (slot < 0) slot = getFirstEmptyStack();
-                if (slot < 0) break;
-
-                if (!mainInventory[slot]) {
-                    mainInventory[slot] = std::make_unique<ItemStack>(stack->itemID, 0, stack->itemDamage);
-                }
-
-                int limit = std::min(mainInventory[slot]->getMaxStackSize(), getInventoryStackLimit());
-                int freeSpace = limit - mainInventory[slot]->stackSize;
-                int amountToAdd = std::min(stack->stackSize, freeSpace);
-
-                if (amountToAdd > 0) {
-                    stack->stackSize -= amountToAdd;
-                    mainInventory[slot]->stackSize += amountToAdd;
-                    mainInventory[slot]->animationsToGo = 5;
-                } else {
-                    break;
-                }
-            }
-        } else {
-            // Non-stackable
-            while (stack->stackSize > 0) {
-                int slot = getFirstEmptyStack();
-                if (slot < 0) break;
-                mainInventory[slot] = std::make_unique<ItemStack>(stack->itemID, 1, stack->itemDamage);
-                mainInventory[slot]->animationsToGo = 5;
-                stack->stackSize--;
+        RustBridge::FfiItemStack ffiSlots[36];
+        for (size_t i = 0; i < 36; ++i) {
+            if (mainInventory[i] && mainInventory[i]->stackSize > 0 && mainInventory[i]->itemID > 0) {
+                ffiSlots[i].stack_size = mainInventory[i]->stackSize;
+                ffiSlots[i].animations_to_go = mainInventory[i]->animationsToGo;
+                ffiSlots[i].item_id = mainInventory[i]->itemID;
+                ffiSlots[i].item_damage = mainInventory[i]->itemDamage;
+            } else {
+                ffiSlots[i] = {0, 0, 0, 0};
             }
         }
 
-        return stack->stackSize;
+        RustBridge::FfiItemStack ffiStack;
+        ffiStack.stack_size = stack->stackSize;
+        ffiStack.animations_to_go = stack->animationsToGo;
+        ffiStack.item_id = stack->itemID;
+        ffiStack.item_damage = stack->itemDamage;
+
+        int rem = RustBridge::inventoryAddItem(ffiSlots, 36, &ffiStack, getInventoryStackLimit());
+        stack->stackSize = rem;
+
+        for (size_t i = 0; i < 36; ++i) {
+            if (ffiSlots[i].item_id > 0 && ffiSlots[i].stack_size > 0) {
+                if (!mainInventory[i]) {
+                    mainInventory[i] = std::make_unique<ItemStack>(ffiSlots[i].item_id, ffiSlots[i].stack_size, ffiSlots[i].item_damage);
+                } else {
+                    mainInventory[i]->itemID = ffiSlots[i].item_id;
+                    mainInventory[i]->stackSize = ffiSlots[i].stack_size;
+                    mainInventory[i]->itemDamage = ffiSlots[i].item_damage;
+                }
+                mainInventory[i]->animationsToGo = ffiSlots[i].animations_to_go;
+            } else {
+                mainInventory[i].reset();
+            }
+        }
+        return rem;
     }
 
     void decrementAnimations() {
@@ -185,67 +184,100 @@ public:
     }
 
     int getTotalArmorValue() {
-        int totalReduction = 0;
-        int remainingDurability = 0;
-        int totalDurability = 0;
-
-        auto armorPointsForItem = [](int itemId) -> int {
-            switch (itemId) {
-                case 298: case 302: case 306: case 314: return 3;
-                case 299: case 303: case 307: case 315: return 8;
-                case 300: case 304: case 308: case 316: return 6;
-                case 301: case 305: case 309: case 317: return 3;
-                default: return 0;
+        RustBridge::FfiItemStack ffiArmor[4];
+        for (size_t i = 0; i < 4; ++i) {
+            if (armorInventory[i] && armorInventory[i]->stackSize > 0 && armorInventory[i]->itemID > 0) {
+                ffiArmor[i].stack_size = armorInventory[i]->stackSize;
+                ffiArmor[i].animations_to_go = armorInventory[i]->animationsToGo;
+                ffiArmor[i].item_id = armorInventory[i]->itemID;
+                ffiArmor[i].item_damage = armorInventory[i]->itemDamage;
+            } else {
+                ffiArmor[i] = {0, 0, 0, 0};
             }
-        };
-
-        for (const auto& stack : armorInventory) {
-            if (!stack) continue;
-
-            const int armorPoints = armorPointsForItem(stack->itemID);
-            if (armorPoints <= 0) continue;
-
-            totalReduction += armorPoints;
-            totalDurability += stack->getMaxDamage();
-            remainingDurability += stack->getMaxDamage() - stack->itemDamage;
         }
-
-        if (totalDurability == 0) {
-            return 0;
-        }
-
-        return (totalReduction - 1) * remainingDurability / totalDurability + 1;
+        return RustBridge::inventoryCalcArmor(ffiArmor, 4);
     }
     
     void damageArmor(int damage) {
-        for (auto& stack : armorInventory) {
-            if (stack) {
-                stack->damageItem(damage);
-                if (stack->stackSize == 0) stack.reset();
+        RustBridge::FfiItemStack ffiArmor[4];
+        for (size_t i = 0; i < 4; ++i) {
+            if (armorInventory[i] && armorInventory[i]->stackSize > 0 && armorInventory[i]->itemID > 0) {
+                ffiArmor[i].stack_size = armorInventory[i]->stackSize;
+                ffiArmor[i].animations_to_go = armorInventory[i]->animationsToGo;
+                ffiArmor[i].item_id = armorInventory[i]->itemID;
+                ffiArmor[i].item_damage = armorInventory[i]->itemDamage;
+            } else {
+                ffiArmor[i] = {0, 0, 0, 0};
+            }
+        }
+        RustBridge::inventoryDamageArmor(ffiArmor, 4, damage);
+        for (size_t i = 0; i < 4; ++i) {
+            if (ffiArmor[i].item_id > 0 && ffiArmor[i].stack_size > 0) {
+                if (armorInventory[i]) {
+                    armorInventory[i]->stackSize = ffiArmor[i].stack_size;
+                    armorInventory[i]->itemDamage = ffiArmor[i].item_damage;
+                }
+            } else {
+                armorInventory[i].reset();
             }
         }
     }
     
     float getStrVsBlock(Block* block) {
-        float f = 1.0f;
-        if (mainInventory[currentItem]) {
-            f *= mainInventory[currentItem]->getStrVsBlock(block);
-        }
-        return f;
+        if (!block) return 1.0f;
+        ItemStack* held = getCurrentItem();
+        int heldId = (held && held->stackSize > 0) ? held->itemID : 0;
+        return RustBridge::miningGetStrVsBlock(block->blockID, heldId);
     }
 
     bool canHarvestBlock(Block* block) {
-        if (block->blockMaterial != &Material::rock
-         && block->blockMaterial != &Material::iron
-         && block->blockMaterial != &Material::snow
-         && block->blockMaterial != &Material::builtSnow) {
-            return true;
+        if (!block) return false;
+        ItemStack* held = getCurrentItem();
+        int heldId = (held && held->stackSize > 0) ? held->itemID : 0;
+        return RustBridge::miningCanHarvest(block->blockID, heldId);
+    }
+
+    ItemStack getCraftingResult() const {
+        RustBridge::FfiItemStack grid[4];
+        for (size_t i = 0; i < 4; ++i) {
+            if (craftingInventory[i] && craftingInventory[i]->stackSize > 0 && craftingInventory[i]->itemID > 0) {
+                grid[i].stack_size = craftingInventory[i]->stackSize;
+                grid[i].animations_to_go = craftingInventory[i]->animationsToGo;
+                grid[i].item_id = craftingInventory[i]->itemID;
+                grid[i].item_damage = craftingInventory[i]->itemDamage;
+            } else {
+                grid[i] = {0, 0, 0, 0};
+            }
         }
-        ItemStack* held = mainInventory[currentItem].get();
-        if (!held || held->itemID <= 0 || held->itemID >= 32000) return false;
-        Item* item = Item::itemsList[held->itemID];
-        auto* tool = dynamic_cast<ItemTool*>(item);
-        return tool && tool->canHarvestBlock(block->blockID);
+        RustBridge::FfiItemStack out = RustBridge::inventoryCraft2x2(grid);
+        if (out.item_id > 0 && out.stack_size > 0) {
+            return ItemStack(out.item_id, out.stack_size, out.item_damage);
+        }
+        return ItemStack();
+    }
+
+    void consumeCraftingIngredients() {
+        RustBridge::FfiItemStack grid[4];
+        for (size_t i = 0; i < 4; ++i) {
+            if (craftingInventory[i] && craftingInventory[i]->stackSize > 0 && craftingInventory[i]->itemID > 0) {
+                grid[i].stack_size = craftingInventory[i]->stackSize;
+                grid[i].animations_to_go = craftingInventory[i]->animationsToGo;
+                grid[i].item_id = craftingInventory[i]->itemID;
+                grid[i].item_damage = craftingInventory[i]->itemDamage;
+            } else {
+                grid[i] = {0, 0, 0, 0};
+            }
+        }
+        RustBridge::inventoryConsumeCraft2x2(grid);
+        for (size_t i = 0; i < 4; ++i) {
+            if (grid[i].item_id > 0 && grid[i].stack_size > 0) {
+                if (craftingInventory[i]) {
+                    craftingInventory[i]->stackSize = grid[i].stack_size;
+                }
+            } else {
+                craftingInventory[i].reset();
+            }
+        }
     }
 
     void writeToNBT(std::shared_ptr<NBTList> nbtList) {

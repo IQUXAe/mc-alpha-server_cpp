@@ -102,8 +102,8 @@ public:
     }
     
     int getDamageVsEntity(Entity* entity) {
-        if (Item* item = getItem()) {
-            return item->getDamageVsEntity(entity);
+        if (itemID > 0) {
+            return RustBridge::getWeaponDamage(itemID);
         }
         return 1;
     }

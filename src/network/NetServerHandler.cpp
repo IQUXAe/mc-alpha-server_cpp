@@ -713,18 +713,6 @@ void NetServerHandler::handleFlying(Packet10Flying& pkt) {
         pkt.moving = false;
     }
 
-    if (pkt.moving) {
-        const double stance = pkt.stance - pkt.y;
-        if (stance < 0.1 || stance > 1.65) {
-            kick("Illegal stance");
-            return;
-        }
-        if (std::abs(pkt.x) > 3.2E7 || std::abs(pkt.z) > 3.2E7) {
-            kick("Illegal position");
-            return;
-        }
-    }
-
     const double baseX = lastX_;
     const double baseY = lastY_;
     const double baseZ = lastZ_;
@@ -744,20 +732,40 @@ void NetServerHandler::handleFlying(Packet10Flying& pkt) {
         return;
     }
 
-    const double moveX = pkt.x - baseX;
-    const double moveY = pkt.y - baseY;
-    const double moveZ = pkt.z - baseZ;
-    const double requestedMoveSq = moveX * moveX + moveY * moveY + moveZ * moveZ;
+    const RustBridge::FfiMovementInput moveCheck{
+        .from_x = baseX,
+        .from_y = baseY,
+        .from_z = baseZ,
+        .to_x = pkt.x,
+        .to_y = pkt.y,
+        .to_z = pkt.z,
+        .stance = pkt.stance,
+        .on_ground = pkt.onGround,
+        .is_in_water = (player_->isInWater != 0),
+        .fall_distance = player_->fallDistance,
+    };
 
-    if (requestedMoveSq > kHardMovementRejectSq) {
+    const RustBridge::FfiMovementResult checkRes = RustBridge::validateMovement(moveCheck);
+    if (checkRes.status == 1) {
+        kick("Illegal stance");
+        return;
+    }
+    if (checkRes.status == 2) {
+        kick("Illegal position");
+        return;
+    }
+    if (checkRes.status == 3) {
         kick("Moved too quickly");
         return;
     }
-
-    if (requestedMoveSq > kSoftMovementRejectSq) {
+    if (checkRes.status == 4) {
         teleport(baseX, baseY, baseZ, yaw, pitch);
         return;
     }
+
+    const double moveX = pkt.x - baseX;
+    const double moveY = pkt.y - baseY;
+    const double moveZ = pkt.z - baseZ;
 
     player_->suppressMoveFallState = true;
     player_->moveEntity(moveX, moveY, moveZ);
@@ -765,17 +773,23 @@ void NetServerHandler::handleFlying(Packet10Flying& pkt) {
     player_->rotationYaw = yaw;
     player_->rotationPitch = pitch;
 
-    const double acceptedDeltaY = player_->posY - baseY;
-    if (pkt.onGround) {
-        if (player_->isInWater) {
-            player_->fallDistance = 0.0f;
-        } else if (player_->fallDistance > 0.0f) {
-            player_->onFall(player_->fallDistance);
-            player_->fallDistance = 0.0f;
-        }
-    } else if (acceptedDeltaY < 0.0) {
-        player_->fallDistance = static_cast<float>(player_->fallDistance - acceptedDeltaY);
+    const RustBridge::FfiMovementInput fallCheck{
+        .from_x = baseX,
+        .from_y = baseY,
+        .from_z = baseZ,
+        .to_x = player_->posX,
+        .to_y = player_->posY,
+        .to_z = player_->posZ,
+        .stance = pkt.stance,
+        .on_ground = pkt.onGround,
+        .is_in_water = (player_->isInWater != 0),
+        .fall_distance = player_->fallDistance,
+    };
+    const RustBridge::FfiMovementResult fallRes = RustBridge::validateMovement(fallCheck);
+    if (fallRes.fall_damage > 0) {
+        player_->attackEntityFrom(nullptr, fallRes.fall_damage);
     }
+    player_->fallDistance = fallRes.new_fall_distance;
 
     player_->onGround = pkt.onGround;
     lastX_ = player_->posX;
