@@ -62,4 +62,14 @@ public:
     uint8_t getPacketId() override {
         return 0x3B; // 59 in hex
     }
+
+    bool toFfi(RustPacket& out) const override {
+        out.packet_id = 59;
+        out.data.complex_entity.x = xPosition;
+        out.data.complex_entity.y = static_cast<int16_t>(yPosition);
+        out.data.complex_entity.z = zPosition;
+        out.data.complex_entity.nbt_data = entityData.data();
+        out.data.complex_entity.nbt_len = entityData.size();
+        return true;
+    }
 };

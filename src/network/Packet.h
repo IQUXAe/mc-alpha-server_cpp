@@ -136,6 +136,7 @@ public:
     virtual void processPacket(NetHandler& handler) = 0;
     virtual int getPacketSize() = 0;
     virtual std::unique_ptr<Packet> clone() const = 0;
+    virtual bool toFfi(struct RustPacket& out) const { return false; }
 
     int getPacketId() const;
 

@@ -242,6 +242,164 @@ pub struct RustPacket59ComplexEntity {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct RustPacket4UpdateTime {
+    pub time: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustPacket6SpawnPosition {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustPacket8UpdateHealth {
+    pub health: i8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustPacket9Respawn {
+    pub dummy: u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustPacket17AddToInventory {
+    pub item_id: i16,
+    pub count: i8,
+    pub damage: i16,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustPacket20NamedEntitySpawn {
+    pub entity_id: i32,
+    pub name: *const c_char,
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+    pub rotation: i8,
+    pub pitch: i8,
+    pub current_item: i16,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustPacket22Collect {
+    pub collected_entity_id: i32,
+    pub collector_entity_id: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustPacket24MobSpawn {
+    pub entity_id: i32,
+    pub mob_type: u8,
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+    pub yaw: i8,
+    pub pitch: i8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustPacket28EntityVelocity {
+    pub entity_id: i32,
+    pub motion_x: i16,
+    pub motion_y: i16,
+    pub motion_z: i16,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustPacket29DestroyEntity {
+    pub entity_id: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustPacket30Entity {
+    pub entity_id: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustPacket31RelEntityMove {
+    pub entity_id: i32,
+    pub dx: i8,
+    pub dy: i8,
+    pub dz: i8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustPacket32EntityLook {
+    pub entity_id: i32,
+    pub yaw: i8,
+    pub pitch: i8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustPacket33RelEntityMoveLook {
+    pub entity_id: i32,
+    pub dx: i8,
+    pub dy: i8,
+    pub dz: i8,
+    pub yaw: i8,
+    pub pitch: i8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustPacket34EntityTeleport {
+    pub entity_id: i32,
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+    pub yaw: i8,
+    pub pitch: i8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustPacket38EntityStatus {
+    pub entity_id: i32,
+    pub status: i8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustPacket39AttachEntity {
+    pub entity_id: i32,
+    pub vehicle_id: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustPacket50PreChunk {
+    pub x: i32,
+    pub z: i32,
+    pub mode: bool,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustPacket53BlockChange {
+    pub x: i32,
+    pub y: i8,
+    pub z: i32,
+    pub block_type: u8,
+    pub metadata: u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct RustPacket255KickDisconnect {
     pub reason: *const c_char,
 }
@@ -252,8 +410,12 @@ pub union RustPacketUnion {
     pub login: RustPacket1Login,
     pub handshake: RustPacket2Handshake,
     pub chat: RustPacket3Chat,
+    pub update_time: RustPacket4UpdateTime,
     pub inventory: RustPacket5PlayerInventory,
+    pub spawn_position: RustPacket6SpawnPosition,
     pub use_entity: RustPacket7UseEntity,
+    pub update_health: RustPacket8UpdateHealth,
+    pub respawn: RustPacket9Respawn,
     pub flying: RustPacket10Flying,
     pub position: RustPacket11PlayerPosition,
     pub look: RustPacket12PlayerLook,
@@ -261,8 +423,23 @@ pub union RustPacketUnion {
     pub block_dig: RustPacket14BlockDig,
     pub place: RustPacket15Place,
     pub item_switch: RustPacket16BlockItemSwitch,
+    pub add_to_inventory: RustPacket17AddToInventory,
     pub arm_anim: RustPacket18ArmAnimation,
+    pub named_entity_spawn: RustPacket20NamedEntitySpawn,
     pub pickup_spawn: RustPacket21PickupSpawn,
+    pub collect: RustPacket22Collect,
+    pub mob_spawn: RustPacket24MobSpawn,
+    pub entity_velocity: RustPacket28EntityVelocity,
+    pub destroy_entity: RustPacket29DestroyEntity,
+    pub entity: RustPacket30Entity,
+    pub rel_entity_move: RustPacket31RelEntityMove,
+    pub entity_look: RustPacket32EntityLook,
+    pub rel_entity_move_look: RustPacket33RelEntityMoveLook,
+    pub entity_teleport: RustPacket34EntityTeleport,
+    pub entity_status: RustPacket38EntityStatus,
+    pub attach_entity: RustPacket39AttachEntity,
+    pub pre_chunk: RustPacket50PreChunk,
+    pub block_change: RustPacket53BlockChange,
     pub complex_entity: RustPacket59ComplexEntity,
     pub kick: RustPacket255KickDisconnect,
 }
@@ -778,6 +955,297 @@ pub unsafe extern "C" fn rust_network_manager_send(
     cv.notify_one();
 }
 
+fn put_u8(buf: &mut Vec<u8>, v: u8) { buf.push(v); }
+fn put_i8(buf: &mut Vec<u8>, v: i8) { buf.push(v as u8); }
+fn put_i16(buf: &mut Vec<u8>, v: i16) { buf.extend_from_slice(&v.to_be_bytes()); }
+fn put_i32(buf: &mut Vec<u8>, v: i32) { buf.extend_from_slice(&v.to_be_bytes()); }
+fn put_i64(buf: &mut Vec<u8>, v: i64) { buf.extend_from_slice(&v.to_be_bytes()); }
+fn put_f32(buf: &mut Vec<u8>, v: f32) { buf.extend_from_slice(&v.to_bits().to_be_bytes()); }
+fn put_f64(buf: &mut Vec<u8>, v: f64) { buf.extend_from_slice(&v.to_bits().to_be_bytes()); }
+fn put_str(buf: &mut Vec<u8>, s: &str) {
+    let bytes = s.as_bytes();
+    put_i16(buf, bytes.len() as i16);
+    buf.extend_from_slice(bytes);
+}
+fn c_to_str_safe(ptr: *const c_char) -> &'static str {
+    if ptr.is_null() { return ""; }
+    unsafe { CStr::from_ptr(ptr) }.to_str().unwrap_or("")
+}
+
+pub fn encode_packet(pkt: &RustPacket, buf: &mut Vec<u8>) -> bool {
+    put_u8(buf, pkt.packet_id);
+    unsafe {
+        match pkt.packet_id {
+            0 => true,
+            1 => {
+                put_i32(buf, pkt.data.login.protocol_version);
+                put_str(buf, c_to_str_safe(pkt.data.login.username));
+                put_str(buf, c_to_str_safe(pkt.data.login.password));
+                put_i64(buf, pkt.data.login.map_seed);
+                put_i8(buf, pkt.data.login.dimension);
+                true
+            }
+            2 => {
+                put_str(buf, c_to_str_safe(pkt.data.handshake.username));
+                true
+            }
+            3 => {
+                put_str(buf, c_to_str_safe(pkt.data.chat.message));
+                true
+            }
+            4 => {
+                put_i64(buf, pkt.data.update_time.time);
+                true
+            }
+            5 => {
+                put_i32(buf, pkt.data.inventory.inventory_type);
+                put_i16(buf, pkt.data.inventory.item_count);
+                if !pkt.data.inventory.slots.is_null() && pkt.data.inventory.item_count > 0 {
+                    let slots = std::slice::from_raw_parts(pkt.data.inventory.slots, pkt.data.inventory.item_count as usize);
+                    for s in slots {
+                        put_i16(buf, s.item_id);
+                        if s.item_id >= 0 {
+                            put_i8(buf, s.count);
+                            put_i16(buf, s.damage);
+                        }
+                    }
+                }
+                true
+            }
+            6 => {
+                put_i32(buf, pkt.data.spawn_position.x);
+                put_i32(buf, pkt.data.spawn_position.y);
+                put_i32(buf, pkt.data.spawn_position.z);
+                true
+            }
+            7 => {
+                put_i32(buf, pkt.data.use_entity.player_entity_id);
+                put_i32(buf, pkt.data.use_entity.target_entity_id);
+                put_u8(buf, if pkt.data.use_entity.is_left_click { 1 } else { 0 });
+                true
+            }
+            8 => {
+                put_i8(buf, pkt.data.update_health.health);
+                true
+            }
+            9 => true,
+            10 => {
+                put_u8(buf, if pkt.data.flying.on_ground { 1 } else { 0 });
+                true
+            }
+            11 => {
+                put_f64(buf, pkt.data.position.x);
+                put_f64(buf, pkt.data.position.y);
+                put_f64(buf, pkt.data.position.stance);
+                put_f64(buf, pkt.data.position.z);
+                put_u8(buf, if pkt.data.position.on_ground { 1 } else { 0 });
+                true
+            }
+            12 => {
+                put_f32(buf, pkt.data.look.yaw);
+                put_f32(buf, pkt.data.look.pitch);
+                put_u8(buf, if pkt.data.look.on_ground { 1 } else { 0 });
+                true
+            }
+            13 => {
+                put_f64(buf, pkt.data.look_move.x);
+                put_f64(buf, pkt.data.look_move.y);
+                put_f64(buf, pkt.data.look_move.stance);
+                put_f64(buf, pkt.data.look_move.z);
+                put_f32(buf, pkt.data.look_move.yaw);
+                put_f32(buf, pkt.data.look_move.pitch);
+                put_u8(buf, if pkt.data.look_move.on_ground { 1 } else { 0 });
+                true
+            }
+            14 => {
+                put_i8(buf, pkt.data.block_dig.status);
+                put_i32(buf, pkt.data.block_dig.x);
+                put_i8(buf, pkt.data.block_dig.y);
+                put_i32(buf, pkt.data.block_dig.z);
+                put_i8(buf, pkt.data.block_dig.face);
+                true
+            }
+            15 => {
+                put_i16(buf, pkt.data.place.item_id);
+                put_i32(buf, pkt.data.place.x);
+                put_i8(buf, pkt.data.place.y);
+                put_i32(buf, pkt.data.place.z);
+                put_i8(buf, pkt.data.place.direction);
+                true
+            }
+            16 => {
+                put_i32(buf, pkt.data.item_switch.entity_id);
+                put_i16(buf, pkt.data.item_switch.item_id);
+                true
+            }
+            17 => {
+                put_i16(buf, pkt.data.add_to_inventory.item_id);
+                put_i8(buf, pkt.data.add_to_inventory.count);
+                put_i16(buf, pkt.data.add_to_inventory.damage);
+                true
+            }
+            18 => {
+                put_i32(buf, pkt.data.arm_anim.entity_id);
+                put_i8(buf, pkt.data.arm_anim.animate);
+                true
+            }
+            20 => {
+                put_i32(buf, pkt.data.named_entity_spawn.entity_id);
+                put_str(buf, c_to_str_safe(pkt.data.named_entity_spawn.name));
+                put_i32(buf, pkt.data.named_entity_spawn.x);
+                put_i32(buf, pkt.data.named_entity_spawn.y);
+                put_i32(buf, pkt.data.named_entity_spawn.z);
+                put_i8(buf, pkt.data.named_entity_spawn.rotation);
+                put_i8(buf, pkt.data.named_entity_spawn.pitch);
+                put_i16(buf, pkt.data.named_entity_spawn.current_item);
+                true
+            }
+            21 => {
+                put_i32(buf, pkt.data.pickup_spawn.entity_id);
+                put_i16(buf, pkt.data.pickup_spawn.item_id);
+                put_i8(buf, pkt.data.pickup_spawn.count);
+                put_i32(buf, pkt.data.pickup_spawn.x);
+                put_i32(buf, pkt.data.pickup_spawn.y);
+                put_i32(buf, pkt.data.pickup_spawn.z);
+                put_i8(buf, pkt.data.pickup_spawn.rotation);
+                put_i8(buf, pkt.data.pickup_spawn.pitch);
+                put_i8(buf, pkt.data.pickup_spawn.roll);
+                true
+            }
+            22 => {
+                put_i32(buf, pkt.data.collect.collected_entity_id);
+                put_i32(buf, pkt.data.collect.collector_entity_id);
+                true
+            }
+            24 => {
+                put_i32(buf, pkt.data.mob_spawn.entity_id);
+                put_u8(buf, pkt.data.mob_spawn.mob_type);
+                put_i32(buf, pkt.data.mob_spawn.x);
+                put_i32(buf, pkt.data.mob_spawn.y);
+                put_i32(buf, pkt.data.mob_spawn.z);
+                put_i8(buf, pkt.data.mob_spawn.yaw);
+                put_i8(buf, pkt.data.mob_spawn.pitch);
+                true
+            }
+            28 => {
+                put_i32(buf, pkt.data.entity_velocity.entity_id);
+                put_i16(buf, pkt.data.entity_velocity.motion_x);
+                put_i16(buf, pkt.data.entity_velocity.motion_y);
+                put_i16(buf, pkt.data.entity_velocity.motion_z);
+                true
+            }
+            29 => {
+                put_i32(buf, pkt.data.destroy_entity.entity_id);
+                true
+            }
+            30 => {
+                put_i32(buf, pkt.data.entity.entity_id);
+                true
+            }
+            31 => {
+                put_i32(buf, pkt.data.rel_entity_move.entity_id);
+                put_i8(buf, pkt.data.rel_entity_move.dx);
+                put_i8(buf, pkt.data.rel_entity_move.dy);
+                put_i8(buf, pkt.data.rel_entity_move.dz);
+                true
+            }
+            32 => {
+                put_i32(buf, pkt.data.entity_look.entity_id);
+                put_i8(buf, pkt.data.entity_look.yaw);
+                put_i8(buf, pkt.data.entity_look.pitch);
+                true
+            }
+            33 => {
+                put_i32(buf, pkt.data.rel_entity_move_look.entity_id);
+                put_i8(buf, pkt.data.rel_entity_move_look.dx);
+                put_i8(buf, pkt.data.rel_entity_move_look.dy);
+                put_i8(buf, pkt.data.rel_entity_move_look.dz);
+                put_i8(buf, pkt.data.rel_entity_move_look.yaw);
+                put_i8(buf, pkt.data.rel_entity_move_look.pitch);
+                true
+            }
+            34 => {
+                put_i32(buf, pkt.data.entity_teleport.entity_id);
+                put_i32(buf, pkt.data.entity_teleport.x);
+                put_i32(buf, pkt.data.entity_teleport.y);
+                put_i32(buf, pkt.data.entity_teleport.z);
+                put_i8(buf, pkt.data.entity_teleport.yaw);
+                put_i8(buf, pkt.data.entity_teleport.pitch);
+                true
+            }
+            38 => {
+                put_i32(buf, pkt.data.entity_status.entity_id);
+                put_i8(buf, pkt.data.entity_status.status);
+                true
+            }
+            39 => {
+                put_i32(buf, pkt.data.attach_entity.entity_id);
+                put_i32(buf, pkt.data.attach_entity.vehicle_id);
+                true
+            }
+            50 => {
+                put_i32(buf, pkt.data.pre_chunk.x);
+                put_i32(buf, pkt.data.pre_chunk.z);
+                put_u8(buf, if pkt.data.pre_chunk.mode { 1 } else { 0 });
+                true
+            }
+            53 => {
+                put_i32(buf, pkt.data.block_change.x);
+                put_i8(buf, pkt.data.block_change.y);
+                put_i32(buf, pkt.data.block_change.z);
+                put_u8(buf, pkt.data.block_change.block_type);
+                put_u8(buf, pkt.data.block_change.metadata);
+                true
+            }
+            59 => {
+                put_i32(buf, pkt.data.complex_entity.x);
+                put_i16(buf, pkt.data.complex_entity.y);
+                put_i32(buf, pkt.data.complex_entity.z);
+                let len = pkt.data.complex_entity.nbt_len as i16;
+                put_i16(buf, len);
+                if !pkt.data.complex_entity.nbt_data.is_null() && len > 0 {
+                    let slice = std::slice::from_raw_parts(pkt.data.complex_entity.nbt_data, len as usize);
+                    buf.extend_from_slice(slice);
+                }
+                true
+            }
+            255 => {
+                put_str(buf, c_to_str_safe(pkt.data.kick.reason));
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rust_network_manager_send_packet(
+    manager: *mut RustNetworkManager,
+    packet: *const RustPacket,
+    is_chunk_data: bool,
+) -> bool {
+    if manager.is_null() || packet.is_null() {
+        return false;
+    }
+    let m = &*manager;
+    if m.is_server_terminating.load(Ordering::Relaxed) {
+        return false;
+    }
+    let mut bytes = Vec::with_capacity(64);
+    if !encode_packet(&*packet, &mut bytes) {
+        return false;
+    }
+    let len = bytes.len();
+    m.send_queue_byte_length.fetch_add(len, Ordering::Relaxed);
+
+    let &(ref lock, ref cv) = &*m.write_queue;
+    if let Ok(mut q) = lock.lock() {
+        q.push_back((bytes, is_chunk_data));
+    }
+    cv.notify_one();
+    true
+}
+
 unsafe fn to_ffi_packet(pkt: PacketData) -> RustPacket {
     match pkt {
         PacketData::KeepAlive => RustPacket {
@@ -1152,4 +1620,60 @@ pub unsafe extern "C" fn rust_network_manager_server_shutdown(manager: *mut Rust
     (*manager).is_server_terminating.store(true, Ordering::SeqCst);
     let &(_, ref cv) = &*(*manager).write_queue;
     cv.notify_all();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_encode_chat_packet() {
+        let msg = CString::new("Hello World").unwrap();
+        let pkt = RustPacket {
+            packet_id: 3,
+            data: RustPacketUnion {
+                chat: RustPacket3Chat {
+                    message: msg.as_ptr(),
+                },
+            },
+        };
+        let mut buf = Vec::new();
+        assert!(encode_packet(&pkt, &mut buf));
+        assert_eq!(buf[0], 3); // Packet ID
+        assert_eq!(&buf[1..3], &(11u16).to_be_bytes()); // length 11
+        assert_eq!(&buf[3..], b"Hello World");
+    }
+
+    #[test]
+    fn test_encode_update_health() {
+        let pkt = RustPacket {
+            packet_id: 8,
+            data: RustPacketUnion {
+                update_health: RustPacket8UpdateHealth {
+                    health: 15,
+                },
+            },
+        };
+        let mut buf = Vec::new();
+        assert!(encode_packet(&pkt, &mut buf));
+        assert_eq!(buf[0], 8);
+        assert_eq!(buf[1], 15);
+        assert_eq!(buf.len(), 2);
+    }
+
+    #[test]
+    fn test_encode_update_time() {
+        let pkt = RustPacket {
+            packet_id: 4,
+            data: RustPacketUnion {
+                update_time: RustPacket4UpdateTime {
+                    time: 123456789,
+                },
+            },
+        };
+        let mut buf = Vec::new();
+        assert!(encode_packet(&pkt, &mut buf));
+        assert_eq!(buf[0], 4);
+        assert_eq!(&buf[1..9], &(123456789i64).to_be_bytes());
+    }
 }

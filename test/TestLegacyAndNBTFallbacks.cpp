@@ -5,6 +5,7 @@
 #include "core/InventoryPlayer.h"
 #include "MinecraftServer.h"
 #include "core/PropertyManager.h"
+#include "entity/EntityPlayerMP.h"
 #include <filesystem>
 #include <fstream>
 #include <chrono>
@@ -191,4 +192,84 @@ TEST(LegacyAndNBTTest, OnTheFlyMigrationAndBackup) {
     // Clean up
     std::filesystem::remove_all(testWorldPath);
     std::filesystem::remove(propFileMigration);
+}
+
+// Test case 5: Rust Player NBT Storage with atomic write and GZip compression
+TEST(LegacyAndNBTTest, RustPlayerStorageGzipRoundTrip) {
+    std::string testPlayerDir = "test_players_dir";
+    std::filesystem::remove_all(testPlayerDir);
+    std::filesystem::create_directories(testPlayerDir);
+
+    std::string playerFile = testPlayerDir + "/Steve.dat";
+
+    MinecraftServer server;
+    World world(&server, "test_temp_world_player", 12345ULL);
+
+    // Save player state
+    {
+        EntityPlayerMP player(&server, &world, "Steve");
+        player.posX = 128.5;
+        player.posY = 65.0;
+        player.posZ = -256.25;
+        player.rotationYaw = 90.0f;
+        player.rotationPitch = -15.0f;
+        player.health = 18;
+        player.score = 420;
+        player.savedHeldItemId = 276; // Diamond sword
+
+        // Add items to inventory
+        player.inventory.mainInventory[0] = std::make_unique<ItemStack>(276, 1, 5); // Diamond sword
+        player.inventory.mainInventory[1] = std::make_unique<ItemStack>(260, 16, 0); // Apple
+        player.inventory.armorInventory[0] = std::make_unique<ItemStack>(310, 1, 10); // Diamond Helmet
+
+        EXPECT_TRUE(player.saveToFile(playerFile));
+    }
+
+    // Verify file exists and is GZip compressed (magic bytes: 0x1F, 0x8B)
+    ASSERT_TRUE(std::filesystem::exists(playerFile));
+    {
+        std::ifstream in(playerFile, std::ios::binary);
+        uint8_t magic[2] = {0, 0};
+        in.read(reinterpret_cast<char*>(magic), 2);
+        EXPECT_EQ(magic[0], 0x1F);
+        EXPECT_EQ(magic[1], 0x8B);
+    }
+
+    // Verify no lingering temporary file
+    std::string tmpFile = testPlayerDir + "/Steve.dat_tmp_";
+    EXPECT_FALSE(std::filesystem::exists(tmpFile));
+
+    // Load back and verify all properties
+    {
+        EntityPlayerMP playerLoaded(&server, &world, "Steve");
+        EXPECT_TRUE(playerLoaded.loadFromFile(playerFile));
+
+        EXPECT_DOUBLE_EQ(playerLoaded.posX, 128.5);
+        EXPECT_DOUBLE_EQ(playerLoaded.posY, 65.0);
+        EXPECT_DOUBLE_EQ(playerLoaded.posZ, -256.25);
+        EXPECT_FLOAT_EQ(playerLoaded.rotationYaw, 90.0f);
+        EXPECT_FLOAT_EQ(playerLoaded.rotationPitch, -15.0f);
+        EXPECT_EQ(playerLoaded.health, 18);
+        EXPECT_EQ(playerLoaded.score, 420);
+        EXPECT_EQ(playerLoaded.savedHeldItemId, 276);
+
+        ASSERT_NE(playerLoaded.inventory.mainInventory[0], nullptr);
+        EXPECT_EQ(playerLoaded.inventory.mainInventory[0]->itemID, 276);
+        EXPECT_EQ(playerLoaded.inventory.mainInventory[0]->stackSize, 1);
+        EXPECT_EQ(playerLoaded.inventory.mainInventory[0]->itemDamage, 5);
+
+        ASSERT_NE(playerLoaded.inventory.mainInventory[1], nullptr);
+        EXPECT_EQ(playerLoaded.inventory.mainInventory[1]->itemID, 260);
+        EXPECT_EQ(playerLoaded.inventory.mainInventory[1]->stackSize, 16);
+        EXPECT_EQ(playerLoaded.inventory.mainInventory[1]->itemDamage, 0);
+
+        ASSERT_NE(playerLoaded.inventory.armorInventory[0], nullptr);
+        EXPECT_EQ(playerLoaded.inventory.armorInventory[0]->itemID, 310);
+        EXPECT_EQ(playerLoaded.inventory.armorInventory[0]->stackSize, 1);
+        EXPECT_EQ(playerLoaded.inventory.armorInventory[0]->itemDamage, 10);
+    }
+
+    // Clean up
+    std::filesystem::remove_all(testPlayerDir);
+    std::filesystem::remove_all("test_temp_world_player");
 }

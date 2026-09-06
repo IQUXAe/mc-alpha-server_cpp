@@ -30,6 +30,11 @@ public:
 
     void addToSendQueue(std::unique_ptr<Packet> pkt) {
         if (!rustManager_ || !pkt) return;
+        RustPacket ffiPacket{};
+        if (pkt->toFfi(ffiPacket)) {
+            rust_network_manager_send_packet(rustManager_, &ffiPacket, pkt->isChunkDataPacket);
+            return;
+        }
         ByteBuffer buf;
         buf.writeUByte(static_cast<uint8_t>(pkt->getPacketId()));
         pkt->writePacketData(buf);

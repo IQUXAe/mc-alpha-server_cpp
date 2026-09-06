@@ -183,4 +183,12 @@ Material* materialFromId(uint8_t materialId) {
     return map[materialId];
 }
 
+bool savePlayerData(const std::string& filepath, const AlphaPlayerData& data) {
+    return ::alpha_player_storage_save(filepath.c_str(), &data);
+}
+
+bool loadPlayerData(const std::string& filepath, AlphaPlayerData& outData) {
+    return ::alpha_player_storage_load(filepath.c_str(), &outData);
+}
+
 } // namespace RustBridge

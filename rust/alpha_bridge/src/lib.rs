@@ -457,6 +457,7 @@ pub mod network;
 pub mod generator;
 pub mod pathfinder;
 pub mod commands;
+pub mod player_storage;
 
 
 

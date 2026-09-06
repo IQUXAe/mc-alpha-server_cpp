@@ -233,6 +233,7 @@ protected:
 class EntityPlayer : public EntityLiving {
 public:
     std::string username;
+    int score = 0;
     bool sleeping = false;
     float foodLevel = 20.0f;
 

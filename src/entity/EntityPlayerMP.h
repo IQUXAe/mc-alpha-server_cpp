@@ -5,6 +5,7 @@
 #include "../server/ItemInWorldManager.h"
 #include "../core/InventoryPlayer.h"
 #include "../core/NBT.h"
+#include "../core/RustBridge.h"
 #include <string>
 #include <fstream>
 #include <iostream>
@@ -141,46 +142,107 @@ public:
         }
     }
 
-    // File-based save/load
+    // File-based save/load via Rust GZip NBT storage
     bool saveToFile(const std::string& filepath) {
-        try {
-            auto nbt = std::make_shared<NBTCompound>();
-            writeToNBT(nbt);
-            
-            ByteBuffer buf;
-            nbt->writeRoot(buf, "Player");
-            
-            std::ofstream file(filepath, std::ios::binary);
-            if (!file.is_open()) return false;
-            
-            file.write(reinterpret_cast<const char*>(buf.data.data()), buf.data.size()); // NOLINT: file I/O
-            return true;
-        } catch (...) {
-            return false;
+        RustBridge::AlphaPlayerData data{};
+        data.pos_x = posX;
+        data.pos_y = posY;
+        data.pos_z = posZ;
+        data.motion_x = motionX;
+        data.motion_y = motionY;
+        data.motion_z = motionZ;
+        data.rotation_yaw = rotationYaw;
+        data.rotation_pitch = rotationPitch;
+        data.fall_distance = fallDistance;
+        data.fire = static_cast<int16_t>(fire);
+        data.air = static_cast<int16_t>(air);
+        data.on_ground = onGround;
+        data.health = static_cast<int16_t>(health);
+        data.hurt_time = static_cast<int16_t>(hurtTime);
+        data.death_time = static_cast<int16_t>(deathTime);
+        data.attack_time = static_cast<int16_t>(attackTime);
+        data.dimension = dimension;
+        data.score = score;
+        data.held_item_id = savedHeldItemId;
+
+        size_t count = 0;
+        for (size_t i = 0; i < inventory.mainInventory.size() && count < 64; ++i) {
+            if (inventory.mainInventory[i]) {
+                data.slots[count++] = RustBridge::FfiPlayerSlot{
+                    static_cast<uint8_t>(i),
+                    static_cast<int16_t>(inventory.mainInventory[i]->itemID),
+                    static_cast<int8_t>(inventory.mainInventory[i]->stackSize),
+                    static_cast<int16_t>(inventory.mainInventory[i]->itemDamage)
+                };
+            }
         }
+        for (size_t i = 0; i < inventory.armorInventory.size() && count < 64; ++i) {
+            if (inventory.armorInventory[i]) {
+                data.slots[count++] = RustBridge::FfiPlayerSlot{
+                    static_cast<uint8_t>(i + 100),
+                    static_cast<int16_t>(inventory.armorInventory[i]->itemID),
+                    static_cast<int8_t>(inventory.armorInventory[i]->stackSize),
+                    static_cast<int16_t>(inventory.armorInventory[i]->itemDamage)
+                };
+            }
+        }
+        for (size_t i = 0; i < inventory.craftingInventory.size() && count < 64; ++i) {
+            if (inventory.craftingInventory[i]) {
+                data.slots[count++] = RustBridge::FfiPlayerSlot{
+                    static_cast<uint8_t>(i + 80),
+                    static_cast<int16_t>(inventory.craftingInventory[i]->itemID),
+                    static_cast<int8_t>(inventory.craftingInventory[i]->stackSize),
+                    static_cast<int16_t>(inventory.craftingInventory[i]->itemDamage)
+                };
+            }
+        }
+        data.slots_count = count;
+
+        return RustBridge::savePlayerData(filepath, data);
     }
 
     bool loadFromFile(const std::string& filepath) {
-        try {
-            std::ifstream file(filepath, std::ios::binary);
-            if (!file.is_open()) return false;
-            
-            file.seekg(0, std::ios::end);
-            size_t size = file.tellg();
-            file.seekg(0, std::ios::beg);
-            
-            std::vector<uint8_t> data(size);
-            file.read(reinterpret_cast<char*>(data.data()), size); // NOLINT: file I/O
-            
-            ByteBuffer buf(data);
-            auto nbt = NBTCompound::readRoot(buf);
-            if (!nbt) return false;
-            
-            readFromNBT(nbt);
-            return true;
-        } catch (...) {
+        RustBridge::AlphaPlayerData data{};
+        if (!RustBridge::loadPlayerData(filepath, data)) {
             return false;
         }
+
+        posX = data.pos_x;
+        posY = data.pos_y;
+        posZ = data.pos_z;
+        motionX = data.motion_x;
+        motionY = data.motion_y;
+        motionZ = data.motion_z;
+        rotationYaw = data.rotation_yaw;
+        rotationPitch = data.rotation_pitch;
+        fallDistance = data.fall_distance;
+        fire = data.fire;
+        air = data.air;
+        onGround = data.on_ground;
+        health = data.health;
+        hurtTime = data.hurt_time;
+        deathTime = data.death_time;
+        attackTime = data.attack_time;
+        dimension = data.dimension;
+        score = data.score;
+        savedHeldItemId = data.held_item_id;
+
+        inventory.mainInventory.clear(); inventory.mainInventory.resize(36);
+        inventory.armorInventory.clear(); inventory.armorInventory.resize(4);
+        inventory.craftingInventory.clear(); inventory.craftingInventory.resize(4);
+
+        for (size_t i = 0; i < data.slots_count && i < 64; ++i) {
+            const auto& s = data.slots[i];
+            auto stack = std::make_unique<ItemStack>(s.item_id, s.count, s.damage);
+            if (s.slot < 36) {
+                inventory.mainInventory[s.slot] = std::move(stack);
+            } else if (s.slot >= 80 && s.slot < 84) {
+                inventory.craftingInventory[s.slot - 80] = std::move(stack);
+            } else if (s.slot >= 100 && s.slot < 104) {
+                inventory.armorInventory[s.slot - 100] = std::move(stack);
+            }
+        }
+        return true;
     }
 
 private:

@@ -426,3 +426,76 @@ TEST_F(PacketTest, PacketCreateFromFfiInventory) {
     EXPECT_EQ(invPkt->slots[0].damage, 10);
     EXPECT_EQ(invPkt->slots[1].itemId, -1);
 }
+
+TEST_F(PacketTest, PacketToFfiRoundTrip) {
+    // Packet 3: Chat
+    {
+        Packet3Chat chat("Hello FFI outgoing");
+        RustPacket ffi{};
+        EXPECT_TRUE(chat.toFfi(ffi));
+        EXPECT_EQ(ffi.packet_id, 3);
+        EXPECT_STREQ(ffi.data.chat.message, "Hello FFI outgoing");
+    }
+
+    // Packet 4: Update Time
+    {
+        Packet4UpdateTime timePkt(123456789LL);
+        RustPacket ffi{};
+        EXPECT_TRUE(timePkt.toFfi(ffi));
+        EXPECT_EQ(ffi.packet_id, 4);
+        EXPECT_EQ(ffi.data.update_time.time, 123456789LL);
+    }
+
+    // Packet 6: Spawn Position
+    {
+        Packet6SpawnPosition spawn(10, 64, -20);
+        RustPacket ffi{};
+        EXPECT_TRUE(spawn.toFfi(ffi));
+        EXPECT_EQ(ffi.packet_id, 6);
+        EXPECT_EQ(ffi.data.spawn_position.x, 10);
+        EXPECT_EQ(ffi.data.spawn_position.y, 64);
+        EXPECT_EQ(ffi.data.spawn_position.z, -20);
+    }
+
+    // Packet 8: Update Health
+    {
+        Packet8UpdateHealth health(15);
+        RustPacket ffi{};
+        EXPECT_TRUE(health.toFfi(ffi));
+        EXPECT_EQ(ffi.packet_id, 8);
+        EXPECT_EQ(ffi.data.update_health.health, 15);
+    }
+
+    // Packet 50: Pre Chunk
+    {
+        Packet50PreChunk pre(3, -7, true);
+        RustPacket ffi{};
+        EXPECT_TRUE(pre.toFfi(ffi));
+        EXPECT_EQ(ffi.packet_id, 50);
+        EXPECT_EQ(ffi.data.pre_chunk.x, 3);
+        EXPECT_EQ(ffi.data.pre_chunk.z, -7);
+        EXPECT_TRUE(ffi.data.pre_chunk.mode);
+    }
+
+    // Packet 53: Block Change
+    {
+        Packet53BlockChange change(100, 50, 200, 1, 2);
+        RustPacket ffi{};
+        EXPECT_TRUE(change.toFfi(ffi));
+        EXPECT_EQ(ffi.packet_id, 53);
+        EXPECT_EQ(ffi.data.block_change.x, 100);
+        EXPECT_EQ(ffi.data.block_change.y, 50);
+        EXPECT_EQ(ffi.data.block_change.z, 200);
+        EXPECT_EQ(ffi.data.block_change.block_type, 1);
+        EXPECT_EQ(ffi.data.block_change.metadata, 2);
+    }
+
+    // Packet 255: Kick Disconnect
+    {
+        Packet255KickDisconnect kick("Server full");
+        RustPacket ffi{};
+        EXPECT_TRUE(kick.toFfi(ffi));
+        EXPECT_EQ(ffi.packet_id, 255);
+        EXPECT_STREQ(ffi.data.kick.reason, "Server full");
+    }
+}

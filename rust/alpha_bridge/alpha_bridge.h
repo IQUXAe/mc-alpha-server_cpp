@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,6 +24,40 @@ typedef struct AlphaLevelDat {
     int32_t version;
     const char* level_name;
 } AlphaLevelDat;
+
+typedef struct FfiPlayerSlot {
+    uint8_t slot;
+    int16_t item_id;
+    int8_t count;
+    int16_t damage;
+} FfiPlayerSlot;
+
+typedef struct AlphaPlayerData {
+    double pos_x;
+    double pos_y;
+    double pos_z;
+    double motion_x;
+    double motion_y;
+    double motion_z;
+    float rotation_yaw;
+    float rotation_pitch;
+    float fall_distance;
+    int16_t fire;
+    int16_t air;
+    bool on_ground;
+    int16_t health;
+    int16_t hurt_time;
+    int16_t death_time;
+    int16_t attack_time;
+    int32_t dimension;
+    int32_t score;
+    int32_t held_item_id;
+    FfiPlayerSlot slots[64];
+    size_t slots_count;
+} AlphaPlayerData;
+
+bool alpha_player_storage_save(const char* filepath, const AlphaPlayerData* data);
+bool alpha_player_storage_load(const char* filepath, AlphaPlayerData* out_data);
 
 AlphaBuffer alpha_gzip_compress(const uint8_t* input, size_t input_len, int level);
 AlphaBuffer alpha_gzip_decompress(const uint8_t* input, size_t input_len);
@@ -518,6 +553,126 @@ typedef struct RustPacket59ComplexEntity {
     size_t nbt_len;
 } RustPacket59ComplexEntity;
 
+typedef struct RustPacket4UpdateTime {
+    int64_t time;
+} RustPacket4UpdateTime;
+
+typedef struct RustPacket6SpawnPosition {
+    int32_t x;
+    int32_t y;
+    int32_t z;
+} RustPacket6SpawnPosition;
+
+typedef struct RustPacket8UpdateHealth {
+    int8_t health;
+} RustPacket8UpdateHealth;
+
+typedef struct RustPacket9Respawn {
+    uint8_t dummy;
+} RustPacket9Respawn;
+
+typedef struct RustPacket17AddToInventory {
+    int16_t item_id;
+    int8_t count;
+    int16_t damage;
+} RustPacket17AddToInventory;
+
+typedef struct RustPacket20NamedEntitySpawn {
+    int32_t entity_id;
+    const char* name;
+    int32_t x;
+    int32_t y;
+    int32_t z;
+    int8_t rotation;
+    int8_t pitch;
+    int16_t current_item;
+} RustPacket20NamedEntitySpawn;
+
+typedef struct RustPacket22Collect {
+    int32_t collected_entity_id;
+    int32_t collector_entity_id;
+} RustPacket22Collect;
+
+typedef struct RustPacket24MobSpawn {
+    int32_t entity_id;
+    uint8_t mob_type;
+    int32_t x;
+    int32_t y;
+    int32_t z;
+    int8_t yaw;
+    int8_t pitch;
+} RustPacket24MobSpawn;
+
+typedef struct RustPacket28EntityVelocity {
+    int32_t entity_id;
+    int16_t motion_x;
+    int16_t motion_y;
+    int16_t motion_z;
+} RustPacket28EntityVelocity;
+
+typedef struct RustPacket29DestroyEntity {
+    int32_t entity_id;
+} RustPacket29DestroyEntity;
+
+typedef struct RustPacket30Entity {
+    int32_t entity_id;
+} RustPacket30Entity;
+
+typedef struct RustPacket31RelEntityMove {
+    int32_t entity_id;
+    int8_t dx;
+    int8_t dy;
+    int8_t dz;
+} RustPacket31RelEntityMove;
+
+typedef struct RustPacket32EntityLook {
+    int32_t entity_id;
+    int8_t yaw;
+    int8_t pitch;
+} RustPacket32EntityLook;
+
+typedef struct RustPacket33RelEntityMoveLook {
+    int32_t entity_id;
+    int8_t dx;
+    int8_t dy;
+    int8_t dz;
+    int8_t yaw;
+    int8_t pitch;
+} RustPacket33RelEntityMoveLook;
+
+typedef struct RustPacket34EntityTeleport {
+    int32_t entity_id;
+    int32_t x;
+    int32_t y;
+    int32_t z;
+    int8_t yaw;
+    int8_t pitch;
+} RustPacket34EntityTeleport;
+
+typedef struct RustPacket38EntityStatus {
+    int32_t entity_id;
+    int8_t status;
+} RustPacket38EntityStatus;
+
+typedef struct RustPacket39AttachEntity {
+    int32_t entity_id;
+    int32_t vehicle_id;
+} RustPacket39AttachEntity;
+
+typedef struct RustPacket50PreChunk {
+    int32_t x;
+    int32_t z;
+    bool mode;
+} RustPacket50PreChunk;
+
+typedef struct RustPacket53BlockChange {
+    int32_t x;
+    int8_t y;
+    int32_t z;
+    uint8_t block_type;
+    uint8_t metadata;
+} RustPacket53BlockChange;
+
 typedef struct RustPacket255KickDisconnect {
     const char* reason;
 } RustPacket255KickDisconnect;
@@ -526,8 +681,12 @@ typedef union RustPacketUnion {
     RustPacket1Login login;
     RustPacket2Handshake handshake;
     RustPacket3Chat chat;
+    RustPacket4UpdateTime update_time;
     RustPacket5PlayerInventory inventory;
+    RustPacket6SpawnPosition spawn_position;
     RustPacket7UseEntity use_entity;
+    RustPacket8UpdateHealth update_health;
+    RustPacket9Respawn respawn;
     RustPacket10Flying flying;
     RustPacket11PlayerPosition position;
     RustPacket12PlayerLook look;
@@ -535,8 +694,23 @@ typedef union RustPacketUnion {
     RustPacket14BlockDig block_dig;
     RustPacket15Place place;
     RustPacket16BlockItemSwitch item_switch;
+    RustPacket17AddToInventory add_to_inventory;
     RustPacket18ArmAnimation arm_anim;
+    RustPacket20NamedEntitySpawn named_entity_spawn;
     RustPacket21PickupSpawn pickup_spawn;
+    RustPacket22Collect collect;
+    RustPacket24MobSpawn mob_spawn;
+    RustPacket28EntityVelocity entity_velocity;
+    RustPacket29DestroyEntity destroy_entity;
+    RustPacket30Entity entity;
+    RustPacket31RelEntityMove rel_entity_move;
+    RustPacket32EntityLook entity_look;
+    RustPacket33RelEntityMoveLook rel_entity_move_look;
+    RustPacket34EntityTeleport entity_teleport;
+    RustPacket38EntityStatus entity_status;
+    RustPacket39AttachEntity attach_entity;
+    RustPacket50PreChunk pre_chunk;
+    RustPacket53BlockChange block_change;
     RustPacket59ComplexEntity complex_entity;
     RustPacket255KickDisconnect kick;
 } RustPacketUnion;
@@ -552,6 +726,11 @@ void rust_network_manager_send(
     RustNetworkManager* manager,
     const uint8_t* data,
     size_t len,
+    bool is_chunk_data
+);
+bool rust_network_manager_send_packet(
+    RustNetworkManager* manager,
+    const RustPacket* packet,
     bool is_chunk_data
 );
 RustPacket* rust_network_manager_poll_parsed(RustNetworkManager* manager);
