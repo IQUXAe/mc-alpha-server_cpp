@@ -154,13 +154,6 @@ void ServerConfigurationManager::removePlayerFromAllChunks(EntityPlayerMP* playe
     }
 }
 
-EntityPlayerMP* ServerConfigurationManager::getPlayerById(int entityId) {
-    for (auto* p : playerEntities) {
-        if (p && p->entityId == entityId) return p;
-    }
-    return nullptr;
-}
-
 std::vector<EntityPlayerMP*> ServerConfigurationManager::getPlayersInChunk(int64_t chunkKey) const {
     auto it = playersByChunk_.find(chunkKey);
     if (it == playersByChunk_.end()) return {};

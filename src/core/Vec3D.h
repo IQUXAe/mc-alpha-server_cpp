@@ -92,8 +92,4 @@ public:
         if (t >= 0.0 && t <= 1.0) return Vec3D(xCoord + dx * t, yCoord + dy * t, zCoord + dz * t);
         return std::nullopt;
     }
-
-    std::string toString() const {
-        return "(" + std::to_string(xCoord) + ", " + std::to_string(yCoord) + ", " + std::to_string(zCoord) + ")";
-    }
 };

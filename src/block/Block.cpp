@@ -514,18 +514,6 @@ Block::Block(int id)
                    props.max_x, props.max_y, props.max_z);
 }
 
-Block::Block(int id, Material* material)
-    : blockID(id), blockMaterial(material), blockHardness(0.0f), blockResistance(0.0f) {
-    
-    if (blocksList[id] != nullptr) {
-        throw std::runtime_error("Block slot " + std::to_string(id) + " is already occupied!");
-    }
-    
-    blocksList[id] = this;
-    setBlockBounds(0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
-    lightOpacity[id] = 255;
-    isBlockContainer[id] = false;
-}
 
 int Block::idDropped(int metadata) const {
     auto props = RustBridge::blockProperties(blockID);
@@ -1062,34 +1050,6 @@ void Block::initBlocks() {
     }
 
     std::cout << "[INFO] Registered all standard blocks." << std::endl;
-}
-
-Block* Block::setHardness(float hardness) {
-    blockHardness = hardness;
-    if (blockResistance < hardness * 5.0f) {
-        blockResistance = hardness * 5.0f;
-    }
-    return this;
-}
-
-Block* Block::setResistance(float resistance) {
-    blockResistance = resistance * 3.0f;
-    return this;
-}
-
-Block* Block::setLightOpacity(int opacity) {
-    lightOpacity[blockID] = opacity;
-    return this;
-}
-
-Block* Block::setLightValue(float value) {
-    lightValue[blockID] = static_cast<int>(15.0f * value);
-    return this;
-}
-
-Block* Block::setTickOnLoad(bool tick) {
-    tickOnLoad[blockID] = tick;
-    return this;
 }
 
 void Block::setBlockBounds(float mnX, float mnY, float mnZ, float mxX, float mxY, float mxZ) {

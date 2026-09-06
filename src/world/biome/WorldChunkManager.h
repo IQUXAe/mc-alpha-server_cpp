@@ -15,7 +15,6 @@ private:
 public:
     std::vector<double> temperature;
     std::vector<double> humidity;
-    std::vector<double> field_4257_c;   // noise blend array
     std::vector<MobSpawnerBase> biomes; // field_4256_d
 
     WorldChunkManager(int64_t worldSeed) {

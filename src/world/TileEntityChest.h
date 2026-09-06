@@ -130,6 +130,3 @@ public:
 public:
     RustBridge::FfiChestState state_;
 };
-
-// Register TileEntityChest with ID "Chest" (matching Java)
-REGISTER_TILE_ENTITY(TileEntityChest, "Chest");

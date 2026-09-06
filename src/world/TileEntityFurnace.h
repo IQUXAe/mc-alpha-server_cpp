@@ -206,6 +206,3 @@ inline void TileEntityFurnace::updateFurnaceBlockState(bool burning) {
     extern void updateFurnaceState(bool active, World* world, int x, int y, int z);
     updateFurnaceState(burning, worldObj, xCoord, yCoord, zCoord);
 }
-
-// Register TileEntityFurnace with ID "Furnace" (matching Java)
-REGISTER_TILE_ENTITY(TileEntityFurnace, "Furnace");

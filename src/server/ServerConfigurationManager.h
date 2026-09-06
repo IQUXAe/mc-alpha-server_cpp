@@ -81,7 +81,6 @@ private:
 
     // chunkKey -> set of player entity IDs who have this chunk loaded (sentChunks_)
     std::unordered_map<int64_t, std::unordered_set<int>> playersByChunk_;
-    EntityPlayerMP* getPlayerById(int entityId);
 
     void loadList(const std::string& filename, std::set<std::string>& list);
     void saveList(const std::string& filename, const std::set<std::string>& list);

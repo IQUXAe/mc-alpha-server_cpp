@@ -23,30 +23,12 @@ std::vector<uint8_t> fromRustBuffer(AlphaBuffer buffer) {
 
 namespace RustBridge {
 
-int32_t rngNextInt(int32_t bound) {
-    return ::alpha_rng_next_int(bound);
-}
-
 float rngNextFloat() {
     return ::alpha_rng_next_float();
 }
 
 double rngNextDouble() {
     return ::alpha_rng_next_double();
-}
-
-FfiItemStack itemStackCreate(int32_t itemID, int32_t stackSize, int32_t itemDamage) {
-    FfiItemStack result;
-    ::FfiItemStack raw = ::item_stack_create(itemID, stackSize, itemDamage);
-    std::memcpy(&result, &raw, sizeof(result));
-    return result;
-}
-
-FfiItemStack itemStackCopy(const FfiItemStack* stack) {
-    FfiItemStack result;
-    ::FfiItemStack raw = ::item_stack_copy(reinterpret_cast<const ::FfiItemStack*>(stack));
-    std::memcpy(&result, &raw, sizeof(result));
-    return result;
 }
 
 bool itemStackDamage(FfiItemStack* stack, int32_t damage, int32_t maxDamage) {
@@ -86,10 +68,6 @@ void signSetLine(FfiSignState* state, int32_t line, const char* text) {
     ::sign_set_line(reinterpret_cast<::FfiSignState*>(state), line, text);
 }
 
-bool enabled() {
-    return true;
-}
-
 std::vector<uint8_t> gzipCompress(const std::vector<uint8_t>& input, int level) {
     return fromRustBuffer(alpha_gzip_compress(input.data(), input.size(), level));
 }
@@ -98,20 +76,8 @@ std::vector<uint8_t> gzipDecompress(const std::vector<uint8_t>& input) {
     return fromRustBuffer(alpha_gzip_decompress(input.data(), input.size()));
 }
 
-std::vector<uint8_t> zstdCompress(const std::vector<uint8_t>& input, int level) {
-    return fromRustBuffer(alpha_zstd_compress(input.data(), input.size(), level));
-}
-
-std::vector<uint8_t> zstdDecompress(const std::vector<uint8_t>& input) {
-    return fromRustBuffer(alpha_zstd_decompress(input.data(), input.size()));
-}
-
 std::vector<uint8_t> zlibCompress(const std::vector<uint8_t>& input, int level) {
     return fromRustBuffer(alpha_zlib_compress(input.data(), input.size(), level));
-}
-
-std::vector<uint8_t> zlibDecompress(const std::vector<uint8_t>& input) {
-    return fromRustBuffer(alpha_zlib_decompress(input.data(), input.size()));
 }
 
 std::vector<uint8_t> encodeLevelDat(const LevelDatData& level) {
@@ -189,10 +155,6 @@ bool savePlayerData(const std::string& filepath, const AlphaPlayerData& data) {
 
 bool loadPlayerData(const std::string& filepath, AlphaPlayerData& outData) {
     return ::alpha_player_storage_load(filepath.c_str(), &outData);
-}
-
-int32_t inventoryMaxStackSize(int32_t itemId) {
-    return ::alpha_inventory_max_stack_size(itemId);
 }
 
 int32_t inventoryAddItem(FfiItemStack* slots, size_t slotsLen, FfiItemStack* stack, int32_t stackLimit) {

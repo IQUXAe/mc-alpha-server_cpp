@@ -44,5 +44,3 @@ public:
 public:
     RustBridge::FfiSignState state_;
 };
-
-REGISTER_TILE_ENTITY(TileEntitySign, "Sign");

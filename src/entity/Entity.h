@@ -102,7 +102,6 @@ public:
     virtual float getEyeHeight() const { return 0.0f; }
     virtual double getMountedYOffset() const { return static_cast<double>(height) * 0.75; }
     virtual void updateRiderPosition();
-    virtual void updateRidden();
     virtual void mountEntity(Entity* vehicle);
     virtual void onFall(float distance) {}
     virtual void setOnFire(int ticks);

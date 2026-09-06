@@ -14,9 +14,7 @@ class ServerConfigurationManager;
 class EntityTracker;
 class EntityTrackerEntry;
 class World;
-class WorldServer;
 class Chunk;
-class ChunkProvider;
 class Block;
 class Item;
 class ItemStack;
@@ -41,10 +39,7 @@ class Vec3D;
 struct MovingObjectPosition;
 class Material;
 class PropertyManager;
-class PlayerManager;
-class PlayerNBTManager;
 class ItemInWorldManager;
-class WorldManager;
 
 // Packet forward declarations
 class Packet0KeepAlive;

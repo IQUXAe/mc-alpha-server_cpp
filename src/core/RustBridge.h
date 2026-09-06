@@ -13,8 +13,6 @@ namespace RustBridge {
 
 using FfiItemStack = ::FfiItemStack;
 
-FfiItemStack itemStackCreate(int32_t itemID, int32_t stackSize, int32_t itemDamage);
-FfiItemStack itemStackCopy(const FfiItemStack* stack);
 bool itemStackDamage(FfiItemStack* stack, int32_t damage, int32_t maxDamage);
 
 using FfiFurnaceState = ::FfiFurnaceState;
@@ -53,16 +51,10 @@ struct LevelDatData {
 AlphaBlockProperties blockProperties(uint32_t id);
 Material* materialFromId(uint8_t materialId);
 
-bool enabled();
-
 std::vector<uint8_t> gzipCompress(const std::vector<uint8_t>& input, int level = -1);
 std::vector<uint8_t> gzipDecompress(const std::vector<uint8_t>& input);
 
-std::vector<uint8_t> zstdCompress(const std::vector<uint8_t>& input, int level = 1);
-std::vector<uint8_t> zstdDecompress(const std::vector<uint8_t>& input);
-
 std::vector<uint8_t> zlibCompress(const std::vector<uint8_t>& input, int level = -1);
-std::vector<uint8_t> zlibDecompress(const std::vector<uint8_t>& input);
 
 std::vector<uint8_t> encodeLevelDat(const LevelDatData& level);
 bool decodeLevelDat(const std::vector<uint8_t>& input, LevelDatData& outLevel);
@@ -74,7 +66,6 @@ bool savePlayerData(const std::string& filepath, const AlphaPlayerData& data);
 bool loadPlayerData(const std::string& filepath, AlphaPlayerData& outData);
 
 // Thread-safe RNG — backed by Rust's global Mutex<JavaRandom> seeded from /dev/urandom.
-int32_t rngNextInt(int32_t bound);
 float   rngNextFloat();
 double  rngNextDouble();
 
@@ -83,7 +74,6 @@ using FfiMovementInput = ::FfiMovementInput;
 using FfiMovementResult = ::FfiMovementResult;
 
 // Player Inventory & Crafting
-int32_t inventoryMaxStackSize(int32_t itemId);
 int32_t inventoryAddItem(FfiItemStack* slots, size_t slotsLen, FfiItemStack* stack, int32_t stackLimit = 64);
 int32_t inventoryCalcArmor(const FfiItemStack* armorSlots, size_t armorLen);
 void inventoryDamageArmor(FfiItemStack* armorSlots, size_t armorLen, int32_t damageAmount);

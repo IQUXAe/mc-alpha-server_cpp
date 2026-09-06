@@ -144,19 +144,6 @@ void Entity::updateRiderPosition() {
     }
 }
 
-void Entity::updateRidden() {
-    Entity* vehicle = getRidingEntity();
-    if (!vehicle) return;
-    if (vehicle->isDead) {
-        mountEntity(nullptr);
-        return;
-    }
-    motionX = 0.0;
-    motionY = 0.0;
-    motionZ = 0.0;
-    vehicle->updateRiderPosition();
-}
-
 void Entity::mountEntity(Entity* vehicle) {
     Entity* currentVehicle = getRidingEntity();
 

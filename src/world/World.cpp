@@ -1613,11 +1613,6 @@ std::unique_ptr<PathEntity> World::getPathToEntity(const Entity& from, const Ent
     return pathfinder.createEntityPathTo(from, to.posX, to.boundingBox.minY, to.posZ, maxDistance);
 }
 
-std::unique_ptr<PathEntity> World::getPathToPosition(const Entity& from, int x, int y, int z, float maxDistance) {
-    Pathfinder pathfinder(*this);
-    return pathfinder.createEntityPathTo(from, x, y, z, maxDistance);
-}
-
 EntityPlayerMP* World::getClosestPlayer(double x, double y, double z, double maxDistance) const {
     if (!mcServer || !mcServer->configManager) return nullptr;
     EntityPlayerMP* closest = nullptr;

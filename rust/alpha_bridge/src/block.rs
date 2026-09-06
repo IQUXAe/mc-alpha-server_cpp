@@ -1,5 +1,3 @@
-use std::mem;
-
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq)]
 pub enum BlockMaterial {
@@ -115,10 +113,6 @@ macro_rules! b {
             max_x: $maxx, max_y: $maxy, max_z: $maxz,
         }
     };
-}
-
-const fn hardness_default_resistance(h: f32) -> f32 {
-    if h * 5.0 > 0.0 { h * 5.0 } else { 0.0 }
 }
 
 const AIR: AlphaBlockProperties = AlphaBlockProperties {

@@ -64,17 +64,10 @@ public:
     double minX, minY, minZ;
     double maxX, maxY, maxZ;
 
-    Block(int id, Material* material);
     explicit Block(int id); // Reads all properties from Rust data table
     virtual ~Block() = default;
 
     static void initBlocks(); // Must be called once on server startup
-
-    virtual Block* setHardness(float hardness);
-    virtual Block* setResistance(float resistance);
-    virtual Block* setLightOpacity(int opacity);
-    virtual Block* setLightValue(float value);
-    virtual Block* setTickOnLoad(bool tick);
 
     void setBlockBounds(float minX, float minY, float minZ, float maxX, float maxY, float maxZ);
 

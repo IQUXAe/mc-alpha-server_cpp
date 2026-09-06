@@ -6,7 +6,7 @@
 static thread_local World* current_world = nullptr;
 
 ChunkProviderGenerate::ChunkProviderGenerate(World* world, int64_t seed, WorldChunkManager* managerOverride)
-    : worldObj(world), rand(seed),
+    : worldObj(world),
       chunkManager(managerOverride ? managerOverride : world->func_4077_a()) {
     
     rustGen_ = rust_chunk_provider_generate_create(seed);
@@ -17,13 +17,6 @@ ChunkProviderGenerate::~ChunkProviderGenerate() {
         rust_chunk_provider_generate_destroy(rustGen_);
         rustGen_ = nullptr;
     }
-}
-
-// Check if chunk can be populated (all 3 neighbors exist)
-bool ChunkProviderGenerate::canPopulateChunk(int chunkX, int chunkZ) {
-    return worldObj->chunkExists(chunkX + 1, chunkZ) &&
-           worldObj->chunkExists(chunkX, chunkZ + 1) &&
-           worldObj->chunkExists(chunkX + 1, chunkZ + 1);
 }
 
 void ChunkProviderGenerate::generateChunk(Chunk& chunk, bool generateLighting) {
@@ -50,13 +43,6 @@ void ChunkProviderGenerate::generateChunk(Chunk& chunk, bool generateLighting) {
     if (generateLighting) {
         chunk.generateSkylightMap();
     }
-}
-
-// Generate terrain for existing chunk (modified to work with pre-created chunk)
-void ChunkProviderGenerate::provideChunk(int chunkX, int chunkZ) {
-    Chunk* chunk = worldObj->getChunk(chunkX, chunkZ, false);
-    if (!chunk) return;
-    generateChunk(*chunk, true);
 }
 
 // Exact port of Java's populate delegating decoration to Rust with 2x2 chunk batch
