@@ -99,6 +99,17 @@ pub unsafe extern "C" fn alpha_inventory_add_item(
     }
 
     let slots_slice = std::slice::from_raw_parts_mut(slots, slots_len);
+    inventory_add_item_to(slots_slice, incoming, stack_limit)
+}
+
+/// Adds items to an inventory slice (e.g. the 36 main slots). Shared core
+/// for the FFI shell and the native player inventory: fills partial
+/// stacks first, then empty slots; returns the leftover `stack_size`.
+pub fn inventory_add_item_to(
+    slots_slice: &mut [FfiItemStack],
+    incoming: &mut FfiItemStack,
+    stack_limit: i32,
+) -> i32 {
     let max_stack = alpha_inventory_max_stack_size(incoming.item_id);
     let stackable = max_stack > 1;
 
@@ -192,6 +203,12 @@ pub unsafe extern "C" fn alpha_inventory_calc_armor(
     }
 
     let armor = std::slice::from_raw_parts(armor_slots, armor_len);
+    inventory_armor_value(armor)
+}
+
+/// Total armor defense from worn pieces (0-20 points, Alpha durability
+/// weighting). Shared core for the FFI shell and native combat.
+pub fn inventory_armor_value(armor: &[FfiItemStack]) -> i32 {
     let mut total_reduction = 0;
     let mut total_durability = 0;
     let mut remaining_durability = 0;
@@ -236,6 +253,15 @@ pub unsafe extern "C" fn alpha_inventory_damage_armor(
     }
 
     let armor = std::slice::from_raw_parts_mut(armor_slots, armor_len);
+    inventory_damage_armor(armor, damage_amount)
+}
+
+/// Damages all worn armor pieces, breaking depleted ones. Shared core for
+/// the FFI shell and native combat.
+pub fn inventory_damage_armor(armor: &mut [FfiItemStack], damage_amount: i32) {
+    if damage_amount <= 0 {
+        return;
+    }
     for item in armor.iter_mut() {
         if item.item_id <= 0 || item.stack_size <= 0 {
             continue;

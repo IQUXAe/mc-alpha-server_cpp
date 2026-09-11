@@ -1,5 +1,5 @@
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FfiItemStack {
     pub stack_size: i32,
     pub animations_to_go: i32,

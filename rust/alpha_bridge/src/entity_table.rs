@@ -352,6 +352,60 @@ pub struct PlayerEnt {
     pub living: LivingBody,
     pub username: String,
     pub score: i32,
+    pub inventory: PlayerInventory,
+    /// Ticks of post-respawn immunity (mirrors
+    /// `respawnInvulnerabilityTicks`, fresh spawns start at 60).
+    pub respawn_ticks: i32,
+    /// Fractional armor carry (mirrors `armorDamageCarry`).
+    pub armor_carry: i32,
+}
+
+/// Native player inventory (mirrors `InventoryPlayer`: 36 main, 4 armor,
+/// 4 crafting slots plus the held-slot index). Empty is `None`, matching
+/// the C++ null `unique_ptr` slots.
+#[derive(Clone, Debug)]
+pub struct PlayerInventory {
+    pub main: [Option<crate::inventory::FfiItemStack>; 36],
+    pub armor: [Option<crate::inventory::FfiItemStack>; 4],
+    pub crafting: [Option<crate::inventory::FfiItemStack>; 4],
+    pub current: i32,
+}
+
+impl Default for PlayerInventory {
+    fn default() -> Self {
+        Self {
+            main: [None; 36],
+            armor: [None; 4],
+            crafting: [None; 4],
+            current: 0,
+        }
+    }
+}
+
+impl PlayerInventory {
+    /// Held stack (`getCurrentItem`): `None` out of range or empty.
+    pub fn held(&self) -> Option<crate::inventory::FfiItemStack> {
+        if self.current >= 0 && (self.current as usize) < self.main.len() {
+            self.main[self.current as usize]
+        } else {
+            None
+        }
+    }
+}
+
+impl PlayerEnt {
+    /// Fresh player row (mirrors the `EntityPlayer` ctor dims with an
+    /// empty inventory and full respawn immunity).
+    pub fn new(id: EntityId, username: &str) -> Self {
+        Self {
+            living: LivingBody::new(id, 0.6, 1.8, 0.0),
+            username: username.to_string(),
+            score: 0,
+            inventory: PlayerInventory::default(),
+            respawn_ticks: 60,
+            armor_carry: 0,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -577,9 +631,9 @@ mod tests {
 
     fn player(table: &mut EntityTable, name: &str) -> EntityId {
         let id = table.alloc_id();
-        let mut l = LivingBody::new(id, 0.6, 1.8, 0.0);
-        l.body.set_position(11.0, 64.0, 10.0);
-        table.insert(Entity::Player(PlayerEnt { living: l, username: name.to_string(), score: 0 }));
+        let mut p = PlayerEnt::new(id, name);
+        p.living.body.set_position(11.0, 64.0, 10.0);
+        table.insert(Entity::Player(p));
         id
     }
 

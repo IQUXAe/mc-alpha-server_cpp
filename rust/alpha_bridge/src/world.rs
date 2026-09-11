@@ -82,6 +82,9 @@ pub struct World {
     pub seed: i64,
     pub time: i64,
     pub spawn: [i32; 3],
+    /// Peaceful/easy/normal/hard (0..3, mirrors server difficulty;
+    /// scales mob-vs-player damage; default normal like the C++ server).
+    pub difficulty: i32,
     chunks: HashMap<(i32, i32), Chunk>,
     pub entities: EntityTable,
     pub tracker: Tracker,
@@ -100,6 +103,7 @@ impl World {
             seed,
             time: 0,
             spawn: [0, 64, 0],
+            difficulty: 2,
             chunks: HashMap::new(),
             entities: EntityTable::new(),
             tracker: Tracker::new(),
@@ -776,7 +780,7 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entity_table::{LivingBody, PlayerEnt};
+    use crate::entity_table::{LivingBody, MobEnt, PlayerEnt};
 
     fn world_with_floor() -> World {
         let mut w = World::new(1234);
@@ -793,13 +797,10 @@ mod tests {
 
     fn add_player(w: &mut World, name: &str, x: f64, y: f64, z: f64) -> EntityId {
         let id = w.entities.alloc_id();
-        let mut l = LivingBody::new(id, 0.6, 1.8, 0.0);
-        l.body.set_position(x, y, z);
-        w.entities.insert(crate::entity_table::Entity::Player(PlayerEnt {
-            living: l,
-            username: name.to_string(),
-            score: 0,
-        }));
+        let mut p = PlayerEnt::new(id, name);
+        p.living.body.set_position(x, y, z);
+        p.respawn_ticks = 0; // tests fight immediately; spawns get immunity
+        w.entities.insert(crate::entity_table::Entity::Player(p));
         id
     }
 
@@ -931,7 +932,7 @@ mod tests {
     }
 
     fn add_zombie(w: &mut World, x: f64, y: f64, z: f64) -> EntityId {
-        use crate::entity_table::{LivingBody, MobEnt};
+    use crate::entity_table::{LivingBody, MobEnt};
         let id = w.entities.alloc_id();
         let mut l = LivingBody::new(id, 0.6, 1.9, 0.0);
         l.body.set_position(x, y, z);
@@ -1080,7 +1081,7 @@ mod tests {
         assert!(w.entities.get(id).unwrap().body().dead);
     }
 
-    use crate::entity_table::{AnimalEnt, AnimalKind, MobEnt, MobKind};
+    use crate::entity_table::{AnimalEnt, AnimalKind, MobKind};
 
     fn add_mob(w: &mut World, kind: MobKind, x: f64, y: f64, z: f64) -> EntityId {
         let id = w.entities.alloc_id();
@@ -1508,7 +1509,7 @@ mod tests {
     }
 
     #[test]
-    fn test_player_damage_and_death_without_drops() {
+    fn test_player_damage_and_empty_death() {
         let mut w = world_with_floor();
         let player = add_player(&mut w, "steve", 3.5, 64.0, 4.5);
         let zombie = add_mob(&mut w, MobKind::Zombie, 8.5, 64.0, 4.5);
@@ -1517,8 +1518,149 @@ mod tests {
         let before = w.entities.len();
         w.attack_living(player, 100, Some(zombie));
         assert!(w.entities.get(player).unwrap().body().dead);
-        // Death marks dead only: inventory drops are the player slice.
+        // Empty inventory scatters nothing.
         assert_eq!(w.entities.len(), before);
+    }
+
+    fn stk(item_id: i32, count: i32, damage: i32) -> crate::inventory::FfiItemStack {
+        crate::inventory::FfiItemStack {
+            stack_size: count,
+            animations_to_go: 0,
+            item_id,
+            item_damage: damage,
+        }
+    }
+
+    fn set_slot(w: &mut World, id: EntityId, bank: u8, slot: usize, s: crate::inventory::FfiItemStack) {
+        if let Some(crate::entity_table::Entity::Player(p)) = w.entities.get_mut(id) {
+            let bank = match bank {
+                0 => &mut p.inventory.main[..],
+                1 => &mut p.inventory.armor[..],
+                _ => &mut p.inventory.crafting[..],
+            };
+            bank[slot] = Some(s);
+        }
+    }
+
+    fn player_items(w: &World) -> Vec<(i32, i32, i32)> {
+        // (item_id, count, pickup_delay) of every live loose item.
+        let mut out: Vec<(i32, i32, i32)> = w
+            .entities
+            .alive_ids()
+            .into_iter()
+            .filter_map(|oid| match w.entities.get(oid).unwrap() {
+                crate::entity_table::Entity::Item(e) => Some((e.item_id, e.count, e.pickup_delay)),
+                _ => None,
+            })
+            .collect();
+        out.sort_unstable();
+        out
+    }
+
+    #[test]
+    fn test_player_death_scatters_inventory() {
+        let mut w = world_with_floor();
+        let player = add_player(&mut w, "steve", 3.5, 64.0, 4.5);
+        let zombie = add_mob(&mut w, MobKind::Zombie, 8.5, 64.0, 4.5);
+        set_slot(&mut w, player, 0, 0, stk(3, 10, 0)); // dirt x10
+        set_slot(&mut w, player, 1, 0, stk(306, 1, 0)); // iron helm
+        set_slot(&mut w, player, 2, 2, stk(280, 5, 0)); // sticks x5
+        w.attack_living(player, 100, Some(zombie));
+        assert!(w.entities.get(player).unwrap().body().dead);
+        assert_eq!(player_items(&w), vec![(3, 10, 40), (280, 5, 40), (306, 1, 40)]);
+        // Spawn height is feet + 0.5 with an upward toss.
+        for oid in w.entities.alive_ids() {
+            if let crate::entity_table::Entity::Item(e) = w.entities.get(oid).unwrap() {
+                assert_eq!(e.body.pos[1], 64.5);
+                assert!(e.body.motion[1] > 0.0);
+            }
+        }
+        // All banks cleared.
+        assert!(matches!(
+            w.entities.get(player).unwrap(),
+            crate::entity_table::Entity::Player(p)
+                if p.inventory.main.iter().all(|s| s.is_none())
+                    && p.inventory.armor.iter().all(|s| s.is_none())
+                    && p.inventory.crafting.iter().all(|s| s.is_none())
+        ));
+    }
+
+    #[test]
+    fn test_player_respawn_immunity() {
+        let mut w = world_with_floor();
+        let player = add_player(&mut w, "steve", 3.5, 64.0, 4.5);
+        let zombie = add_mob(&mut w, MobKind::Zombie, 4.5, 64.0, 4.5);
+        if let Some(crate::entity_table::Entity::Player(p)) = w.entities.get_mut(player) {
+            p.respawn_ticks = 10;
+        }
+        w.attack_living(player, 5, Some(zombie));
+        assert_eq!(player_health(&w, player), 20);
+    }
+
+    #[test]
+    fn test_player_armor_absorbs_and_wears() {
+        let mut w = world_with_floor();
+        let player = add_player(&mut w, "steve", 3.5, 64.0, 4.5);
+        let zombie = add_mob(&mut w, MobKind::Zombie, 8.5, 64.0, 4.5);
+        // Full iron: 3 + 8 + 6 + 3 = 20 points at full durability.
+        set_slot(&mut w, player, 1, 0, stk(306, 1, 0));
+        set_slot(&mut w, player, 1, 1, stk(307, 1, 0));
+        set_slot(&mut w, player, 1, 2, stk(308, 1, 0));
+        set_slot(&mut w, player, 1, 3, stk(309, 1, 0));
+        w.attack_living(player, 10, Some(zombie));
+        // scaled = 10 * (25 - 20) = 50 -> 2 damage through, carry 0.
+        assert_eq!(player_health(&w, player), 18);
+        assert!(matches!(
+            w.entities.get(player).unwrap(),
+            crate::entity_table::Entity::Player(p)
+                if p.armor_carry == 0
+                    && p.inventory.armor.iter().all(|s| s.map(|x| x.item_damage) == Some(10))
+        ));
+    }
+
+    #[test]
+    fn test_player_peaceful_ignores_mob_hit() {
+        let mut w = world_with_floor();
+        w.difficulty = 0;
+        let player = add_player(&mut w, "steve", 3.5, 64.0, 4.5);
+        let zombie = add_mob(&mut w, MobKind::Zombie, 4.5, 64.0, 4.5);
+        w.attack_living(player, 5, Some(zombie));
+        assert_eq!(player_health(&w, player), 20);
+    }
+
+    #[test]
+    fn test_player_pickup_merges_and_overflows() {
+        let mut w = world_with_floor();
+        let player = add_player(&mut w, "steve", 3.5, 64.0, 4.5);
+        assert_eq!(w.player_add_item(player, stk(3, 10, 0)), 0);
+        assert_eq!(w.player_add_item(player, stk(3, 60, 0)), 0);
+        let main: Vec<Option<(i32, i32)>> = match w.entities.get(player).unwrap() {
+            crate::entity_table::Entity::Player(p) => {
+                p.inventory.main.iter().take(3).map(|s| s.map(|x| (x.item_id, x.stack_size))).collect()
+            }
+            _ => unreachable!(),
+        };
+        assert_eq!(main, vec![Some((3, 64)), Some((3, 6)), None]);
+        // Bad ids refuse.
+        assert_eq!(w.player_add_item(player, stk(0, 5, 0)), 5);
+        assert_eq!(w.player_add_item(player, stk(32000, 5, 0)), 5);
+        assert_eq!(w.player_add_item(player, stk(3, 0, 0)), 0);
+    }
+
+    #[test]
+    fn test_player_held_slot() {
+        let mut w = world_with_floor();
+        let player = add_player(&mut w, "steve", 3.5, 64.0, 4.5);
+        assert_eq!(w.player_held(player), None);
+        set_slot(&mut w, player, 0, 2, stk(5, 3, 0));
+        if let Some(crate::entity_table::Entity::Player(p)) = w.entities.get_mut(player) {
+            p.inventory.current = 2;
+        }
+        assert_eq!(w.player_held(player).map(|s| (s.item_id, s.stack_size)), Some((5, 3)));
+        if let Some(crate::entity_table::Entity::Player(p)) = w.entities.get_mut(player) {
+            p.inventory.current = 99;
+        }
+        assert_eq!(w.player_held(player), None);
     }
 }
 
@@ -1533,11 +1675,20 @@ impl World {
     /// Damage pipeline on a native living row (mirrors
     /// `EntityLiving::attackEntityFrom` + `onDeath` with mob/animal drops).
     /// `attacker` supplies knockback direction; `None` skips it. Players
-    /// take damage and knockback like mobs; their inventory drops arrive
-    /// with the player slice (death only marks dead for now).
+    /// route through respawn immunity, difficulty scaling, and armor like
+    /// `EntityPlayerMP::attackEntityFrom` (death message and the health
+    /// packet are the network slice's).
     pub fn attack_living(&mut self, id: EntityId, amount: i32, attacker: Option<EntityId>) {
         use crate::entity_living::{AttackInput, living_attack_run};
         self.sheep_shear(id, attacker);
+        let amount = match self.entities.get(id) {
+            Some(Entity::Player(p)) if p.respawn_ticks > 0 => return,
+            Some(Entity::Player(_)) => match self.player_armored_damage(id, amount, attacker) {
+                Some(scaled) => scaled,
+                None => return,
+            },
+            _ => amount,
+        };
         let input = match self.entities.get(id) {
             Some(Entity::Mob(_)) | Some(Entity::Animal(_)) | Some(Entity::Player(_)) => {
                 let (l, px, pz) = match self.entities.get(id) {
@@ -1681,15 +1832,161 @@ impl World {
             self.entities.mount(ridden_by, None);
         }
         // Kind drops for mobs/animals (counts mirror the C++ getDropCount
-        // formulas); players drop nothing yet (player slice).
+        // formulas); players scatter their inventory instead.
         if matches!(self.entities.get(id), Some(Entity::Mob(_)) | Some(Entity::Animal(_))) {
             let (drop_id, drop_count) = self.living_drops(id);
             for _ in 0..drop_count {
                 self.spawn_item_entity(drop_id, 1, 0, px, py, pz);
             }
         }
+        if matches!(self.entities.get(id), Some(Entity::Player(_))) {
+            self.scatter_player_inventory(id, px, py, pz);
+        }
         if let Some(e) = self.entities.get_mut(id) {
             e.body_mut().dead = true;
+        }
+    }
+
+    /// Player damage scaling (mirrors `EntityPlayerMP::attackEntityFrom`
+    /// minus messaging and packets): difficulty scaling plus armor
+    /// absorption with carry, damaging worn armor on the way. Returns
+    /// `None` when the hit is fully absorbed.
+    fn player_armored_damage(
+        &mut self,
+        id: EntityId,
+        amount: i32,
+        attacker: Option<EntityId>,
+    ) -> Option<i32> {
+        use crate::inventory::FfiItemStack;
+        use crate::player_combat::alpha_combat_calculate_damage;
+        use crate::player_inventory::{inventory_armor_value, inventory_damage_armor};
+        let attacker_is_player = attacker
+            .and_then(|a| self.entities.get(a))
+            .map(|e| matches!(e, Entity::Player(_)))
+            .unwrap_or(false);
+        let mut tmp = [FfiItemStack {
+            stack_size: 0,
+            animations_to_go: 0,
+            item_id: 0,
+            item_damage: 0,
+        }; 4];
+        let carry = match self.entities.get(id) {
+            Some(Entity::Player(p)) => {
+                for (i, slot) in p.inventory.armor.iter().enumerate() {
+                    tmp[i] = slot.unwrap_or(tmp[i]);
+                }
+                p.armor_carry
+            }
+            _ => return Some(amount),
+        };
+        let res = alpha_combat_calculate_damage(
+            amount,
+            attacker_is_player,
+            self.difficulty,
+            inventory_armor_value(&tmp),
+            carry,
+        );
+        if res.scaled_damage <= 0 {
+            return None;
+        }
+        inventory_damage_armor(&mut tmp, res.scaled_damage);
+        if let Some(Entity::Player(p)) = self.entities.get_mut(id) {
+            p.armor_carry = res.new_armor_damage_carry;
+            for (i, slot) in p.inventory.armor.iter_mut().enumerate() {
+                *slot = if tmp[i].item_id > 0 && tmp[i].stack_size > 0 {
+                    Some(tmp[i])
+                } else {
+                    None
+                };
+            }
+        }
+        Some(res.damage_after_armor)
+    }
+
+    /// Death scatter (mirrors `EntityPlayerMP::onDeath` drops): every
+    /// non-empty main/armor/crafting stack becomes an item entity at feet
+    /// + 0.5 with drop velocity (3 world-RNG draws per stack, like the C++
+    /// `playerDropVelocity` call) and a 40-tick pickup delay; all banks
+    /// clear. The inventory-resend packet is the network slice's.
+    fn scatter_player_inventory(&mut self, id: EntityId, px: f64, py: f64, pz: f64) {
+        use crate::entity_player::alpha_player_drop_velocity;
+        let stacks: Vec<crate::inventory::FfiItemStack> = match self.entities.get(id) {
+            Some(Entity::Player(p)) => p
+                .inventory
+                .main
+                .iter()
+                .chain(p.inventory.armor.iter())
+                .chain(p.inventory.crafting.iter())
+                .filter_map(|s| *s)
+                .collect(),
+            _ => return,
+        };
+        if let Some(Entity::Player(p)) = self.entities.get_mut(id) {
+            p.inventory.main = [None; 36];
+            p.inventory.armor = [None; 4];
+            p.inventory.crafting = [None; 4];
+        }
+        for s in stacks {
+            if s.stack_size <= 0 || s.item_id <= 0 {
+                continue;
+            }
+            let (ra, rb, rc) =
+                (self.rng.next_double(), self.rng.next_double(), self.rng.next_double());
+            let v = alpha_player_drop_velocity(ra, rb, rc);
+            let eid = self.spawn_item_entity(s.item_id, s.stack_size, s.item_damage, px, py + 0.5, pz);
+            if let Some(Entity::Item(e)) = self.entities.get_mut(eid) {
+                e.body.motion = [v.mx, v.my, v.mz];
+                e.pickup_delay = 40;
+            }
+        }
+    }
+
+    /// Pick up a stack into main inventory (mirrors
+    /// `addItemStackToInventory` acceptance: empty and out-of-range ids
+    /// refuse). Returns the leftover count like the C++ remainder write.
+    pub fn player_add_item(
+        &mut self,
+        id: EntityId,
+        mut stack: crate::inventory::FfiItemStack,
+    ) -> i32 {
+        use crate::inventory::FfiItemStack;
+        use crate::player_inventory::inventory_add_item_to;
+        if stack.stack_size <= 0 {
+            return 0;
+        }
+        if stack.item_id <= 0 || stack.item_id >= 32000 {
+            return stack.stack_size;
+        }
+        match self.entities.get_mut(id) {
+            Some(Entity::Player(p)) => {
+                let mut tmp = [FfiItemStack {
+                    stack_size: 0,
+                    animations_to_go: 0,
+                    item_id: 0,
+                    item_damage: 0,
+                }; 36];
+                for (i, slot) in p.inventory.main.iter().enumerate() {
+                    tmp[i] = slot.unwrap_or(tmp[i]);
+                }
+                let rem = inventory_add_item_to(&mut tmp, &mut stack, 64);
+                for (i, slot) in p.inventory.main.iter_mut().enumerate() {
+                    *slot = if tmp[i].item_id > 0 && tmp[i].stack_size > 0 {
+                        Some(tmp[i])
+                    } else {
+                        None
+                    };
+                }
+                rem
+            }
+            _ => stack.stack_size,
+        }
+    }
+
+    /// Held stack (mirrors `getCurrentItem`).
+    pub fn player_held(&self, id: EntityId) -> Option<crate::inventory::FfiItemStack> {
+        match self.entities.get(id) {
+            Some(Entity::Player(p)) => p.inventory.held(),
+            _ => None,
         }
     }
 
