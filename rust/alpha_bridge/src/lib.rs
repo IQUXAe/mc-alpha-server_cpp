@@ -391,6 +391,7 @@ pub extern "C" fn alpha_zlib_compress(
 }
 
 pub mod block;
+pub mod byte_buffer;
 pub mod inventory;
 pub mod tile_entity_furnace;
 pub mod tile_entity_chest;
@@ -423,6 +424,7 @@ pub mod aabb;
 pub mod math_helper;
 pub mod server_constants;
 pub mod vec3d;
+pub mod item_data;
 
 use crate::random::JavaRandom;
 use crate::noise::{NoiseGeneratorOctaves, NoiseGeneratorOctaves2};
