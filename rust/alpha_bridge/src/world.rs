@@ -46,7 +46,7 @@ pub const WORLD_HEIGHT: i32 = 128;
 /// Block types with no collision box (mirrors the C++ `nullopt`
 /// `getCollisionBoundingBoxFromPool` overrides: fluids, plants, torches,
 /// saplings, crops, fire).
-fn has_collision_box(block_type: u8) -> bool {
+pub(crate) fn has_collision_box(block_type: u8) -> bool {
     !matches!(
         block_type,
         x if x == BlockType::Fluid as u8
@@ -184,6 +184,22 @@ impl World {
     /// Crate-visible chunk lookup for persistence.
     pub(crate) fn chunk_ref(&self, cx: i32, cz: i32) -> Option<&Chunk> {
         self.chunks.get(&(cx, cz))
+    }
+
+    /// Crate-visible RNG draws (driver shims share the world stream).
+    pub(crate) fn rng_next_int(&mut self, bound: i32) -> i32 {
+        if bound <= 0 {
+            return 0;
+        }
+        self.rng.next_int_bound(bound)
+    }
+
+    pub(crate) fn rng_next_f64(&mut self) -> f64 {
+        self.rng.next_double()
+    }
+
+    pub(crate) fn rng_next_f32(&mut self) -> f32 {
+        self.rng.next_float()
     }
 
     pub fn has_chunk(&self, cx: i32, cz: i32) -> bool {
@@ -2097,6 +2113,18 @@ impl World {
         }
     }
 
+    /// Crate-visible eye height for sessions.
+    pub(crate) fn living_eye_height_pub(e: &Entity) -> f64 {
+        Self::living_eye_height(e)
+    }
+
+    /// Crate-visible chunk dirty flag for tile updates.
+    pub(crate) fn mark_chunk_modified(&mut self, cx: i32, cz: i32) {
+        if let Some(c) = self.chunks.get_mut(&(cx, cz)) {
+            c.is_modified = true;
+        }
+    }
+
     /// Damage pipeline on a native living row (mirrors
     /// `EntityLiving::attackEntityFrom` + `onDeath` with mob/animal drops).
     /// `attacker` supplies knockback direction; `None` skips it. Players
@@ -3347,6 +3375,181 @@ impl World {
         true
     }
 
+    /// First-hit ray trace with liquids included (mirrors `rayTraceBlocks`
+    /// with `includeLiquids = true` for boat aiming): same DDA walk,
+    /// returning the first collidable cell. Still fluids block the ray
+    /// (flowing water 1..7 lets it through like `canCollideCheck`).
+    pub fn ray_trace_hit_liquids(&self, from: [f64; 3], to: [f64; 3]) -> Option<[i32; 3]> {
+        if ![from[0], from[1], from[2], to[0], to[1], to[2]].iter().all(|v| v.is_finite()) {
+            return None;
+        }
+        let (mut cx, mut cy, mut cz) = (from[0], from[1], from[2]);
+        let (mut ccx, mut ccy, mut ccz) = (cx.floor() as i32, cy.floor() as i32, cz.floor() as i32);
+        let (tx, ty, tz) = (to[0].floor() as i32, to[1].floor() as i32, to[2].floor() as i32);
+        for _ in 0..=200 {
+            if !cx.is_finite() || !cy.is_finite() || !cz.is_finite() {
+                return None;
+            }
+            if ccx == tx && ccy == ty && ccz == tz {
+                return None;
+            }
+            let (mut nbx, mut nby, mut nbz) = (999.0f64, 999.0f64, 999.0f64);
+            if tx > ccx {
+                nbx = ccx as f64 + 1.0;
+            }
+            if tx < ccx {
+                nbx = ccx as f64;
+            }
+            if ty > ccy {
+                nby = ccy as f64 + 1.0;
+            }
+            if ty < ccy {
+                nby = ccy as f64;
+            }
+            if tz > ccz {
+                nbz = ccz as f64 + 1.0;
+            }
+            if tz < ccz {
+                nbz = ccz as f64;
+            }
+            let (dx, dy, dz) = (to[0] - cx, to[1] - cy, to[2] - cz);
+            let (mut sx, mut sy, mut sz) = (999.0f64, 999.0f64, 999.0f64);
+            if nbx != 999.0 && dx.abs() > 1.0e-7 {
+                sx = (nbx - cx) / dx;
+            }
+            if nby != 999.0 && dy.abs() > 1.0e-7 {
+                sy = (nby - cy) / dy;
+            }
+            if nbz != 999.0 && dz.abs() > 1.0e-7 {
+                sz = (nbz - cz) / dz;
+            }
+            let side: i8;
+            if sx < sy && sx < sz {
+                side = if tx > ccx { 4 } else { 5 };
+                cx = nbx;
+                cy += dy * sx;
+                cz += dz * sx;
+            } else if sy < sz {
+                side = if ty > ccy { 0 } else { 1 };
+                cx += dx * sy;
+                cy = nby;
+                cz += dz * sy;
+            } else {
+                side = if tz > ccz { 2 } else { 3 };
+                cx += dx * sz;
+                cy += dy * sz;
+                cz = nbz;
+            }
+            ccx = cx.floor() as i32;
+            if side == 5 {
+                ccx -= 1;
+            }
+            ccy = cy.floor() as i32;
+            if side == 1 {
+                ccy -= 1;
+            }
+            ccz = cz.floor() as i32;
+            if side == 3 {
+                ccz -= 1;
+            }
+            let bid = self.get_block_id(ccx, ccy, ccz);
+            if bid == 0 {
+                continue;
+            }
+            if alpha_block_properties_get(bid as u32).block_type == BlockType::Fluid as u8 {
+                // canCollideCheck(meta, true): falling (8+) reads as still,
+                // still (0) blocks, flowing (1..7) lets the ray through.
+                let mut meta = self.get_block_meta(ccx, ccy, ccz);
+                if meta >= 8 {
+                    meta = 0;
+                }
+                if meta != 0 {
+                    continue;
+                }
+            }
+            return Some([ccx, ccy, ccz]);
+        }
+        None
+    }
+
+    /// Melee line of sight (mirrors the attack `hasLineOfSight`): the
+    /// attacker's eye against three target samples (feet + 0.1, middle,
+    /// eye), blocked by swept collision boxes strictly inside the segment
+    /// (`+ 1.0E-6 <` like C++).
+    pub fn attack_los(&self, attacker_id: EntityId, target_id: EntityId) -> bool {
+        use crate::vec3d::Vec3D;
+        let (eye, samples) = match (self.entities.get(attacker_id), self.entities.get(target_id)) {
+            (Some(a), Some(t)) => {
+                let ab = a.body();
+                let eye =
+                    Vec3D::new(ab.pos[0], ab.pos[1] + Self::living_eye_height(a), ab.pos[2]);
+                let tb = t.body();
+                let teye = Self::living_eye_height(t);
+                (
+                    eye,
+                    [
+                        Vec3D::new(tb.pos[0], tb.bounding_box.min_y + 0.1, tb.pos[2]),
+                        Vec3D::new(tb.pos[0], tb.pos[1] + tb.height as f64 * 0.5, tb.pos[2]),
+                        Vec3D::new(tb.pos[0], tb.pos[1] + teye, tb.pos[2]),
+                    ],
+                )
+            }
+            _ => return false,
+        };
+        for to in &samples {
+            if !self.segment_blocked(&eye, to) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Swept-box segment test for [`World::attack_los`] (mirrors
+    /// `rayHitsSolidBlock`): any collidable cell box clipped by the
+    /// segment strictly inside counts.
+    fn segment_blocked(&self, from: &crate::vec3d::Vec3D, to: &crate::vec3d::Vec3D) -> bool {
+        let min_x = floor_double(from.x_coord.min(to.x_coord));
+        let min_y = floor_double(from.y_coord.min(to.y_coord));
+        let min_z = floor_double(from.z_coord.min(to.z_coord));
+        let max_x = floor_double(from.x_coord.max(to.x_coord));
+        let max_y = floor_double(from.y_coord.max(to.y_coord));
+        let max_z = floor_double(from.z_coord.max(to.z_coord));
+        let target_sq = (from.x_coord - to.x_coord).powi(2)
+            + (from.y_coord - to.y_coord).powi(2)
+            + (from.z_coord - to.z_coord).powi(2);
+        for x in min_x..=max_x {
+            for y in min_y..=max_y {
+                for z in min_z..=max_z {
+                    let bid = self.get_block_id(x, y, z);
+                    if bid == 0 {
+                        continue;
+                    }
+                    let props = alpha_block_properties_get(bid as u32);
+                    if !has_collision_box(props.block_type) {
+                        continue;
+                    }
+                    let bb = AxisAlignedBB::get_bounding_box(
+                        x as f64 + props.min_x as f64,
+                        y as f64 + props.min_y as f64,
+                        z as f64 + props.min_z as f64,
+                        x as f64 + props.max_x as f64,
+                        y as f64 + props.max_y as f64,
+                        z as f64 + props.max_z as f64,
+                    );
+                    if let Some(hit) = bb.clip(from, to) {
+                        let d = (from.x_coord - hit.hit_vec.x_coord).powi(2)
+                            + (from.y_coord - hit.hit_vec.y_coord).powi(2)
+                            + (from.z_coord - hit.hit_vec.z_coord).powi(2);
+                        if d + 1.0e-6 < target_sq {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
     /// Phase-1 attack dispatch (mirrors `attackEntityAt` → per-kind
     /// `attackTarget`). `dist` is the C++ phase-1 distance
     /// (`sqrt_float(float(full 3D pos distSq))`). Returns the effective
@@ -3663,7 +3866,7 @@ impl World {
 
     /// Soil check for fire (mirrors `doesBlockAllowAttachment`: solid and
     /// movement-blocking material).
-    fn block_allows_attachment(&self, x: i32, y: i32, z: i32) -> bool {
+    pub(crate) fn block_allows_attachment(&self, x: i32, y: i32, z: i32) -> bool {
         let bid = self.get_block_id(x, y, z);
         if bid == 0 {
             return false;
@@ -4081,6 +4284,33 @@ extern "C" fn spawn_jockey(fx: f32, fy: f32, fz: f32, yaw: f32, host_id: i32) ->
         world.entities.mount(id, Some(host_id));
         true
     })
+}
+
+/// Nest-safe tick-bridge scope: runs `f` with the bridge pointing at
+/// `world`, restoring the previous pointer after (unlike `TickGuard`,
+/// which always clears).
+pub(crate) fn with_tick_bridge<T>(world: *mut World, f: impl FnOnce() -> T) -> T {
+    struct Restore {
+        prev: *mut World,
+    }
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TICK_WORLD.with(|t| t.set(self.prev));
+        }
+    }
+    let prev = TICK_WORLD.with(|t| {
+        let p = t.get();
+        t.set(world);
+        p
+    });
+    let _restore = Restore { prev };
+    f()
+}
+
+/// Shared tick table for cross-bridge use (canStay routing from item
+/// verbs, drops from harvests).
+pub(crate) fn tick_table_ref() -> &'static BlockTickWorld {
+    &TICK_TABLE
 }
 
 fn spawner_table() -> crate::mob_spawning::SpawnerWorld {
@@ -4579,22 +4809,7 @@ extern "C" fn tick_spawn_falling(block_id: u8, fx: f64, fy: f64, fz: f64) {
 extern "C" fn tick_drop_occupant(x: i32, y: i32, z: i32) {
     // dropBlockAsItem with chance 1.0. The C++ needs-server guard is a
     // client check; the native world is always the server side.
-    with_tick_world(
-        |w| {
-            let bid = w.get_block_id(x, y, z);
-            if bid == 0 {
-                return;
-            }
-            let (drop, qty, _) = World::native_drop_ids(bid);
-            if drop <= 0 {
-                return;
-            }
-            unsafe {
-                block_base_drop(&TICK_TABLE, drop, qty, 0, x, y, z, 1.0);
-            }
-        },
-        (),
-    );
+    with_tick_world(|w| w.drop_block_as_item(x, y, z), ());
 }
 
 extern "C" fn tick_detonate(_x: i32, _y: i32, _z: i32) {
@@ -4698,7 +4913,7 @@ impl World {
     /// quantityDropped / damageDropped call sites. No damageDropped
     /// overrides exist, so damage is always 0; tallgrass and mushrooms
     /// force (0, 0, 0) via their class overrides (not the props table).
-    fn native_drop_ids(bid: u8) -> (i32, i32, i32) {
+    pub(crate) fn native_drop_ids(bid: u8) -> (i32, i32, i32) {
         match bid {
             31 | 39 | 40 => (0, 0, 0),
             _ => {
@@ -4711,7 +4926,7 @@ impl World {
     /// Placement write (mirrors `setBlockWithNotify` minus removal scatter
     /// and client packets): set the id, run the added-router, notify
     /// neighbors.
-    fn apply_set_notify(&mut self, x: i32, y: i32, z: i32, id: u8) -> bool {
+    pub(crate) fn apply_set_notify(&mut self, x: i32, y: i32, z: i32, id: u8) -> bool {
         if !self.set_block_id(x, y, z, id) {
             return false;
         }
@@ -4722,7 +4937,7 @@ impl World {
 
     /// Id+meta placement write (mirrors `setBlockAndMetadataWithNotify`
     /// the same way).
-    fn apply_set_meta_notify(&mut self, x: i32, y: i32, z: i32, id: u8, meta: u8) -> bool {
+    pub(crate) fn apply_set_meta_notify(&mut self, x: i32, y: i32, z: i32, id: u8, meta: u8) -> bool {
         if y < 0 || y >= WORLD_HEIGHT {
             return false;
         }
@@ -4742,8 +4957,28 @@ impl World {
         }
     }
 
-    /// Placement router (mirrors the `onBlockAdded` overrides).
+    /// Placement router (mirrors the `onBlockAdded` overrides, including
+    /// container tile creation).
     fn block_added(&mut self, x: i32, y: i32, z: i32, bid: u8) {
+        match bid {
+            54 => {
+                self.tiles.entry((x, y, z)).or_insert_with(|| {
+                    TileData::Chest(crate::tile_entity_chest::chest_create())
+                });
+            }
+            61 | 62 => {
+                self.tiles.entry((x, y, z)).or_insert_with(|| {
+                    TileData::Furnace(crate::tile_entity_furnace::furnace_create())
+                });
+            }
+            63 | 68 => {
+                self.tiles.entry((x, y, z)).or_insert_with(|| {
+                    TileData::Sign(crate::tile_entity_sign::sign_create())
+                });
+            }
+            _ => {}
+        }
+        let _guard = TickGuard::enter(self as *mut World);
         let _guard = TickGuard::enter(self as *mut World);
         unsafe {
             match bid {
@@ -4838,8 +5073,119 @@ impl World {
 
     /// Registered-block check (mirrors `blocksList[id] != nullptr` via the
     /// initBlocks rule: every non-air material gets an instance).
-    fn native_registered(bid: u8) -> bool {
+    pub(crate) fn native_registered(bid: u8) -> bool {
         bid != 0 && !is_air_material(bid)
+    }
+
+    /// Block-as-item drop at chance 1.0 (mirrors `dropBlockAsItem` for an
+    /// already-captured block id — the cell may be air by now).
+    pub(crate) fn drop_block_for(&mut self, bid: u8, x: i32, y: i32, z: i32) {
+        if bid == 0 {
+            return;
+        }
+        let (drop, qty, _) = Self::native_drop_ids(bid);
+        if drop <= 0 {
+            return;
+        }
+        let _guard = TickGuard::enter(self as *mut World);
+        unsafe {
+            block_base_drop(&TICK_TABLE, drop, qty, 0, x, y, z, 1.0);
+        }
+    }
+
+    /// Block-as-item drop for the live occupant (fluid wash path).
+    pub(crate) fn drop_block_as_item(&mut self, x: i32, y: i32, z: i32) {
+        let bid = self.get_block_id(x, y, z);
+        self.drop_block_for(bid, x, y, z);
+    }
+
+    /// Container tile scatter on break (mirrors the furnace/chest
+    /// `onBlockRemoval` halves, including the tile-row removal).
+    /// Tile-less cells are a no-op.
+    pub(crate) fn scatter_container_tile(&mut self, x: i32, y: i32, z: i32) {
+        use crate::block_container::{block_chest_scatter_stack, block_furnace_scatter_stack};
+        let tile = match self.tiles.get(&(x, y, z)) {
+            Some(t) => *t,
+            None => return,
+        };
+        // ScatterWorld shims draw from the world RNG and spawn directly
+        // (mirroring the C++ global-RNG scatter table).
+        extern "C" fn sc_next_int(bound: i32) -> i32 {
+            if bound <= 0 {
+                return 0;
+            }
+            with_tick_world(|w| w.rng.next_int_bound(bound), 0)
+        }
+        extern "C" fn sc_next_f32() -> f32 {
+            with_tick_world(|w| w.rng.next_float(), 0.0)
+        }
+        extern "C" fn sc_next_f64() -> f64 {
+            with_tick_world(|w| w.rng.next_double(), 0.0)
+        }
+        extern "C" fn sc_spawn(
+            item_id: i32,
+            count: i32,
+            damage: i32,
+            fx: f64,
+            fy: f64,
+            fz: f64,
+            mx: f64,
+            my: f64,
+            mz: f64,
+        ) {
+            with_tick_world(
+                |w| {
+                    let eid = w.spawn_item_entity(item_id, count, damage, fx, fy, fz);
+                    if let Some(Entity::Item(e)) = w.entities.get_mut(eid) {
+                        e.body.motion = [mx, my, mz];
+                    }
+                },
+                (),
+            );
+        }
+        let table = crate::block_container::ScatterWorld {
+            next_int: Some(sc_next_int),
+            next_f32_01: Some(sc_next_f32),
+            next_f64_01: Some(sc_next_f64),
+            spawn_item: Some(sc_spawn),
+        };
+        let _guard = TickGuard::enter(self as *mut World);
+        unsafe {
+            match tile {
+                TileData::Furnace(s) => {
+                    for slot in s.slots {
+                        if slot.stack_size > 0 {
+                            block_furnace_scatter_stack(
+                                &table,
+                                slot.item_id,
+                                slot.stack_size,
+                                slot.item_damage,
+                                x,
+                                y,
+                                z,
+                            );
+                        }
+                    }
+                }
+                TileData::Chest(s) => {
+                    for slot in s.slots {
+                        if slot.stack_size > 0 {
+                            block_chest_scatter_stack(
+                                &table,
+                                slot.item_id,
+                                slot.stack_size,
+                                slot.item_damage,
+                                x,
+                                y,
+                                z,
+                            );
+                        }
+                    }
+                }
+                TileData::Sign(_) => {}
+            }
+        }
+        self.tiles.remove(&(x, y, z));
     }
 
     /// Sign support check (mirrors `BlockSign::onNeighborBlockChange`):

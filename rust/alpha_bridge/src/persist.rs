@@ -202,7 +202,7 @@ fn write_stack(m: &mut BTreeMap<String, NbtTag>, s: &FfiItemStack) {
     m.insert("Damage".to_string(), NbtTag::Short(s.item_damage as i16));
 }
 
-fn read_stack(m: &BTreeMap<String, NbtTag>) -> FfiItemStack {
+pub(crate) fn read_stack(m: &BTreeMap<String, NbtTag>) -> FfiItemStack {
     FfiItemStack {
         item_id: get_short(m, "id") as i32,
         stack_size: get_byte(m, "Count") as i32,
@@ -260,50 +260,7 @@ pub fn encode_chunk_blob(world: &World, cx: i32, cz: i32, zstd: bool) -> Option<
         .collect();
     tile_cells.sort_by_key(|(k, _)| *k);
     for ((x, y, z), tile) in tile_cells {
-        let mut m = BTreeMap::new();
-        m.insert("x".to_string(), NbtTag::Int(x));
-        m.insert("y".to_string(), NbtTag::Int(y));
-        m.insert("z".to_string(), NbtTag::Int(z));
-        match tile {
-            TileData::Furnace(s) => {
-                m.insert("id".to_string(), NbtTag::String("Furnace".to_string()));
-                m.insert("BurnTime".to_string(), NbtTag::Short(s.burn_time));
-                m.insert("CookTime".to_string(), NbtTag::Short(s.cook_time));
-                m.insert("ItemBurnTime".to_string(), NbtTag::Short(s.current_item_burn_time));
-                let mut items = Vec::new();
-                for (i, slot) in s.slots.iter().enumerate() {
-                    if slot.stack_size > 0 {
-                        let mut im = BTreeMap::new();
-                        write_stack(&mut im, slot);
-                        im.insert("Slot".to_string(), NbtTag::Byte(i as i8));
-                        items.push(NbtTag::Compound(NbtCompound { map: im }));
-                    }
-                }
-                m.insert("Items".to_string(), NbtTag::List(NbtList { tag_type: 10, elements: items }));
-            }
-            TileData::Chest(s) => {
-                m.insert("id".to_string(), NbtTag::String("Chest".to_string()));
-                let mut items = Vec::new();
-                for (i, slot) in s.slots.iter().enumerate() {
-                    if slot.stack_size > 0 {
-                        let mut im = BTreeMap::new();
-                        write_stack(&mut im, slot);
-                        im.insert("Slot".to_string(), NbtTag::Byte(i as i8));
-                        items.push(NbtTag::Compound(NbtCompound { map: im }));
-                    }
-                }
-                m.insert("Items".to_string(), NbtTag::List(NbtList { tag_type: 10, elements: items }));
-            }
-            TileData::Sign(s) => {
-                m.insert("id".to_string(), NbtTag::String("Sign".to_string()));
-                for (i, line) in s.lines.iter().enumerate() {
-                    let len = line.iter().position(|&c| c == 0).unwrap_or(SIGN_LINES);
-                    let text = String::from_utf8_lossy(&line[..len.min(16)]).to_string();
-                    m.insert(format!("Text{}", i + 1), NbtTag::String(text));
-                }
-            }
-        }
-        tiles.push(NbtTag::Compound(NbtCompound { map: m }));
+        tiles.push(NbtTag::Compound(tile_nbt(x, y, z, &tile)));
     }
     level.insert("TileEntities".to_string(), NbtTag::List(NbtList { tag_type: 10, elements: tiles }));
 
@@ -440,6 +397,54 @@ pub struct DecodedChunk {
     pub animals: Vec<PendingCreature>,
     pub monsters: Vec<PendingCreature>,
     pub boats: Vec<PendingBoat>,
+}
+
+/// Single tile-entity compound (shared by chunk blobs and packet 59).
+pub(crate) fn tile_nbt(x: i32, y: i32, z: i32, tile: &TileData) -> NbtCompound {
+    let mut m = BTreeMap::new();
+    m.insert("x".to_string(), NbtTag::Int(x));
+    m.insert("y".to_string(), NbtTag::Int(y));
+    m.insert("z".to_string(), NbtTag::Int(z));
+    match tile {
+        TileData::Furnace(s) => {
+            m.insert("id".to_string(), NbtTag::String("Furnace".to_string()));
+            m.insert("BurnTime".to_string(), NbtTag::Short(s.burn_time));
+            m.insert("CookTime".to_string(), NbtTag::Short(s.cook_time));
+            m.insert("ItemBurnTime".to_string(), NbtTag::Short(s.current_item_burn_time));
+            let mut items = Vec::new();
+            for (i, slot) in s.slots.iter().enumerate() {
+                if slot.stack_size > 0 {
+                    let mut im = BTreeMap::new();
+                    write_stack(&mut im, slot);
+                    im.insert("Slot".to_string(), NbtTag::Byte(i as i8));
+                    items.push(NbtTag::Compound(NbtCompound { map: im }));
+                }
+            }
+            m.insert("Items".to_string(), NbtTag::List(NbtList { tag_type: 10, elements: items }));
+        }
+        TileData::Chest(s) => {
+            m.insert("id".to_string(), NbtTag::String("Chest".to_string()));
+            let mut items = Vec::new();
+            for (i, slot) in s.slots.iter().enumerate() {
+                if slot.stack_size > 0 {
+                    let mut im = BTreeMap::new();
+                    write_stack(&mut im, slot);
+                    im.insert("Slot".to_string(), NbtTag::Byte(i as i8));
+                    items.push(NbtTag::Compound(NbtCompound { map: im }));
+                }
+            }
+            m.insert("Items".to_string(), NbtTag::List(NbtList { tag_type: 10, elements: items }));
+        }
+        TileData::Sign(s) => {
+            m.insert("id".to_string(), NbtTag::String("Sign".to_string()));
+            for (i, line) in s.lines.iter().enumerate() {
+                let len = line.iter().position(|&c| c == 0).unwrap_or(SIGN_LINES);
+                let text = String::from_utf8_lossy(&line[..len.min(16)]).to_string();
+                m.insert(format!("Text{}", i + 1), NbtTag::String(text));
+            }
+        }
+    }
+    NbtCompound { map: m }
 }
 
 fn read_stack_slots(
