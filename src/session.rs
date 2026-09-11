@@ -1133,12 +1133,12 @@ impl PlaySession {
                 }
             }
         } else if status == 2 {
-            unsafe { crate::player_digging::alpha_dig_cancel(&mut self.dig) };
+            crate::player_digging::alpha_dig_cancel(&mut self.dig);
         } else if status == 1 {
             if !protected || self.is_op(ctx) {
                 let bid = ctx.world.get_block_id(x, y, z);
                 let input = self.dig_input(ctx, bid as i32);
-                let done = unsafe { alpha_dig_on_tick(&mut self.dig, x, y, z, input) };
+                let done = alpha_dig_on_tick(&mut self.dig, x, y, z, input);
                 if done {
                     self.harvest(ctx, x, y, z);
                 }
@@ -1193,7 +1193,7 @@ impl PlaySession {
                         || kind == crate::item_data::ItemToolKind::Axe as i32
                     {
                         let max = alpha_item_max_damage(s.item_id);
-                        crate::inventory::item_stack_damage(&mut s as *mut _, 1, max);
+                        crate::inventory::item_stack_damage(&mut s, 1, max);
                         if s.stack_size <= 0 || s.item_damage > max {
                             slot = None;
                         } else {
@@ -1236,7 +1236,7 @@ use crate::player_digging::{
 };
 use crate::player_mining::alpha_mining_can_harvest;
 use crate::player_movement::{FfiMovementInput, alpha_movement_validate};
-use crate::server_admin::{ChatWorld, rust_chat_command};
+use crate::server_admin::chat_command;
 use crate::world::{TileData, World};
 
 // ---- extra outbound builders ----
@@ -1673,59 +1673,6 @@ static USE_TABLE: ItemUseWorld = ItemUseWorld {
     ray_trace: Some(use_ray_trace),
 };
 
-extern "C" fn chat_is_op() -> bool {
-    with_use_ctx(
-        |w, pid, _, ops| match w.entities.get(pid) {
-            // Ops store lowercased; the query lowercases like C++ isOp.
-            Some(Entity::Player(p)) => ops.contains(&p.username.to_ascii_lowercase()),
-            _ => false,
-        },
-        false,
-    )
-}
-
-extern "C" fn chat_registered(id: i32) -> bool {
-    (0..256).contains(&id) && crate::world::World::native_registered(id as u8)
-}
-
-extern "C" fn chat_give(item_id: i32, count: i32, damage: i32) {
-    with_use_ctx(
-        |w, pid, _, _| {
-            if let Some(e) = w.entities.get(pid) {
-                let (px, py, pz) = (e.body().pos[0], e.body().pos[1], e.body().pos[2]);
-                w.spawn_item_entity(item_id, count, damage, px, py, pz);
-            }
-        },
-        (),
-    );
-}
-
-extern "C" fn chat_teleport(x: f64, y: f64, z: f64, yaw: f32, pitch: f32) {
-    with_use_ctx(
-        |w, pid, sess, _| {
-            sess.teleport_to(w, pid, x, y, z, yaw, pitch);
-        },
-        (),
-    );
-}
-
-extern "C" fn chat_send(msg_ptr: *const u8, msg_len: usize) {
-    if msg_ptr.is_null() {
-        return;
-    }
-    let msg = unsafe { std::slice::from_raw_parts(msg_ptr, msg_len) };
-    let text = String::from_utf8_lossy(msg).to_string();
-    with_use_ctx(|_, _, sess, _| sess.outbox.push(pkt_chat(&text)), ());
-}
-
-static CHAT_TABLE: ChatWorld = ChatWorld {
-    is_op: Some(chat_is_op),
-    block_registered: Some(chat_registered),
-    give_item: Some(chat_give),
-    teleport: Some(chat_teleport),
-    send_chat: Some(chat_send),
-};
-
 /// Tile-entity packet (id 59, gzipped NBT like sendTileEntityPacket).
 pub fn tile_packet(x: i32, y: i32, z: i32, tile: &TileData) -> Vec<u8> {
     use crate::nbt::write_root;
@@ -1899,7 +1846,7 @@ impl PlaySession {
                 };
                 if wear > 0 {
                     let max = alpha_item_max_damage(s.item_id);
-                    crate::inventory::item_stack_damage(&mut s as *mut _, wear, max);
+                    crate::inventory::item_stack_damage(&mut s, wear, max);
                     if s.stack_size <= 0 {
                         let is_fallback = match ctx.world.entities.get(me) {
                             Some(Entity::Player(p)) => p.inventory.current == 35,
@@ -1954,18 +1901,7 @@ impl PlaySession {
             msg.pop();
         }
         if msg.starts_with('/') {
-            let yaw = ctx.world.entities.get(self.player).map(|e| e.body().yaw).unwrap_or(0.0);
-            let pitch =
-                ctx.world.entities.get(self.player).map(|e| e.body().pitch).unwrap_or(0.0);
-            let _guard = UseGuard::enter(
-                ctx.world as *mut World,
-                self.player,
-                self as *mut PlaySession,
-                ctx.ops as *const HashSet<String>,
-            );
-            unsafe {
-                rust_chat_command(&CHAT_TABLE, msg.as_ptr(), msg.len(), yaw, pitch);
-            }
+            chat_command(ctx.world, self, ctx.ops, &msg);
             return None;
         }
         let username = self.username(ctx.world).to_string();
@@ -2424,7 +2360,7 @@ impl PlaySession {
                         false
                     } else {
                         let max = alpha_item_max_damage(s.item_id);
-                        crate::inventory::item_stack_damage(&mut *s as *mut _, 1, max);
+                        crate::inventory::item_stack_damage(&mut *s, 1, max);
                         true
                     }
                 }

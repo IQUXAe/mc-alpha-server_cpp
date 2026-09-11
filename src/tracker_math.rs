@@ -1,24 +1,16 @@
-//! Pure entity-tracking math ported from C++ `EntityTracker`.
+//! Pure entity-tracking math (fixed-point / angle / delta-packet
+//! formulas shared by the tracker).
 //!
-//! `EntityTracker.cpp` duplicated the same fixed-point / angle /
-//! delta-packet formulas in 4 places (constructor, `makeSpawnPacket`,
-//! `sendSpawnTo`, `sendUpdates`). This module is the single source of
-//! truth. All functions are pure (no pointers, no allocation, no
-//! `unwrap()`) so they can be unit-tested in Rust and called from C++
-//! one at a time while ownership (`entries_`, `trackingPlayers`) stays
-//! in C++ for now.
-//!
-//! Long-term FFI-reduction direction: once all call sites use these,
-//! the whole per-tick `sendUpdates` loop can move behind a single
-//! batch FFI call (snapshots in, packet list out) instead of dozens
-//! of fine-grained calls.
+//! `EntityTracker.cpp` duplicated the same formulas in 4 places
+//! (constructor, `makeSpawnPacket`, `sendSpawnTo`, `sendUpdates`).
+//! This module is the single source of truth. All functions are pure
+//! (no pointers, no allocation, no `unwrap()`) and unit-tested.
 
 /// Network fixed-point position: `(int)(pos * 32.0)`.
 ///
 /// Matches the C++ C-style cast (truncation toward zero) via `as`,
 /// which also truncates toward zero for float->int.
-#[no_mangle]
-pub extern "C" fn alpha_tracker_encode_pos(pos: f64) -> i32 {
+pub fn alpha_tracker_encode_pos(pos: f64) -> i32 {
     (pos * 32.0) as i32
 }
 
@@ -26,8 +18,7 @@ pub extern "C" fn alpha_tracker_encode_pos(pos: f64) -> i32 {
 ///
 /// The masking makes negative angles wrap exactly like the C++ code
 /// (e.g. -1 degree -> 0xFF -> -1 as i8).
-#[no_mangle]
-pub extern "C" fn alpha_tracker_encode_rot(degrees: f32) -> i8 {
+pub fn alpha_tracker_encode_rot(degrees: f32) -> i8 {
     let v = (degrees * 256.0 / 360.0).floor() as i32 & 0xFF;
     v as u8 as i8
 }
@@ -37,8 +28,7 @@ pub extern "C" fn alpha_tracker_encode_rot(degrees: f32) -> i8 {
 /// Returns: 0 = keep-alive `entity`, 1 = `relEntityMove`,
 /// 2 = `entityLook`, 3 = `relEntityMoveLook`, 4 = `entityTeleport`
 /// (delta outside `[-128, 128)` no longer fits in an i8).
-#[no_mangle]
-pub extern "C" fn alpha_tracker_move_kind(
+pub fn alpha_tracker_move_kind(
     dx: i32,
     dy: i32,
     dz: i32,
@@ -65,8 +55,7 @@ pub extern "C" fn alpha_tracker_move_kind(
 /// Java sends `Packet28` when squared velocity delta exceeds
 /// `0.02^2`, plus an explicit stop packet when motion hits exactly
 /// zero after being non-zero.
-#[no_mangle]
-pub extern "C" fn alpha_tracker_velocity_changed(
+pub fn alpha_tracker_velocity_changed(
     motion_x: f64,
     motion_y: f64,
     motion_z: f64,
@@ -94,8 +83,7 @@ pub extern "C" fn alpha_tracker_velocity_changed(
 /// Note: vanilla only compares X/Z against `trackingRange`
 /// (Y is ignored), and compares the *observer* position against the
 /// *last sent* fixed-point position, not the live one. Preserved here.
-#[no_mangle]
-pub extern "C" fn alpha_tracker_in_range(
+pub fn alpha_tracker_in_range(
     player_x: f64,
     player_z: f64,
     last_fixed_x: i32,

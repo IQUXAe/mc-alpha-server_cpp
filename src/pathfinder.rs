@@ -1,22 +1,6 @@
 use std::collections::{BinaryHeap, HashMap};
 
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct PathfinderWorldAccessor {
-    pub world: *mut std::ffi::c_void,
-    pub is_liquid: unsafe extern "C" fn(world: *mut std::ffi::c_void, x: i32, y: i32, z: i32) -> bool,
-    pub blocks_movement: unsafe extern "C" fn(world: *mut std::ffi::c_void, x: i32, y: i32, z: i32) -> bool,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct FfiPathPoint {
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct PathPointNode {
     x: i32,
     y: i32,
@@ -277,47 +261,4 @@ pub fn find_path_native(
     }
     path.reverse();
     path
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn rust_pathfinder_find_path(
-    accessor: PathfinderWorldAccessor,
-    start_x: f64, start_y: f64, start_z: f64,
-    target_x: f64, target_y: f64, target_z: f64,
-    entity_width: f32,
-    entity_height: f32,
-    max_distance: f32,
-    out_points: *mut FfiPathPoint,
-    max_points: i32,
-) -> i32 {
-    if accessor.world.is_null() || accessor.is_liquid as usize == 0 || accessor.blocks_movement as usize == 0 {
-        return 0;
-    }
-    if max_points <= 0 {
-        return 0;
-    }
-    let is_liquid = |x: i32, y: i32, z: i32| unsafe { (accessor.is_liquid)(accessor.world, x, y, z) };
-    let blocks_movement =
-        |x: i32, y: i32, z: i32| unsafe { (accessor.blocks_movement)(accessor.world, x, y, z) };
-    let path = find_path_native(
-        &is_liquid,
-        &blocks_movement,
-        start_x, start_y, start_z,
-        target_x, target_y, target_z,
-        entity_width, entity_height, max_distance,
-    );
-
-    let count = path.len().min(max_points as usize);
-    if out_points.is_null() || count == 0 {
-        return count as i32;
-    }
-    let slice = std::slice::from_raw_parts_mut(out_points, count);
-    for i in 0..count {
-        slice[i] = FfiPathPoint {
-            x: path[i].0,
-            y: path[i].1,
-            z: path[i].2,
-        };
-    }
-    count as i32
 }

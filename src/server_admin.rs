@@ -8,15 +8,18 @@
 //!   format (trim trailing space/CR/LF, skip empties, sorted+deduplicated
 //!   like `std::set`), membership and mutation.
 //! - Chat driver: tokenizing, strict argument parsing, permission and range
-//!   checks, and effect callbacks into C++ (give/teleport/chat). C++ keeps
-//!   sockets, the entity table, and the world.
+//!   checks, with effects applied straight to the world and session.
 //!
 //! Number parsing is deliberately STRICT (trailing garbage rejected, like
 //! Java `parseInt`/`parseDouble`): the old C++ `from_chars` accepted
 //! prefixes such as `12ab` as `12`. Doubles must additionally be finite
 //! (`from_chars` rejects `inf`/`nan`, Rust `parse` does not).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
+
+use crate::entity_table::Entity;
+use crate::session::{PlaySession, pkt_chat};
+use crate::world::World;
 
 /// Lowercase ASCII like the C++ `::tolower` loop over latin names.
 pub fn admin_normalize(name: &str) -> String {
@@ -133,45 +136,24 @@ pub fn parse_command_double(s: &str) -> Option<f64> {
     }
 }
 
-/// Effects for the chat driver. All strings cross as `(ptr, len)` UTF-8.
-/// `send_chat` delivers one line back to the issuing player.
-#[repr(C)]
-pub struct ChatWorld {
-    pub is_op: Option<extern "C" fn() -> bool>,
-    pub block_registered: Option<extern "C" fn(id: i32) -> bool>,
-    pub give_item: Option<extern "C" fn(item_id: i32, count: i32, damage: i32)>,
-    pub teleport: Option<extern "C" fn(x: f64, y: f64, z: f64, yaw: f32, pitch: f32)>,
-    pub send_chat: Option<extern "C" fn(msg_ptr: *const u8, msg_len: usize)>,
-}
-
-fn chat(world: &ChatWorld, msg: &str) {
-    if let Some(f) = world.send_chat {
-        f(msg.as_ptr(), msg.len());
-    }
-}
-
-fn is_op(world: &ChatWorld) -> bool {
-    world.is_op.map(|f| f()).unwrap_or(false)
+/// One chat line back to the issuing player.
+fn say(sess: &mut PlaySession, text: &str) {
+    sess.outbox.push(pkt_chat(text));
 }
 
 /// Player `/give` + `/tp` dispatcher (mirrors
 /// `NetServerHandler::handleCommand`). `msg` must start with `/`; anything
 /// else is ignored. All user-facing strings match the C++ originals.
-#[no_mangle]
-pub unsafe extern "C" fn rust_chat_command(
-    world: *const ChatWorld,
-    msg_ptr: *const u8,
-    msg_len: usize,
-    player_yaw: f32,
-    player_pitch: f32,
+pub fn chat_command(
+    world: &mut World,
+    sess: &mut PlaySession,
+    ops: &HashSet<String>,
+    msg: &str,
 ) {
-    if world.is_null() || msg_ptr.is_null() {
-        return;
-    }
-    let world = unsafe { &*world };
-    let raw = unsafe { std::slice::from_raw_parts(msg_ptr, msg_len) };
-    let Ok(msg) = std::str::from_utf8(raw) else {
-        return;
+    // Ops store lowercased; the query lowercases like C++ isOp.
+    let op = match world.entities.get(sess.player) {
+        Some(Entity::Player(p)) => ops.contains(&p.username.to_ascii_lowercase()),
+        _ => false,
     };
     let body = match msg.strip_prefix('/') {
         Some(b) => b,
@@ -182,13 +164,13 @@ pub unsafe extern "C" fn rust_chat_command(
         return;
     }
     let cmd = args[0];
-    if !is_op(world) && (cmd == "give" || cmd == "tp") {
-        chat(world, "You do not have permission to use this command");
+    if !op && (cmd == "give" || cmd == "tp") {
+        say(sess, "You do not have permission to use this command");
         return;
     }
     if cmd == "give" {
         if args.len() < 2 {
-            chat(world, "Usage: /give <itemId> [count] [damage]");
+            say(sess, "Usage: /give <itemId> [count] [damage]");
             return;
         }
         let (Some(item_id), count, damage) = (
@@ -197,7 +179,7 @@ pub unsafe extern "C" fn rust_chat_command(
             args.get(3).and_then(|s| parse_command_int(s)).unwrap_or(0),
         )
         else {
-            chat(world, "Invalid command arguments");
+            say(sess, "Invalid command arguments");
             return;
         };
         // NOTE: `args.get(2)` on a missing slot yields the default WITHOUT
@@ -205,28 +187,30 @@ pub unsafe extern "C" fn rust_chat_command(
         if (args.len() >= 3 && parse_command_int(args[2]).is_none())
             || (args.len() >= 4 && parse_command_int(args[3]).is_none())
         {
-            chat(world, "Invalid command arguments");
+            say(sess, "Invalid command arguments");
             return;
         }
         let count = count.clamp(1, 64);
         if item_id <= 0 || item_id >= 32000 {
-            chat(world, "Invalid item id");
+            say(sess, "Invalid item id");
             return;
         }
         if item_id < 256 {
-            let registered = world.block_registered.map(|f| f(item_id)).unwrap_or(false);
+            let registered =
+                (0..256).contains(&item_id) && World::native_registered(item_id as u8);
             if !registered {
-                chat(world, &format!("Unknown block id: {item_id}"));
+                say(sess, &format!("Unknown block id: {item_id}"));
                 return;
             }
         }
-        if let Some(f) = world.give_item {
-            f(item_id, count, damage);
+        if let Some(e) = world.entities.get(sess.player) {
+            let (px, py, pz) = (e.body().pos[0], e.body().pos[1], e.body().pos[2]);
+            world.spawn_item_entity(item_id, count, damage, px, py, pz);
         }
-        chat(world, &format!("Gave {count}x {item_id}"));
+        say(sess, &format!("Gave {count}x {item_id}"));
     } else if cmd == "tp" {
         if args.len() < 4 {
-            chat(world, "Usage: /tp <x> <y> <z>");
+            say(sess, "Usage: /tp <x> <y> <z>");
             return;
         }
         let (Some(tx), Some(ty), Some(tz)) = (
@@ -235,23 +219,24 @@ pub unsafe extern "C" fn rust_chat_command(
             parse_command_double(args[3]),
         )
         else {
-            chat(world, "Invalid command arguments");
+            say(sess, "Invalid command arguments");
             return;
         };
-        if let Some(f) = world.teleport {
-            f(tx, ty, tz, player_yaw, player_pitch);
-        }
+        let (yaw, pitch) = match world.entities.get(sess.player) {
+            Some(e) => (e.body().yaw, e.body().pitch),
+            None => (0.0, 0.0),
+        };
+        sess.teleport_to(world, sess.player, tx, ty, tz, yaw, pitch);
         // C++ std::to_string(double) prints 6 decimals; match it exactly.
-        chat(world, &format!("Teleported to {tx:.6}, {ty:.6}, {tz:.6}"));
+        say(sess, &format!("Teleported to {tx:.6}, {ty:.6}, {tz:.6}"));
     } else {
-        chat(world, &format!("Unknown command: {cmd}"));
+        say(sess, &format!("Unknown command: {cmd}"));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
 
     #[test]
     fn test_list_roundtrip() {
@@ -288,126 +273,94 @@ mod tests {
         assert_eq!(parse_command_double("1_0"), None);
     }
 
-    struct Fake {
-        log: Vec<String>,
-        gave: Vec<(i32, i32, i32)>,
-        teleported: Vec<(f64, f64, f64)>,
-        op: bool,
+    use crate::entity_table::{Entity, PlayerEnt};
+    use crate::session::PlaySession;
+    use crate::world::World;
+
+    fn setup(op: bool) -> (World, PlaySession, HashSet<String>) {
+        let mut w = World::new(7);
+        let id = w.entities.alloc_id();
+        let mut p = PlayerEnt::new(id, "Steve");
+        p.living.body.set_position(0.5, 64.0, 0.5);
+        p.respawn_ticks = 0;
+        w.entities.insert(Entity::Player(p));
+        let ops = if op {
+            HashSet::from(["steve".to_string()])
+        } else {
+            HashSet::new()
+        };
+        (w, PlaySession::new(id), ops)
     }
 
-    static FAKE: Mutex<Option<Fake>> = Mutex::new(None);
-
-    fn fake() -> MutexGuard<'static, Option<Fake>> {
-        match FAKE.lock() {
-            Ok(g) => g,
-            Err(poisoned) => poisoned.into_inner(),
+    /// Chat lines out of a session outbox (id-3 packets, length-prefixed).
+    fn chats(sess: &PlaySession) -> Vec<String> {
+        let mut out = Vec::new();
+        for msg in &sess.outbox {
+            if msg.first() == Some(&3) && msg.len() >= 3 {
+                let n = u16::from_be_bytes([msg[1], msg[2]]) as usize;
+                if msg.len() >= 3 + n {
+                    out.push(String::from_utf8_lossy(&msg[3..3 + n]).into_owned());
+                }
+            }
         }
+        out
     }
 
-    fn reset(op: bool) {
-        *fake() = Some(Fake { log: Vec::new(), gave: Vec::new(), teleported: Vec::new(), op });
+    fn run(w: &mut World, sess: &mut PlaySession, ops: &HashSet<String>, cmd: &str) {
+        sess.outbox.clear();
+        chat_command(w, sess, ops, cmd);
     }
 
-    extern "C" fn s_is_op() -> bool {
-        fake().as_ref().map(|f| f.op).unwrap_or(false)
-    }
-    extern "C" fn s_registered(id: i32) -> bool {
-        (1..100).contains(&id)
-    }
-    extern "C" fn s_give(id: i32, count: i32, damage: i32) {
-        if let Some(f) = fake().as_mut() {
-            f.gave.push((id, count, damage));
-        }
-    }
-    extern "C" fn s_tp(x: f64, y: f64, z: f64, _yaw: f32, _pitch: f32) {
-        if let Some(f) = fake().as_mut() {
-            f.teleported.push((x, y, z));
-        }
-    }
-    extern "C" fn s_chat(ptr: *const u8, len: usize) {
-        if let Some(f) = fake().as_mut() {
-            let s = unsafe { std::slice::from_raw_parts(ptr, len) };
-            f.log.push(String::from_utf8_lossy(s).into_owned());
-        }
-    }
-
-    fn table() -> ChatWorld {
-        ChatWorld {
-            is_op: Some(s_is_op),
-            block_registered: Some(s_registered),
-            give_item: Some(s_give),
-            teleport: Some(s_tp),
-            send_chat: Some(s_chat),
-        }
-    }
-
-    fn run(cmd: &str) {
-        let t = table();
-        unsafe { rust_chat_command(&t, cmd.as_ptr(), cmd.len(), 0.0, 0.0) };
-    }
-
-    fn logs() -> Vec<String> {
-        fake().as_ref().map(|f| f.log.clone()).unwrap_or_default()
+    fn gave_item(w: &World, item_id: i32, count: i32, damage: i32) -> bool {
+        w.entities.alive_ids().iter().any(|oid| {
+            matches!(w.entities.get(*oid),
+                Some(Entity::Item(e)) if e.item_id == item_id && e.count == count && e.damage == damage)
+        })
     }
 
     #[test]
     fn test_chat_driver() {
         // Non-command input ignored.
-        reset(true);
-        run("hello");
-        assert!(logs().is_empty());
+        let (mut w, mut sess, ops) = setup(true);
+        run(&mut w, &mut sess, &ops, "hello");
+        assert!(chats(&sess).is_empty());
 
         // Permission gate.
-        reset(false);
-        run("/give 5");
-        assert_eq!(logs(), vec!["You do not have permission to use this command"]);
+        let (mut w, mut sess, ops) = setup(false);
+        run(&mut w, &mut sess, &ops, "/give 5");
+        assert_eq!(chats(&sess), vec!["You do not have permission to use this command"]);
 
         // Give happy path with clamping.
-        reset(true);
-        run("/give 5 99 2");
-        {
-            let g = fake();
-            let f = g.as_ref().unwrap_or_else(|| unreachable!());
-            assert_eq!(f.gave, vec![(5, 64, 2)]);
-        }
-        assert_eq!(logs(), vec!["Gave 64x 5"]);
+        let (mut w, mut sess, ops) = setup(true);
+        run(&mut w, &mut sess, &ops, "/give 5 99 2");
+        assert!(gave_item(&w, 5, 64, 2));
+        assert_eq!(chats(&sess), vec!["Gave 64x 5"]);
 
         // Give validation errors.
-        reset(true);
-        run("/give");
-        assert_eq!(logs(), vec!["Usage: /give <itemId> [count] [damage]"]);
-        reset(true);
-        run("/give 0");
-        assert_eq!(logs(), vec!["Invalid item id"]);
-        reset(true);
-        run("/give 200");
-        assert_eq!(logs(), vec!["Unknown block id: 200"]);
-        reset(true);
-        run("/give 5x");
-        assert_eq!(logs(), vec!["Invalid command arguments"]);
+        let (mut w, mut sess, ops) = setup(true);
+        run(&mut w, &mut sess, &ops, "/give");
+        assert_eq!(chats(&sess), vec!["Usage: /give <itemId> [count] [damage]"]);
+        run(&mut w, &mut sess, &ops, "/give 0");
+        assert_eq!(chats(&sess), vec!["Invalid item id"]);
+        run(&mut w, &mut sess, &ops, "/give 200");
+        assert_eq!(chats(&sess), vec!["Unknown block id: 200"]);
+        run(&mut w, &mut sess, &ops, "/give 5x");
+        assert_eq!(chats(&sess), vec!["Invalid command arguments"]);
 
         // Tp happy path (6-decimal message like to_string).
-        reset(true);
-        run("/tp 10 64 -3");
-        {
-            let g = fake();
-            let f = g.as_ref().unwrap_or_else(|| unreachable!());
-            assert_eq!(f.teleported, vec![(10.0, 64.0, -3.0)]);
+        run(&mut w, &mut sess, &ops, "/tp 10 64 -3");
+        match w.entities.get(sess.player).unwrap() {
+            Entity::Player(p) => assert_eq!(p.living.body.pos, [10.0, 64.0, -3.0]),
+            _ => unreachable!(),
         }
-        assert_eq!(logs(), vec!["Teleported to 10.000000, 64.000000, -3.000000"]);
-        reset(true);
-        run("/tp 10 64");
-        assert_eq!(logs(), vec!["Usage: /tp <x> <y> <z>"]);
-        reset(true);
-        run("/tp 10 oo 3");
-        assert_eq!(logs(), vec!["Invalid command arguments"]);
+        assert_eq!(chats(&sess), vec!["Teleported to 10.000000, 64.000000, -3.000000"]);
+        run(&mut w, &mut sess, &ops, "/tp 10 64");
+        assert_eq!(chats(&sess), vec!["Usage: /tp <x> <y> <z>"]);
+        run(&mut w, &mut sess, &ops, "/tp 10 oo 3");
+        assert_eq!(chats(&sess), vec!["Invalid command arguments"]);
 
         // Unknown command.
-        reset(true);
-        run("/dance");
-        assert_eq!(logs(), vec!["Unknown command: dance"]);
-
-        // Null table is safe.
-        unsafe { rust_chat_command(std::ptr::null(), "x".as_ptr(), 1, 0.0, 0.0) };
+        run(&mut w, &mut sess, &ops, "/dance");
+        assert_eq!(chats(&sess), vec!["Unknown command: dance"]);
     }
 }

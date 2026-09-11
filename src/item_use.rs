@@ -7,8 +7,7 @@
 /// Furnace facing metadata from player yaw (mirrors the
 /// `furnaceFacingFromYaw` helper for `ItemBlock::onItemUse`):
 /// 0→2(N), 1→5(E), 2→3(S), 3→4(W).
-#[no_mangle]
-pub extern "C" fn alpha_item_furnace_facing(yaw: f32) -> u8 {
+pub fn alpha_item_furnace_facing(yaw: f32) -> u8 {
     // Java: floor(yaw * 4/360 + 0.5) & 3, float arithmetic like C++.
     let facing = (yaw * 4.0f32 / 360.0f32 + 0.5f32).floor() as i32 & 3;
     const TABLE: [u8; 4] = [2, 5, 3, 4];
@@ -18,8 +17,7 @@ pub extern "C" fn alpha_item_furnace_facing(yaw: f32) -> u8 {
 /// Sign-post yaw metadata (mirrors `ItemSign::onItemUse`):
 /// `floor(double(yaw + 180.0f) * 16.0 / 360.0 + 0.5) & 15`.
 /// Note the C++ double arithmetic (unlike the furnace f32 case).
-#[no_mangle]
-pub extern "C" fn alpha_item_sign_yaw_meta(yaw: f32) -> u8 {
+pub fn alpha_item_sign_yaw_meta(yaw: f32) -> u8 {
     (((yaw + 180.0f32) as f64 * 16.0 / 360.0 + 0.5).floor() as i32 & 15) as u8
 }
 
@@ -32,8 +30,7 @@ pub struct FoodBite {
     pub heal: i32,
 }
 
-#[no_mangle]
-pub extern "C" fn alpha_item_food_bite(count: i32, heal_amount: i32) -> FoodBite {
+pub fn alpha_item_food_bite(count: i32, heal_amount: i32) -> FoodBite {
     if count > 0 {
         FoodBite { new_count: count - 1, heal: heal_amount }
     } else {

@@ -8,20 +8,18 @@ pub struct FfiItemStack {
 }
 
 // Returns true if the item broke (stack size changed).
-// max_damage is passed from C++ (Rust cannot access Item::itemsList).
-#[no_mangle]
-pub extern "C" fn item_stack_damage(stack: *mut FfiItemStack, damage: i32, max_damage: i32) -> bool {
-    let s = unsafe { &mut *stack };
+// max_damage comes from the item table (this module owns no registry).
+pub fn item_stack_damage(stack: &mut FfiItemStack, damage: i32, max_damage: i32) -> bool {
     if max_damage <= 0 {
         return false;
     }
-    s.item_damage += damage;
-    if s.item_damage > max_damage {
-        s.stack_size -= 1;
-        if s.stack_size < 0 {
-            s.stack_size = 0;
+    stack.item_damage += damage;
+    if stack.item_damage > max_damage {
+        stack.stack_size -= 1;
+        if stack.stack_size < 0 {
+            stack.stack_size = 0;
         }
-        s.item_damage = 0;
+        stack.item_damage = 0;
         return true;
     }
     false

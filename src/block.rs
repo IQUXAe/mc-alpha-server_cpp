@@ -226,8 +226,7 @@ static BLOCK_PROPS: [AlphaBlockProperties; 256] = {
     props
 };
 
-#[no_mangle]
-pub extern "C" fn alpha_block_properties_get(id: u32) -> AlphaBlockProperties {
+pub fn alpha_block_properties_get(id: u32) -> AlphaBlockProperties {
     if id >= 256 {
         return AIR;
     }

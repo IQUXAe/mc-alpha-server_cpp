@@ -2,8 +2,7 @@ use crate::block::{alpha_block_properties_get, BlockMaterial};
 
 /// Checks if a player holding `held_item_id` can harvest drops from `block_id`.
 /// Follows Minecraft Alpha 1.2.6 rules.
-#[no_mangle]
-pub extern "C" fn alpha_mining_can_harvest(block_id: i32, held_item_id: i32) -> bool {
+pub fn alpha_mining_can_harvest(block_id: i32, held_item_id: i32) -> bool {
     if block_id <= 0 || block_id >= 256 {
         return false;
     }
@@ -59,8 +58,7 @@ pub extern "C" fn alpha_mining_can_harvest(block_id: i32, held_item_id: i32) -> 
 }
 
 /// Returns digging speed multiplier for a held item against a specific block.
-#[no_mangle]
-pub extern "C" fn alpha_mining_get_str_vs_block(block_id: i32, held_item_id: i32) -> f32 {
+pub fn alpha_mining_get_str_vs_block(block_id: i32, held_item_id: i32) -> f32 {
     if block_id <= 0 || block_id >= 256 {
         return 1.0;
     }
@@ -135,8 +133,7 @@ pub extern "C" fn alpha_mining_get_str_vs_block(block_id: i32, held_item_id: i32
 }
 
 /// Returns block hardness progress per tick applied by player.
-#[no_mangle]
-pub extern "C" fn alpha_mining_check_hardness(
+pub fn alpha_mining_check_hardness(
     block_id: i32,
     held_item_id: i32,
     in_water: bool,
@@ -172,8 +169,7 @@ pub extern "C" fn alpha_mining_check_hardness(
 }
 
 /// Returns number of ticks required to break a block, or -1 if unbreakable.
-#[no_mangle]
-pub extern "C" fn alpha_mining_get_destroy_ticks(
+pub fn alpha_mining_get_destroy_ticks(
     block_id: i32,
     held_item_id: i32,
     in_water: bool,

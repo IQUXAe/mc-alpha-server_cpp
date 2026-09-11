@@ -17,11 +17,11 @@
 /// (Box-Muller over `next_f64_01`); C++ only constructs the item entity.
 #[repr(C)]
 pub struct ScatterWorld {
-    pub next_int: Option<extern "C" fn(bound: i32) -> i32>,
-    pub next_f32_01: Option<extern "C" fn() -> f32>,
-    pub next_f64_01: Option<extern "C" fn() -> f64>,
+    pub next_int: Option<fn(bound: i32) -> i32>,
+    pub next_f32_01: Option<fn() -> f32>,
+    pub next_f64_01: Option<fn() -> f64>,
     pub spawn_item: Option<
-        extern "C" fn(item_id: i32, count: i32, damage: i32, fx: f64, fy: f64, fz: f64, mx: f64, my: f64, mz: f64),
+        fn(item_id: i32, count: i32, damage: i32, fx: f64, fy: f64, fz: f64, mx: f64, my: f64, mz: f64),
     >,
 }
 
@@ -70,9 +70,8 @@ fn emit(
 /// One chest slot scattered in 10..30-sized chunks (mirrors
 /// `BlockChest::onBlockRemoval`). Returns the leftover (always 0 unless the
 /// table is missing).
-#[no_mangle]
-pub unsafe extern "C" fn block_chest_scatter_stack(
-    world: *const ScatterWorld,
+pub fn block_chest_scatter_stack(
+    w: &ScatterWorld,
     item_id: i32,
     count: i32,
     damage: i32,
@@ -80,10 +79,9 @@ pub unsafe extern "C" fn block_chest_scatter_stack(
     y: i32,
     z: i32,
 ) -> i32 {
-    if world.is_null() || item_id <= 0 || count <= 0 {
+    if item_id <= 0 || count <= 0 {
         return count.max(0);
     }
-    let w = unsafe { &*world };
     // Offsets stay in f32 like the C++ float distribution, then promote.
     // Positions add in f32 too (C++ int+float), widening only at the call.
     let (ox, oy, oz) = (rng_f32(w) * 0.8 + 0.1, rng_f32(w) * 0.8 + 0.1, rng_f32(w) * 0.8 + 0.1);
@@ -108,9 +106,8 @@ pub unsafe extern "C" fn block_chest_scatter_stack(
 }
 
 /// One furnace slot scattered whole (mirrors `BlockFurnace::onBlockRemoval`).
-#[no_mangle]
-pub unsafe extern "C" fn block_furnace_scatter_stack(
-    world: *const ScatterWorld,
+pub fn block_furnace_scatter_stack(
+    w: &ScatterWorld,
     item_id: i32,
     count: i32,
     damage: i32,
@@ -118,10 +115,9 @@ pub unsafe extern "C" fn block_furnace_scatter_stack(
     y: i32,
     z: i32,
 ) {
-    if world.is_null() || item_id <= 0 || count <= 0 {
+    if item_id <= 0 || count <= 0 {
         return;
     }
-    let w = unsafe { &*world };
     emit(
         w,
         item_id,
@@ -138,9 +134,8 @@ pub unsafe extern "C" fn block_furnace_scatter_stack(
 
 /// Chest placement (mirrors `BlockChest::canPlaceBlockAt`): no more than
 /// one adjacent chest, and no adjacent double-chest.
-#[no_mangle]
-pub unsafe extern "C" fn block_chest_can_place(
-    get_block_id: Option<extern "C" fn(x: i32, y: i32, z: i32) -> u8>,
+pub fn block_chest_can_place(
+    get_block_id: Option<fn(x: i32, y: i32, z: i32) -> u8>,
     chest_id: u8,
     x: i32,
     y: i32,
@@ -209,8 +204,7 @@ mod tests {
         });
     }
 
-    extern "C" fn s_next_int(bound: i32) -> i32 {
-        let mut g = fake();
+        fn s_next_int(bound: i32) -> i32 {        let mut g = fake();
         let f = g.as_mut().unwrap_or_else(|| unreachable!());
         if f.int_pos < f.int_script.len() {
             let v = f.int_script[f.int_pos];
@@ -220,18 +214,18 @@ mod tests {
             0
         }
     }
-    extern "C" fn s_f32() -> f32 {
+    fn s_f32() -> f32 {
         fake().as_ref().map(|f| f.f32_val).unwrap_or(0.0)
     }
-    extern "C" fn s_f64() -> f64 {
+    fn s_f64() -> f64 {
         fake().as_ref().map(|f| f.f64_val).unwrap_or(0.0)
     }
-    extern "C" fn s_spawn(item: i32, count: i32, damage: i32, fx: f64, fy: f64, fz: f64, mx: f64, my: f64, mz: f64) {
+    fn s_spawn(item: i32, count: i32, damage: i32, fx: f64, fy: f64, fz: f64, mx: f64, my: f64, mz: f64) {
         if let Some(f) = fake().as_mut() {
             f.log.push(format!("spawn {item} {count} {damage} {fx:.1} {fy:.1} {fz:.1} {mx:.2} {my:.2} {mz:.2}"));
         }
     }
-    extern "C" fn s_get_id(x: i32, y: i32, z: i32) -> u8 {
+    fn s_get_id(x: i32, y: i32, z: i32) -> u8 {
         fake().as_ref().and_then(|f| f.blocks.get(&(x, y, z)).copied()).unwrap_or(0)
     }
 
@@ -251,11 +245,11 @@ mod tests {
     #[test]
     fn test_container_scenarios() {
         let t = table();
-        let tp = &t as *const ScatterWorld;
+        let tp = &t;
 
         // 1. Chest stack of 25 chunks into 10/10/5 at the +.1 corner.
         reset();
-        let left = unsafe { block_chest_scatter_stack(tp, 35, 25, 0, 10, 64, 10) };
+        let left = block_chest_scatter_stack(tp, 35, 25, 0, 10, 64, 10);
         assert_eq!(left, 0);
         let l = logs();
         assert_eq!(l.len(), 3);
@@ -264,40 +258,47 @@ mod tests {
 
         // 2. Empty/degenerate inputs scatter nothing.
         reset();
-        assert_eq!(unsafe { block_chest_scatter_stack(tp, 35, 0, 0, 0, 0, 0) }, 0);
-        assert_eq!(unsafe { block_chest_scatter_stack(tp, 0, 5, 0, 0, 0, 0) }, 5);
+        assert_eq!(block_chest_scatter_stack(tp, 35, 0, 0, 0, 0, 0), 0);
+        assert_eq!(block_chest_scatter_stack(tp, 0, 5, 0, 0, 0, 0), 5);
         assert!(logs().is_empty());
-        unsafe { block_furnace_scatter_stack(tp, 0, 5, 0, 0, 0, 0) };
+        block_furnace_scatter_stack(tp, 0, 5, 0, 0, 0, 0);
         assert!(logs().is_empty());
 
         // 3. Furnace slot drops whole at block center-top.
         reset();
-        unsafe { block_furnace_scatter_stack(tp, 265, 3, 0, 1, 2, 3) };
+        block_furnace_scatter_stack(tp, 265, 3, 0, 1, 2, 3);
         let l = logs();
         assert_eq!(l.len(), 1);
         assert!(l[0].starts_with("spawn 265 3 0 1.5 2.7 3.5 -0.10 0.20 -0.10"), "{l:?}");
 
         // 4. Chest placement: solo ok, double ok, triple rejected.
         reset();
-        assert!(unsafe { block_chest_can_place(Some(s_get_id), 54, 0, 64, 0) });
+        assert!(block_chest_can_place(Some(s_get_id), 54, 0, 64, 0));
         let _ = fake().as_mut().map(|f| {
             let _ = f.blocks.insert((1, 64, 0), 54);
         });
-        assert!(unsafe { block_chest_can_place(Some(s_get_id), 54, 0, 64, 0) });
+        assert!(block_chest_can_place(Some(s_get_id), 54, 0, 64, 0));
         let _ = fake().as_mut().map(|f| {
             let _ = f.blocks.insert((2, 64, 0), 54);
         });
-        assert!(!unsafe { block_chest_can_place(Some(s_get_id), 54, 0, 64, 0) });
+        assert!(!block_chest_can_place(Some(s_get_id), 54, 0, 64, 0));
         // Two adjacent directly: also rejected.
         reset();
         let _ = fake().as_mut().map(|f| {
             let _ = f.blocks.insert((1, 64, 0), 54);
             let _ = f.blocks.insert((-1, 64, 0), 54);
         });
-        assert!(!unsafe { block_chest_can_place(Some(s_get_id), 54, 0, 64, 0) });
+        assert!(!block_chest_can_place(Some(s_get_id), 54, 0, 64, 0));
 
-        // 5. Null inputs are safe.
-        assert_eq!(unsafe { block_chest_scatter_stack(std::ptr::null(), 35, 5, 0, 0, 0, 0) }, 5);
-        assert!(!unsafe { block_chest_can_place(None, 54, 0, 64, 0) });
+        // 5. Missing table hooks scatter nothing and place nothing.
+        let bare = ScatterWorld {
+            next_int: None,
+            next_f32_01: None,
+            next_f64_01: None,
+            spawn_item: None,
+        };
+        assert_eq!(block_chest_scatter_stack(&bare, 35, 5, 0, 0, 0, 0), 0);
+        assert!(logs().is_empty());
+        assert!(!block_chest_can_place(None, 54, 0, 64, 0));
     }
 }

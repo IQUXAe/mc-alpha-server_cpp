@@ -22,8 +22,7 @@ pub enum DeathCause {
     Generic = 8,
 }
 
-#[no_mangle]
-pub extern "C" fn alpha_player_death_cause(
+pub fn alpha_player_death_cause(
     has_attacker: bool,
     attacker_kind: u8,
     fall_distance: f32,
@@ -69,8 +68,7 @@ pub struct DropVelocity {
     pub mz: f64,
 }
 
-#[no_mangle]
-pub extern "C" fn alpha_player_drop_velocity(ra: f64, rb: f64, rc: f64) -> DropVelocity {
+pub fn alpha_player_drop_velocity(ra: f64, rb: f64, rc: f64) -> DropVelocity {
     DropVelocity { mx: (ra - 0.5) * 0.2, my: 0.2 + rb * 0.1, mz: (rc - 0.5) * 0.2 }
 }
 

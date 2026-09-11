@@ -37,18 +37,8 @@ pub const HARD_MOVEMENT_REJECT_SQ: f64 = 900.0;
 pub const MAX_COORDINATE: f64 = 3.2e7;
 
 /// Validates movement packet inputs and updates fall distance / damage according to Alpha 1.2.6 rules.
-#[no_mangle]
-pub unsafe extern "C" fn alpha_movement_validate(input: *const FfiMovementInput) -> FfiMovementResult {
-    if input.is_null() {
-        return FfiMovementResult {
-            status: MovementValidationStatus::Ok as u8,
-            new_fall_distance: 0.0,
-            fall_damage: 0,
-            move_sq: 0.0,
-        };
-    }
-
-    let inp = &*input;
+pub fn alpha_movement_validate(input: &FfiMovementInput) -> FfiMovementResult {
+    let inp = input;
 
     // 1. Check stance: stance - y must be within [0.1, 1.65]
     let stance_diff = inp.stance - inp.to_y;
@@ -139,7 +129,7 @@ mod tests {
             is_in_water: false,
             fall_distance: 0.0,
         };
-        let res = unsafe { alpha_movement_validate(&input) };
+        let res = alpha_movement_validate(&input);
         assert_eq!(res.status, MovementValidationStatus::Ok as u8);
         assert_eq!(res.fall_damage, 0);
         assert_eq!(res.new_fall_distance, 0.0);
@@ -159,7 +149,7 @@ mod tests {
             is_in_water: false,
             fall_distance: 0.0,
         };
-        let res = unsafe { alpha_movement_validate(&input) };
+        let res = alpha_movement_validate(&input);
         assert_eq!(res.status, MovementValidationStatus::IllegalStance as u8);
     }
 
@@ -177,7 +167,7 @@ mod tests {
             is_in_water: false,
             fall_distance: 0.0,
         };
-        let res = unsafe { alpha_movement_validate(&input) };
+        let res = alpha_movement_validate(&input);
         assert_eq!(res.status, MovementValidationStatus::IllegalPosition as u8);
     }
 
@@ -195,7 +185,7 @@ mod tests {
             is_in_water: false,
             fall_distance: 0.0,
         };
-        let res = unsafe { alpha_movement_validate(&input) };
+        let res = alpha_movement_validate(&input);
         assert_eq!(res.status, MovementValidationStatus::MovedTooQuickly as u8);
     }
 
@@ -214,7 +204,7 @@ mod tests {
             is_in_water: false,
             fall_distance: 0.0,
         };
-        let res1 = unsafe { alpha_movement_validate(&input_falling) };
+        let res1 = alpha_movement_validate(&input_falling);
         assert_eq!(res1.status, MovementValidationStatus::Ok as u8);
         assert_eq!(res1.new_fall_distance, 10.0);
         assert_eq!(res1.fall_damage, 0);
@@ -232,7 +222,7 @@ mod tests {
             is_in_water: false,
             fall_distance: res1.new_fall_distance,
         };
-        let res2 = unsafe { alpha_movement_validate(&input_landing) };
+        let res2 = alpha_movement_validate(&input_landing);
         assert_eq!(res2.status, MovementValidationStatus::Ok as u8);
         assert_eq!(res2.fall_damage, 7);
         assert_eq!(res2.new_fall_distance, 0.0);
@@ -252,7 +242,7 @@ mod tests {
             is_in_water: true,
             fall_distance: 20.0,
         };
-        let res = unsafe { alpha_movement_validate(&input) };
+        let res = alpha_movement_validate(&input);
         assert_eq!(res.status, MovementValidationStatus::Ok as u8);
         assert_eq!(res.fall_damage, 0);
         assert_eq!(res.new_fall_distance, 0.0);

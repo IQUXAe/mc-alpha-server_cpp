@@ -47,8 +47,7 @@ pub struct FfiDigInput {
 }
 
 /// Fresh digging state (no target, no damage).
-#[no_mangle]
-pub extern "C" fn alpha_dig_state_new() -> FfiDigState {
+pub fn alpha_dig_state_new() -> FfiDigState {
     FfiDigState {
         cur_damage: 0.0,
         block_damage: 0.0,
@@ -61,16 +60,7 @@ pub extern "C" fn alpha_dig_state_new() -> FfiDigState {
 }
 
 /// Reset digging progress (mirrors `ItemInWorldManager::cancelRemoving`).
-///
-/// # Safety
-/// `state` must be non-null, aligned for `FfiDigState`, and writable
-/// for the duration of the call.
-#[no_mangle]
-pub unsafe extern "C" fn alpha_dig_cancel(state: *mut FfiDigState) {
-    if state.is_null() {
-        return;
-    }
-    let s = unsafe { &mut *state };
+pub fn alpha_dig_cancel(s: &mut FfiDigState) {
     s.cur_damage = 0.0;
     s.initial_cooldown = 0;
 }
@@ -81,8 +71,7 @@ pub unsafe extern "C" fn alpha_dig_cancel(state: *mut FfiDigState) {
 /// e.g. torches/flowers) and the caller must harvest immediately.
 /// Does not mutate `state`: progressive digging is driven by
 /// `alpha_dig_on_tick`.
-#[no_mangle]
-pub extern "C" fn alpha_dig_on_click(input: FfiDigInput) -> bool {
+pub fn alpha_dig_on_click(input: FfiDigInput) -> bool {
     if input.block_id <= 0 {
         return false;
     }
@@ -106,23 +95,13 @@ pub extern "C" fn alpha_dig_on_click(input: FfiDigInput) -> bool {
 /// - A different target resets accumulators and latches the new target.
 /// - Air (`block_id == 0`) on the current target is a no-op (matches
 ///   the early `return` in C++; progress is kept, not reset).
-///
-/// # Safety
-/// `state` must be non-null, aligned for `FfiDigState`, and writable
-/// for the duration of the call.
-#[no_mangle]
-pub unsafe extern "C" fn alpha_dig_on_tick(
-    state: *mut FfiDigState,
+pub fn alpha_dig_on_tick(
+    s: &mut FfiDigState,
     x: i32,
     y: i32,
     z: i32,
     input: FfiDigInput,
 ) -> bool {
-    if state.is_null() {
-        return false;
-    }
-    let s = unsafe { &mut *state };
-
     if s.initial_cooldown > 0 {
         s.initial_cooldown -= 1;
         return false;
@@ -257,9 +236,13 @@ mod tests {
     }
 
     #[test]
-    fn test_null_state_is_safe() {
-        let inp = input(1, 278);
-        assert!(!unsafe { alpha_dig_on_tick(core::ptr::null_mut(), 0, 0, 0, inp) });
-        unsafe { alpha_dig_cancel(core::ptr::null_mut()) }; // must not crash
+    fn test_fresh_state_cancel_resets() {
+        // Null states are unrepresentable now (safe &mut only); a fresh
+        // state cancel is the closest meaningful case.
+        let mut s = alpha_dig_state_new();
+        s.cur_damage = 0.5;
+        alpha_dig_cancel(&mut s);
+        assert_eq!(s.cur_damage, 0.0);
+        assert_eq!(s.initial_cooldown, 0);
     }
 }

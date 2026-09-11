@@ -5216,7 +5216,6 @@ impl World {
             _ => {}
         }
         let _guard = TickGuard::enter(self as *mut World);
-        let _guard = TickGuard::enter(self as *mut World);
         unsafe {
             match bid {
                 12 | 13 => block_sand_added(&TICK_TABLE, bid, x, y, z),
@@ -5347,19 +5346,19 @@ impl World {
         };
         // ScatterWorld shims draw from the world RNG and spawn directly
         // (mirroring the C++ global-RNG scatter table).
-        extern "C" fn sc_next_int(bound: i32) -> i32 {
+        fn sc_next_int(bound: i32) -> i32 {
             if bound <= 0 {
                 return 0;
             }
             with_tick_world(|w| w.rng.next_int_bound(bound), 0)
         }
-        extern "C" fn sc_next_f32() -> f32 {
+        fn sc_next_f32() -> f32 {
             with_tick_world(|w| w.rng.next_float(), 0.0)
         }
-        extern "C" fn sc_next_f64() -> f64 {
+        fn sc_next_f64() -> f64 {
             with_tick_world(|w| w.rng.next_double(), 0.0)
         }
-        extern "C" fn sc_spawn(
+        fn sc_spawn(
             item_id: i32,
             count: i32,
             damage: i32,
@@ -5387,40 +5386,38 @@ impl World {
             spawn_item: Some(sc_spawn),
         };
         let _guard = TickGuard::enter(self as *mut World);
-        unsafe {
-            match tile {
-                TileData::Furnace(s) => {
-                    for slot in s.slots {
-                        if slot.stack_size > 0 {
-                            block_furnace_scatter_stack(
-                                &table,
-                                slot.item_id,
-                                slot.stack_size,
-                                slot.item_damage,
-                                x,
-                                y,
-                                z,
-                            );
-                        }
+        match tile {
+            TileData::Furnace(s) => {
+                for slot in s.slots {
+                    if slot.stack_size > 0 {
+                        block_furnace_scatter_stack(
+                            &table,
+                            slot.item_id,
+                            slot.stack_size,
+                            slot.item_damage,
+                            x,
+                            y,
+                            z,
+                        );
                     }
                 }
-                TileData::Chest(s) => {
-                    for slot in s.slots {
-                        if slot.stack_size > 0 {
-                            block_chest_scatter_stack(
-                                &table,
-                                slot.item_id,
-                                slot.stack_size,
-                                slot.item_damage,
-                                x,
-                                y,
-                                z,
-                            );
-                        }
-                    }
-                }
-                TileData::Sign(_) => {}
             }
+            TileData::Chest(s) => {
+                for slot in s.slots {
+                    if slot.stack_size > 0 {
+                        block_chest_scatter_stack(
+                            &table,
+                            slot.item_id,
+                            slot.stack_size,
+                            slot.item_damage,
+                            x,
+                            y,
+                            z,
+                        );
+                    }
+                }
+            }
+            TileData::Sign(_) => {}
         }
         self.tiles.remove(&(x, y, z));
     }

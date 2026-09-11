@@ -135,8 +135,7 @@ pub const ITEM_FISH_COOKED: i32 = 350;
 
 /// True for ids that can appear in `Item::itemsList` after `initItems`:
 /// block ids 1..=255 plus item ids 256..=350.
-#[no_mangle]
-pub extern "C" fn alpha_item_is_valid(item_id: i32) -> bool {
+pub fn alpha_item_is_valid(item_id: i32) -> bool {
     item_id >= 1 && item_id <= LAST_ITEM_ID
 }
 
@@ -157,8 +156,7 @@ pub extern "C" fn alpha_item_is_valid(item_id: i32) -> bool {
 
 /// Unified durability table. Armor range 298..=317 is served by the
 /// existing `alpha_armor_max_damage` helper (no second table here).
-#[no_mangle]
-pub extern "C" fn alpha_item_max_damage(item_id: i32) -> i32 {
+pub fn alpha_item_max_damage(item_id: i32) -> i32 {
     match item_id {
         ITEM_SHOVEL_WOOD | ITEM_PICKAXE_WOOD | ITEM_AXE_WOOD | ITEM_SWORD_WOOD
         | ITEM_SHOVEL_GOLD | ITEM_PICKAXE_GOLD | ITEM_AXE_GOLD | ITEM_SWORD_GOLD => 32,
@@ -186,8 +184,7 @@ pub extern "C" fn alpha_item_max_damage(item_id: i32) -> i32 {
 /// Heal amount for food items, 0 for non-food.
 /// Values: apple 4, soup 10, bread 5, pork raw 3, pork cooked 8,
 /// golden apple 42, fish raw 2, fish cooked 5.
-#[no_mangle]
-pub extern "C" fn alpha_item_food_heal(item_id: i32) -> i32 {
+pub fn alpha_item_food_heal(item_id: i32) -> i32 {
     match item_id {
         ITEM_APPLE_RED => 4,
         ITEM_BOWL_SOUP => 10,
@@ -202,8 +199,7 @@ pub extern "C" fn alpha_item_food_heal(item_id: i32) -> i32 {
 }
 
 /// True for the eight `ItemFood` / `ItemSoup` ids listed above.
-#[no_mangle]
-pub extern "C" fn alpha_item_is_food(item_id: i32) -> bool {
+pub fn alpha_item_is_food(item_id: i32) -> bool {
     alpha_item_food_heal(item_id) > 0
 }
 
@@ -225,8 +221,7 @@ pub enum ItemToolKind {
 
 /// Family lookup. Hoes (290..=294) report `Hoe`; everything that is not a
 /// pick/spade/axe/sword/hoe reports `Other`.
-#[no_mangle]
-pub extern "C" fn alpha_item_tool_kind(item_id: i32) -> i32 {
+pub fn alpha_item_tool_kind(item_id: i32) -> i32 {
     match item_id {
         ITEM_PICKAXE_STEEL | ITEM_PICKAXE_WOOD | ITEM_PICKAXE_STONE | ITEM_PICKAXE_DIAMOND
         | ITEM_PICKAXE_GOLD => ItemToolKind::Pickaxe as i32,
@@ -260,8 +255,7 @@ fn tool_tier_opt(item_id: i32) -> Option<i32> {
 /// Harvest level from `Item.h` (`0=wood, 1=stone, 2=steel, 3=diamond`).
 /// Gold tools were built with level 0 in `Item.cpp`, so they yield 0.
 /// Returns -1 for non-tiered ids (hoes, armor, misc).
-#[no_mangle]
-pub extern "C" fn alpha_item_tool_tier(item_id: i32) -> i32 {
+pub fn alpha_item_tool_tier(item_id: i32) -> i32 {
     match tool_tier_opt(item_id) {
         Some(t) => t,
         None => -1,
@@ -272,8 +266,7 @@ pub extern "C" fn alpha_item_tool_tier(item_id: i32) -> i32 {
 /// Wood/gold 2.0, stone 4.0, steel 6.0, diamond 8.0.
 /// Returns 1.0 for ids without a tier (matches the `getStrVsBlock`
 /// fallback in `Item.cpp:459-467`).
-#[no_mangle]
-pub extern "C" fn alpha_item_tool_speed(item_id: i32) -> f32 {
+pub fn alpha_item_tool_speed(item_id: i32) -> f32 {
     match tool_tier_opt(item_id) {
         Some(0) => 2.0,
         Some(1) => 4.0,
@@ -302,8 +295,7 @@ fn list_has(hay: &[i32], needle: i32) -> bool {
 /// True when `block_id` is in the explicit ctor list for the tool family.
 /// This is only the first half of `ItemTool::getStrVsBlock`; the
 /// material-based fallback lives in `player_mining` and is reused there.
-#[no_mangle]
-pub extern "C" fn alpha_item_is_effective_explicit(item_id: i32, block_id: i32) -> bool {
+pub fn alpha_item_is_effective_explicit(item_id: i32, block_id: i32) -> bool {
     if block_id <= 0 || block_id >= 256 {
         return false;
     }
@@ -650,10 +642,10 @@ mod tests {
             item_id: ITEM_SWORD_WOOD,
             item_damage: 31,
         };
-        let broke = item_stack_damage(&mut s as *mut FfiItemStack, 1, max);
+        let broke = item_stack_damage(&mut s, 1, max);
         assert!(!broke);
         assert_eq!(s.item_damage, 32);
-        let broke2 = item_stack_damage(&mut s as *mut FfiItemStack, 1, max);
+        let broke2 = item_stack_damage(&mut s, 1, max);
         assert!(broke2);
         assert_eq!(s.item_damage, 0);
         assert_eq!(s.stack_size, 0);
@@ -666,7 +658,7 @@ mod tests {
         };
         let max_plain = alpha_item_max_damage(ITEM_DIAMOND);
         assert_eq!(max_plain, 0);
-        let broke3 = item_stack_damage(&mut plain as *mut FfiItemStack, 100, max_plain);
+        let broke3 = item_stack_damage(&mut plain, 100, max_plain);
         assert!(!broke3);
         assert_eq!(plain.stack_size, 1);
     }

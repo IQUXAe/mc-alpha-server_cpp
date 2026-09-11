@@ -8,8 +8,7 @@ pub struct FfiCombatResult {
 
 /// Calculates combat damage scaling by difficulty and armor absorption.
 /// Follows Minecraft Alpha 1.2.6 rules (EntityPlayerMP.attackEntityFrom).
-#[no_mangle]
-pub extern "C" fn alpha_combat_calculate_damage(
+pub fn alpha_combat_calculate_damage(
     raw_damage: i32,
     attacker_is_player: bool,
     difficulty: i32,
@@ -56,8 +55,7 @@ pub extern "C" fn alpha_combat_calculate_damage(
 }
 
 /// Returns damage dealt to entities based on held item ID in Minecraft Alpha 1.2.6.
-#[no_mangle]
-pub extern "C" fn alpha_combat_get_weapon_damage(item_id: i32) -> i32 {
+pub fn alpha_combat_get_weapon_damage(item_id: i32) -> i32 {
     match item_id {
         // Swords: 4 + level * 2
         // Wood (level 0), Gold (level 0)

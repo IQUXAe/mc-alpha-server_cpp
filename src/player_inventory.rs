@@ -1,8 +1,7 @@
 use crate::inventory::FfiItemStack;
 
 /// Returns the maximum stack size for a given item or block ID in Minecraft Alpha 1.2.6.
-#[no_mangle]
-pub extern "C" fn alpha_inventory_max_stack_size(item_id: i32) -> i32 {
+pub fn alpha_inventory_max_stack_size(item_id: i32) -> i32 {
     if item_id <= 0 {
         return 0;
     }
@@ -82,24 +81,15 @@ pub fn alpha_armor_base_points(item_id: i32) -> i32 {
 /// Adds items to an array of inventory slots (e.g. 36 slots).
 /// Updates `slots` in place and decreases `stack.stack_size`.
 /// Returns remaining `stack_size` (0 if completely added).
-#[no_mangle]
-pub unsafe extern "C" fn alpha_inventory_add_item(
-    slots: *mut FfiItemStack,
-    slots_len: usize,
-    stack: *mut FfiItemStack,
+pub fn alpha_inventory_add_item(
+    slots: &mut [FfiItemStack],
+    stack: &mut FfiItemStack,
     stack_limit: i32,
 ) -> i32 {
-    if slots.is_null() || stack.is_null() || slots_len == 0 {
-        return if stack.is_null() { 0 } else { (*stack).stack_size };
-    }
-
-    let incoming = &mut *stack;
-    if incoming.stack_size <= 0 || incoming.item_id <= 0 {
+    if stack.stack_size <= 0 || stack.item_id <= 0 {
         return 0;
     }
-
-    let slots_slice = std::slice::from_raw_parts_mut(slots, slots_len);
-    inventory_add_item_to(slots_slice, incoming, stack_limit)
+    inventory_add_item_to(slots, stack, stack_limit)
 }
 
 /// Adds items to an inventory slice (e.g. the 36 main slots). Shared core
@@ -193,16 +183,7 @@ pub fn inventory_add_item_to(
 /// Calculates total armor defense value from worn armor pieces (0-20 points).
 /// Uses Alpha 1.2.6 durability-weighted reduction formula:
 /// `(total_reduction - 1) * remaining_durability / total_durability + 1`
-#[no_mangle]
-pub unsafe extern "C" fn alpha_inventory_calc_armor(
-    armor_slots: *const FfiItemStack,
-    armor_len: usize,
-) -> i32 {
-    if armor_slots.is_null() || armor_len == 0 {
-        return 0;
-    }
-
-    let armor = std::slice::from_raw_parts(armor_slots, armor_len);
+pub fn alpha_inventory_calc_armor(armor: &[FfiItemStack]) -> i32 {
     inventory_armor_value(armor)
 }
 
@@ -242,17 +223,10 @@ pub fn inventory_armor_value(armor: &[FfiItemStack]) -> i32 {
 }
 
 /// Damages all worn armor pieces by `damage_amount`. Breaks items when durability is depleted.
-#[no_mangle]
-pub unsafe extern "C" fn alpha_inventory_damage_armor(
-    armor_slots: *mut FfiItemStack,
-    armor_len: usize,
-    damage_amount: i32,
-) {
-    if armor_slots.is_null() || armor_len == 0 || damage_amount <= 0 {
+pub fn alpha_inventory_damage_armor(armor: &mut [FfiItemStack], damage_amount: i32) {
+    if damage_amount <= 0 {
         return;
     }
-
-    let armor = std::slice::from_raw_parts_mut(armor_slots, armor_len);
     inventory_damage_armor(armor, damage_amount)
 }
 
@@ -290,8 +264,7 @@ pub fn inventory_damage_armor(armor: &mut [FfiItemStack], damage_amount: i32) {
 /// Resolves crafting recipes in the player's 2x2 crafting grid.
 /// `grid` contains 4 slots: [0]=(0,0), [1]=(1,0), [2]=(0,1), [3]=(1,1).
 /// Returns `FfiItemStack` containing crafted output or empty item (item_id=0, stack_size=0).
-#[no_mangle]
-pub unsafe extern "C" fn alpha_inventory_craft_2x2(grid: *const FfiItemStack) -> FfiItemStack {
+pub fn alpha_inventory_craft_2x2(grid: &[FfiItemStack; 4]) -> FfiItemStack {
     let empty = FfiItemStack {
         item_id: 0,
         stack_size: 0,
@@ -299,11 +272,7 @@ pub unsafe extern "C" fn alpha_inventory_craft_2x2(grid: *const FfiItemStack) ->
         animations_to_go: 0,
     };
 
-    if grid.is_null() {
-        return empty;
-    }
-
-    let g = std::slice::from_raw_parts(grid, 4);
+    let g = grid;
 
     let id = |idx: usize| -> i32 {
         if g[idx].item_id > 0 && g[idx].stack_size > 0 {
@@ -489,13 +458,7 @@ pub unsafe extern "C" fn alpha_inventory_craft_2x2(grid: *const FfiItemStack) ->
 }
 
 /// Decreases stack sizes of crafting grid items by 1 after a successful craft.
-#[no_mangle]
-pub unsafe extern "C" fn alpha_inventory_consume_craft_2x2(grid: *mut FfiItemStack) {
-    if grid.is_null() {
-        return;
-    }
-
-    let g = std::slice::from_raw_parts_mut(grid, 4);
+pub fn alpha_inventory_consume_craft_2x2(g: &mut [FfiItemStack; 4]) {
     for item in g.iter_mut() {
         if item.item_id > 0 && item.stack_size > 0 {
             item.stack_size -= 1;
@@ -522,7 +485,7 @@ mod tests {
         slots[0] = FfiItemStack { item_id: 1, stack_size: 50, item_damage: 0, animations_to_go: 0 };
 
         let mut incoming = FfiItemStack { item_id: 1, stack_size: 20, item_damage: 0, animations_to_go: 0 };
-        let rem = unsafe { alpha_inventory_add_item(slots.as_mut_ptr(), slots.len(), &mut incoming, 64) };
+        let rem = alpha_inventory_add_item(&mut slots, &mut incoming, 64);
 
         assert_eq!(rem, 0);
         assert_eq!(incoming.stack_size, 0);
@@ -539,7 +502,7 @@ mod tests {
         ];
 
         let mut incoming = FfiItemStack { item_id: 276, stack_size: 2, item_damage: 0, animations_to_go: 0 }; // Diamond sword
-        let rem = unsafe { alpha_inventory_add_item(slots.as_mut_ptr(), slots.len(), &mut incoming, 64) };
+        let rem = alpha_inventory_add_item(&mut slots, &mut incoming, 64);
 
         assert_eq!(rem, 0);
         assert_eq!(slots[0].item_id, 276);
@@ -557,7 +520,7 @@ mod tests {
             FfiItemStack { item_id: 313, stack_size: 1, item_damage: 0, animations_to_go: 0 }, // Diamond boots (3)
         ];
         // Total base reduction: 3 + 8 + 6 + 3 = 20 points
-        let pts = unsafe { alpha_inventory_calc_armor(armor.as_ptr(), armor.len()) };
+        let pts = alpha_inventory_calc_armor(&armor);
         assert_eq!(pts, 20);
     }
 
@@ -567,7 +530,7 @@ mod tests {
             FfiItemStack { item_id: 298, stack_size: 1, item_damage: 30, animations_to_go: 0 }, // Leather helmet max 33
         ];
 
-        unsafe { alpha_inventory_damage_armor(armor.as_mut_ptr(), armor.len(), 5) };
+        alpha_inventory_damage_armor(&mut armor, 5);
         // 30 + 5 = 35 > 33 -> broken!
         assert_eq!(armor[0].stack_size, 0);
         assert_eq!(armor[0].item_id, 0);
@@ -582,7 +545,7 @@ mod tests {
             FfiItemStack { item_id: 0, stack_size: 0, item_damage: 0, animations_to_go: 0 },
             FfiItemStack { item_id: 0, stack_size: 0, item_damage: 0, animations_to_go: 0 },
         ];
-        let out = unsafe { alpha_inventory_craft_2x2(grid.as_ptr()) };
+        let out = alpha_inventory_craft_2x2(&grid);
         assert_eq!(out.item_id, 5);
         assert_eq!(out.stack_size, 4);
 
@@ -593,7 +556,7 @@ mod tests {
             FfiItemStack { item_id: 5, stack_size: 1, item_damage: 0, animations_to_go: 0 },
             FfiItemStack { item_id: 5, stack_size: 1, item_damage: 0, animations_to_go: 0 },
         ];
-        let out_wb = unsafe { alpha_inventory_craft_2x2(grid_wb.as_ptr()) };
+        let out_wb = alpha_inventory_craft_2x2(&grid_wb);
         assert_eq!(out_wb.item_id, 58);
         assert_eq!(out_wb.stack_size, 1);
     }
