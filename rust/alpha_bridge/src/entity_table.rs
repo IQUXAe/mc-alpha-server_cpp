@@ -322,6 +322,8 @@ pub struct AnimalEnt {
     pub living: LivingBody,
     pub kind: AnimalKind,
     pub sheared: bool,
+    /// Pig saddle (mirrors `EntityPig::saddled`, NBT `Saddle`).
+    pub saddled: bool,
     pub egg_timer: i32,
     pub path: Vec<[i32; 3]>,
     pub path_index: usize,
@@ -340,6 +342,7 @@ impl AnimalEnt {
             living,
             kind,
             sheared: false,
+            saddled: false,
             egg_timer: 6000,
             path: Vec::new(),
             path_index: 0,

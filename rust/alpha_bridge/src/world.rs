@@ -8,10 +8,19 @@
 //! for tick integration. Generation, persistence, lighting updates, and
 //! networking arrive in later slices.
 
-use std::collections::HashMap;
-
+use std::collections::{BTreeMap, HashMap};
 use crate::aabb::AxisAlignedBB;
 use crate::block::{BlockMaterial, BlockType, alpha_block_properties_get};
+use crate::block_fire::{FireWorld, block_fire_added, block_fire_neighbor, block_fire_tick};
+use crate::block_ticks::{
+    BlockTickWorld, block_base_drop, block_cactus_added, block_cactus_neighbor, block_cactus_tick,
+    block_crops_added, block_crops_neighbor, block_crops_tick, block_flower_neighbor,
+    block_flower_tick, block_fluid_added, block_fluid_neighbor, block_fluid_tick,
+    block_leaves_added, block_leaves_neighbor, block_leaves_tick, block_mushroom_neighbor,
+    block_reed_added, block_reed_neighbor, block_reed_tick, block_sand_added, block_sand_neighbor,
+    block_sand_tick, block_sapling_added, block_sapling_neighbor, block_sapling_tick,
+    block_soil_added, block_soil_neighbor, block_soil_tick, block_torch_neighbor,
+};
 use crate::chunk::Chunk;
 use crate::entity_ai::{
     alpha_ai_animal_path_weight, alpha_ai_mob_path_weight, chase_speed, face_run, steer_run,
@@ -46,6 +55,14 @@ fn has_collision_box(block_type: u8) -> bool {
             || x == BlockType::Crops as u8
             || x == BlockType::Fire as u8
     )
+}
+
+/// True when a block id has air material (mirrors the `== &Material::air`
+/// identity check: `Material` compares by capability flags, so all-false
+/// materials like circuits would alias `Material::AIR` — compare the
+/// material id byte instead).
+fn is_air_material(bid: u8) -> bool {
+    alpha_block_properties_get(bid as u32).material == BlockMaterial::Air as u8
 }
 
 /// Material for a block-table material id (mirrors `materialFromId`).
@@ -88,6 +105,18 @@ pub struct World {
     /// Spawn switches (mirror `isSpawnMonsters/isSpawnAnimals`).
     pub spawn_monsters: bool,
     pub spawn_animals: bool,
+    /// Scheduled block updates keyed by (time, x, y, z) like the C++
+    /// `scheduledTicks` set (duplicate keys keep the FIRST entry).
+    scheduled: BTreeMap<(i64, i32, i32, i32), u8>,
+    /// Leaves-decay search guard (mirrors the singleton `BlockLeaves`
+    /// instance field threaded through the decay drivers).
+    leaves_guard: i32,
+    /// Chunk unload radius in chunks (mirrors view distance + 2).
+    pub unload_radius: i32,
+    /// Unloaded chunks with their entity spill (mirrors the leveldb
+    /// round-trip: evicted here, thawed back on recall; disk eviction
+    /// arrives with the persistence slice).
+    unloaded: HashMap<(i32, i32), Chunk>,
     chunks: HashMap<(i32, i32), Chunk>,
     pub entities: EntityTable,
     pub tracker: Tracker,
@@ -109,6 +138,10 @@ impl World {
             difficulty: 2,
             spawn_monsters: true,
             spawn_animals: true,
+            scheduled: BTreeMap::new(),
+            leaves_guard: 0,
+            unload_radius: 10,
+            unloaded: HashMap::new(),
             chunks: HashMap::new(),
             entities: EntityTable::new(),
             tracker: Tracker::new(),
@@ -1461,6 +1494,183 @@ mod tests {
             }
         }
         assert!(spawned > 0, "lit grass pens should yield passive spawns");
+    }
+
+    #[test]
+    fn test_sand_falls_on_schedule() {
+        let mut w = world_with_floor();
+        w.set_block_id(3, 66, 4, 12);
+        w.schedule_block_update(3, 66, 4, 12, 1);
+        w.tick_world();
+        // The tick fired: sand left and a falling row took over.
+        assert_eq!(w.get_block_id(3, 66, 4), 0);
+        assert!(w.entities.alive_ids().into_iter().any(|oid| matches!(
+            w.entities.get(oid).unwrap(),
+            crate::entity_table::Entity::Falling(f) if f.block_id == 12
+        )));
+    }
+
+    #[test]
+    fn test_scheduled_queue_gates_and_stales() {
+        let mut w = world_with_floor();
+        w.set_block_id(3, 66, 4, 12);
+        // Future entry waits.
+        w.schedule_block_update(3, 66, 4, 12, 5);
+        assert_eq!(w.scheduled.len(), 1);
+        w.tick_world();
+        assert_eq!(w.scheduled.len(), 1);
+        assert_eq!(w.get_block_id(3, 66, 4), 12);
+        // Stale entry (wrong id) is dropped without effect; the future
+        // entry from above is still queued.
+        w.schedule_block_update(5, 66, 5, 12, 0);
+        w.tick_world();
+        assert_eq!(w.scheduled.len(), 1);
+        assert_eq!(w.get_block_id(5, 66, 5), 0);
+        // Duplicate keys keep the first entry like the C++ set.
+        w.schedule_block_update(7, 66, 7, 13, 2);
+        w.schedule_block_update(7, 66, 7, 12, 2);
+        let dups: Vec<u8> = w
+            .scheduled
+            .iter()
+            .filter(|((_, x, y, z), _)| (*x, *y, *z) == (7, 66, 7))
+            .map(|(_, v)| *v)
+            .collect();
+        assert_eq!(dups, vec![13]);
+    }
+
+
+
+    #[test]
+    fn test_torch_pops_when_dug() {
+        let mut w = world_with_floor();
+        w.set_block_id(3, 64, 4, 50);
+        w.set_block_meta(3, 64, 4, 5); // floor mount, like placement sets
+        w.apply_set_notify(3, 63, 4, 0);
+        assert_eq!(w.get_block_id(3, 64, 4), 0);
+        assert!(w.entities.alive_ids().into_iter().any(|oid| matches!(
+            w.entities.get(oid).unwrap(),
+            crate::entity_table::Entity::Item(e) if e.item_id == 50
+        )));
+    }
+
+    #[test]
+    fn test_sign_pops_without_support() {
+        let mut w = world_with_floor();
+        // Wall sign facing +z support.
+        w.set_block_id(3, 65, 5, 1);
+        w.set_block_id(3, 65, 4, 68);
+        w.set_block_meta(3, 65, 4, 2);
+        w.apply_set_notify(3, 65, 5, 0);
+        assert_eq!(w.get_block_id(3, 65, 4), 0);
+        assert!(w.entities.alive_ids().into_iter().any(|oid| matches!(
+            w.entities.get(oid).unwrap(),
+            crate::entity_table::Entity::Item(e) if e.item_id == 323
+        )));
+        // Supported post sign stays.
+        w.set_block_id(5, 64, 5, 63);
+        w.neighbor_changed(5, 64, 5);
+        assert_eq!(w.get_block_id(5, 64, 5), 63);
+    }
+
+    #[test]
+    fn test_flowers_pop_in_dark_random_ticks() {
+        let mut w = world_with_floor();
+        let _p = add_player(&mut w, "steve", 8.5, 64.0, 8.5);
+        for x in 0..16 {
+            for z in 0..16 {
+                w.set_block_id(x, 64, z, 37);
+            }
+        }
+        for _ in 0..300 {
+            w.random_block_ticks();
+        }
+        let left: usize = (0..16)
+            .flat_map(|x| (0..16).map(move |z| (x, z)))
+            .filter(|(x, z)| w.get_block_id(*x, 64, *z) == 37)
+            .count();
+        assert!(left < 256, "dark flowers should pop under random ticks, left={left}");
+    }
+
+    #[test]
+    fn test_sapling_grows_or_restores() {
+        let mut w = world_with_floor();
+        w.set_block_id(8, 63, 8, 3);
+        for x in 0..16 {
+            for z in 0..16 {
+                for y in 64..80 {
+                    set_sky(&mut w, x, y, z, 15);
+                }
+            }
+        }
+        let mut grew = 0;
+        for seed in 0..20 {
+            w.set_block_id(8, 64, 8, 6);
+            w.grow_sapling(8, 64, 8, 6, seed);
+            let logs: usize = (0..16)
+                .flat_map(|x| (0..16).flat_map(move |z| (64..96).map(move |y| (x, y, z))))
+                .filter(|(x, y, z)| w.get_block_id(*x, *y, *z) == 17)
+                .count();
+            if logs > 0 {
+                grew += 1;
+            } else {
+                // Failed generation restores the sapling.
+                assert_eq!(w.get_block_id(8, 64, 8), 6);
+            }
+            // Scrub the tree for the next seed.
+            for x in 0..16 {
+                for z in 0..16 {
+                    for y in 64..96 {
+                        let id = w.get_block_id(x, y, z);
+                        if id == 17 || id == 18 {
+                            w.set_block_id(x, y, z, 0);
+                        }
+                    }
+                }
+            }
+        }
+        assert!(grew > 0, "open lit saplings should grow trees");
+    }
+
+    #[test]
+    fn test_unload_spills_and_recalls() {
+        let mut w = world_with_floor();
+        let _p = add_player(&mut w, "steve", 8.5, 64.0, 8.5);
+        add_floor_chunk(&mut w, 11, 0);
+        let item = w.spawn_item_entity(3, 2, 0, 11.0 * 16.0 + 8.5, 65.0, 8.5);
+        let zombie = add_mob(&mut w, MobKind::Zombie, 11.0 * 16.0 + 8.5, 65.0, 8.5);
+        w.time = 99;
+        w.tick_world();
+        assert_eq!(w.time, 100);
+        assert!(!w.has_chunk(11, 0));
+        assert!(w.entities.get(item).is_none());
+        assert!(w.entities.get(zombie).is_none());
+        // Spawn chunks stay put.
+        assert!(w.has_chunk(0, 0));
+        assert!(w.recall_chunk(11, 0));
+        assert!(w.has_chunk(11, 0));
+        let items = w
+            .entities
+            .alive_ids()
+            .into_iter()
+            .filter(|oid| {
+                matches!(
+                    w.entities.get(*oid).unwrap(),
+                    crate::entity_table::Entity::Item(e) if e.item_id == 3 && e.count == 2
+                )
+            })
+            .count();
+        let mobs = w
+            .entities
+            .alive_ids()
+            .into_iter()
+            .filter(|oid| {
+                matches!(
+                    w.entities.get(*oid).unwrap(),
+                    crate::entity_table::Entity::Mob(m) if m.kind == MobKind::Zombie
+                )
+            })
+            .count();
+        assert_eq!((items, mobs), (1, 1));
     }
 
     fn player_health(w: &World, id: EntityId) -> i16 {
@@ -3696,7 +3906,7 @@ extern "C" fn spawn_is_air(x: i32, y: i32, z: i32) -> bool {
         if world.is_null() {
             return false;
         }
-        (*world).material_at(x, y, z) == Material::AIR
+        is_air_material((*world).get_block_id(x, y, z))
     })
 }
 
@@ -4023,9 +4233,9 @@ impl World {
     }
 
     /// Server tick (mirrors `World::tick` minus chunk I/O, lighting, tile
-    /// entities, and packets): clock, spawners, entity dispatch on a
-    /// snapshot (mid-tick spawns wait a tick like C++), item pickup, and
-    /// the dead-row purge.
+    /// entities, and packets): clock, spawners, scheduled and random block
+    /// ticks, entity dispatch on a snapshot (mid-tick spawns wait a tick
+    /// like C++), item pickup, dead-row purge, and periodic unload.
     pub fn tick_world(&mut self) {
         self.time += 1;
         if self.spawn_monsters {
@@ -4034,6 +4244,8 @@ impl World {
         if self.spawn_animals {
             self.spawn_passive_mobs();
         }
+        self.process_scheduled_ticks();
+        self.random_block_ticks();
         let mut ids = self.entities.alive_ids();
         ids.sort_unstable();
         for id in ids {
@@ -4053,5 +4265,912 @@ impl World {
         }
         self.pickup_items();
         self.entities.purge_dead();
+        self.unload_chunks();
+    }
+}
+
+// Native block-tick bridge: the `block_*` drivers stay untouched; these
+// shims feed them the native world's blocks, light, schedule, RNG, and
+// spawns through a thread-local pointer (the established `*World`
+// pattern). Set-variants apply id/meta plus the C++ added/neighbor
+// routing; client packets (markBlockNeedsUpdate) are no-ops. Container
+// removal scatter is skipped until the tile table slice (no tile state
+// exists natively yet). The native RNG stream is independent of the C++
+// mt19937 stream (same ranges, deterministic per seed).
+thread_local! {
+    static TICK_WORLD: std::cell::Cell<*mut World> = std::cell::Cell::new(std::ptr::null_mut());
+}
+
+/// RAII guard for the tick bridge pointer (restores null on scope exit).
+struct TickGuard;
+impl TickGuard {
+    fn enter(world: *mut World) -> Self {
+        TICK_WORLD.with(|t| t.set(world));
+        TickGuard
+    }
+}
+impl Drop for TickGuard {
+    fn drop(&mut self) {
+        TICK_WORLD.with(|t| t.set(std::ptr::null_mut()));
+    }
+}
+
+fn with_tick_world<T>(f: impl FnOnce(&mut World) -> T, dflt: T) -> T {
+    TICK_WORLD.with(|t| unsafe {
+        let p = t.get();
+        if p.is_null() {
+            dflt
+        } else {
+            f(&mut *p)
+        }
+    })
+}
+
+extern "C" fn tick_next_int(bound: i32) -> i32 {
+    if bound <= 0 {
+        return 0;
+    }
+    with_tick_world(|w| w.rng.next_int_bound(bound), 0)
+}
+
+extern "C" fn tick_next_float01() -> f32 {
+    with_tick_world(|w| w.rng.next_float(), 0.0)
+}
+
+extern "C" fn tick_next_u64() -> u64 {
+    with_tick_world(|w| w.rng.next_long() as u64, 0)
+}
+
+extern "C" fn tick_get_id(x: i32, y: i32, z: i32) -> u8 {
+    with_tick_world(|w| w.get_block_id(x, y, z), 0)
+}
+
+extern "C" fn tick_get_id_nc(x: i32, y: i32, z: i32) -> u8 {
+    // Same map: the native world never force-loads chunks.
+    with_tick_world(|w| w.get_block_id(x, y, z), 0)
+}
+
+extern "C" fn tick_get_meta(x: i32, y: i32, z: i32) -> u8 {
+    with_tick_world(|w| w.get_block_meta(x, y, z), 0)
+}
+
+extern "C" fn tick_set(x: i32, y: i32, z: i32, id: u8) {
+    with_tick_world(|w| w.set_block_id(x, y, z, id), false);
+}
+
+extern "C" fn tick_set_meta(x: i32, y: i32, z: i32, meta: u8) {
+    with_tick_world(|w| w.set_block_meta(x, y, z, meta), false);
+}
+
+extern "C" fn tick_set_notify(x: i32, y: i32, z: i32, id: u8) {
+    with_tick_world(|w| w.apply_set_notify(x, y, z, id), false);
+}
+
+extern "C" fn tick_set_update(x: i32, y: i32, z: i32, id: u8) {
+    // setBlockAndUpdate: plain set plus the (client) mark.
+    with_tick_world(|w| w.set_block_id(x, y, z, id), false);
+}
+
+extern "C" fn tick_set_meta_notify(x: i32, y: i32, z: i32, id: u8, meta: u8) {
+    with_tick_world(|w| w.apply_set_meta_notify(x, y, z, id, meta), false);
+}
+
+extern "C" fn tick_set_and_meta(x: i32, y: i32, z: i32, id: u8, meta: u8) {
+    with_tick_world(
+        |w| {
+            w.set_block_id(x, y, z, id);
+            w.set_block_meta(x, y, z, meta);
+        },
+        (),
+    );
+}
+
+extern "C" fn tick_light(x: i32, y: i32, z: i32) -> i32 {
+    with_tick_world(|w| w.block_light_value(x, y, z) as i32, 0)
+}
+
+extern "C" fn tick_sky(x: i32, y: i32, z: i32) -> bool {
+    with_tick_world(|w| w.can_see_sky(x, y, z), false)
+}
+
+extern "C" fn tick_attach_world(x: i32, y: i32, z: i32) -> bool {
+    with_tick_world(|w| w.block_allows_attachment(x, y, z), false)
+}
+
+extern "C" fn tick_attach_torch(x: i32, y: i32, z: i32) -> bool {
+    // Solid material plus collidable (everything but fluids).
+    with_tick_world(
+        |w| {
+            if w.get_block_id(x, y, z) == 0 {
+                return false;
+            }
+            let m = w.material_at(x, y, z);
+            m.is_solid() && !m.is_liquid()
+        },
+        false,
+    )
+}
+
+extern "C" fn tick_solid(x: i32, y: i32, z: i32) -> bool {
+    // Material-solid like blockTickIsSolid (NOT the id list).
+    with_tick_world(
+        |w| w.get_block_id(x, y, z) != 0 && w.material_at(x, y, z).is_solid(),
+        false,
+    )
+}
+
+extern "C" fn tick_solid_nc(x: i32, y: i32, z: i32) -> bool {
+    with_tick_world(
+        |w| w.get_block_id(x, y, z) != 0 && w.material_at(x, y, z).is_solid(),
+        false,
+    )
+}
+
+extern "C" fn tick_water_lava(x: i32, y: i32, z: i32) -> bool {
+    // Literal mirror (air and fire count as water-or-lava in C++!).
+    with_tick_world(
+        |w| {
+            let bid = w.get_block_id(x, y, z);
+            if bid == 0 || bid == FIRE_BLOCK_ID {
+                return true;
+            }
+            matches!(w.material_at(x, y, z), Material::WATER | Material::LAVA)
+        },
+        false,
+    )
+}
+
+extern "C" fn tick_water(x: i32, y: i32, z: i32) -> bool {
+    with_tick_world(|w| w.material_at(x, y, z) == Material::WATER, false)
+}
+
+extern "C" fn tick_registered(id: u8) -> bool {
+    // Mirrors initBlocks: every non-air material gets a Block instance.
+    with_tick_world(|_| id != 0 && !is_air_material(id), false)
+}
+
+extern "C" fn tick_collidable(x: i32, y: i32, z: i32) -> bool {
+    with_tick_world(
+        |w| {
+            let bid = w.get_block_id(x, y, z);
+            bid != 0
+                && alpha_block_properties_get(bid as u32).block_type != BlockType::Fluid as u8
+                && has_collision_box(alpha_block_properties_get(bid as u32).block_type)
+        },
+        false,
+    )
+}
+
+extern "C" fn tick_schedule(x: i32, y: i32, z: i32, block_id: u8, delay: i32) {
+    with_tick_world(|w| w.schedule_block_update(x, y, z, block_id, delay), ());
+}
+
+extern "C" fn tick_mark(_x: i32, _y: i32, _z: i32) {
+    // markBlockNeedsUpdate only addresses clients.
+}
+
+extern "C" fn tick_notify(x: i32, y: i32, z: i32, _block_id: u8) {
+    with_tick_world(|w| w.notify_neighbors_of(x, y, z), ());
+}
+
+extern "C" fn tick_spawn_drop(
+    item_id: i32,
+    count: i32,
+    damage: i32,
+    fx: f64,
+    fy: f64,
+    fz: f64,
+    spread: f64,
+    up: f64,
+) {
+    with_tick_world(
+        |w| {
+            let eid = w.spawn_item_entity(item_id, count, damage, fx, fy, fz);
+            let (dx, dz) = (w.rng.next_double(), w.rng.next_double());
+            if let Some(Entity::Item(e)) = w.entities.get_mut(eid) {
+                e.body.motion[0] = -spread + 2.0 * spread * dx;
+                e.body.motion[1] = up;
+                e.body.motion[2] = -spread + 2.0 * spread * dz;
+            }
+        },
+        (),
+    );
+}
+
+extern "C" fn tick_spawn_falling(block_id: u8, fx: f64, fy: f64, fz: f64) {
+    with_tick_world(
+        |w| {
+            let id = w.entities.alloc_id();
+            let mut b = Body::new(id, 0.98, 0.98, 0.49);
+            b.set_position(fx, fy, fz);
+            w.entities.insert(Entity::Falling(crate::entity_table::FallingEnt {
+                body: b,
+                block_id: block_id as i32,
+                fall_time: 0,
+            }));
+        },
+        (),
+    );
+}
+
+extern "C" fn tick_drop_occupant(x: i32, y: i32, z: i32) {
+    // dropBlockAsItem with chance 1.0. The C++ needs-server guard is a
+    // client check; the native world is always the server side.
+    with_tick_world(
+        |w| {
+            let bid = w.get_block_id(x, y, z);
+            if bid == 0 {
+                return;
+            }
+            let (drop, qty, _) = World::native_drop_ids(bid);
+            if drop <= 0 {
+                return;
+            }
+            unsafe {
+                block_base_drop(&TICK_TABLE, drop, qty, 0, x, y, z, 1.0);
+            }
+        },
+        (),
+    );
+}
+
+extern "C" fn tick_detonate(_x: i32, _y: i32, _z: i32) {
+    // No-op: TNT has no onBlockDestroyedByPlayer override in C++.
+}
+
+// Tree-generation accessor over the same bridge pointer.
+extern "C" fn tree_get_id(x: i32, y: i32, z: i32) -> u8 {
+    with_tick_world(|w| w.get_block_id(x, y, z), 0)
+}
+
+extern "C" fn tree_set_id(x: i32, y: i32, z: i32, id: u8) {
+    // C++ tree gen uses the plain (non-notify) setBlock.
+    with_tick_world(|w| w.set_block_id(x, y, z, id), false);
+}
+
+extern "C" fn tree_get_meta(x: i32, y: i32, z: i32) -> u8 {
+    with_tick_world(|w| w.get_block_meta(x, y, z), 0)
+}
+
+extern "C" fn tree_set_meta(x: i32, y: i32, z: i32, meta: u8) {
+    with_tick_world(|w| w.set_block_meta(x, y, z, meta), false);
+}
+
+extern "C" fn tree_attach(x: i32, y: i32, z: i32) -> bool {
+    // Block::allowsAttachmentArr: registered plus the allowsAttachment flag.
+    with_tick_world(
+        |w| {
+            let bid = w.get_block_id(x, y, z);
+            bid != 0
+                && !is_air_material(bid)
+                && alpha_block_properties_get(bid as u32).allows_attachment
+        },
+        false,
+    )
+}
+
+extern "C" fn tree_solid(x: i32, y: i32, z: i32) -> bool {
+    with_tick_world(|w| w.is_solid(x, y, z), false)
+}
+
+extern "C" fn tree_height(x: i32, z: i32) -> i32 {
+    with_tick_world(|w| w.get_height_value(x, z), 0)
+}
+
+static TICK_TABLE: BlockTickWorld = BlockTickWorld {
+    next_int: Some(tick_next_int),
+    next_float01: Some(tick_next_float01),
+    next_u64: Some(tick_next_u64),
+    get_block_id: Some(tick_get_id),
+    get_block_id_nc: Some(tick_get_id_nc),
+    get_block_meta: Some(tick_get_meta),
+    set_block: Some(tick_set),
+    set_block_meta: Some(tick_set_meta),
+    set_block_notify: Some(tick_set_notify),
+    set_block_update: Some(tick_set_update),
+    set_block_meta_notify: Some(tick_set_meta_notify),
+    set_block_and_meta: Some(tick_set_and_meta),
+    get_block_light: Some(tick_light),
+    can_see_sky: Some(tick_sky),
+    attach_world: Some(tick_attach_world),
+    attach_torch: Some(tick_attach_torch),
+    is_solid: Some(tick_solid),
+    is_solid_nc: Some(tick_solid_nc),
+    is_water_or_lava: Some(tick_water_lava),
+    is_water: Some(tick_water),
+    block_registered: Some(tick_registered),
+    collidable_box: Some(tick_collidable),
+    schedule_update: Some(tick_schedule),
+    mark_update: Some(tick_mark),
+    notify_neighbors: Some(tick_notify),
+    spawn_drop: Some(tick_spawn_drop),
+    spawn_falling: Some(tick_spawn_falling),
+    drop_occupant: Some(tick_drop_occupant),
+};
+
+fn fire_table() -> FireWorld {
+    FireWorld { base: &TICK_TABLE as *const BlockTickWorld, detonate_tnt: Some(tick_detonate) }
+}
+
+fn tree_accessor() -> crate::decorators::WorldAccessor {
+    crate::decorators::WorldAccessor {
+        get_block_id: tree_get_id,
+        set_block_id: tree_set_id,
+        get_block_meta: tree_get_meta,
+        set_block_meta: tree_set_meta,
+        allows_attachment: tree_attach,
+        is_block_solid: tree_solid,
+        get_height_value: tree_height,
+    }
+}
+
+/// Alpha wheat/seeds item ids for the crops drivers.
+const WHEAT_ITEM_ID: i32 = 296;
+const SEEDS_ITEM_ID: i32 = 295;
+/// Sign drop item id (BlockSign::idDropped).
+const SIGN_ITEM_ID: i32 = 323;
+
+impl World {
+    /// (drop_id, drop_count, drop_damage) mirroring the C++ idDropped /
+    /// quantityDropped / damageDropped call sites. No damageDropped
+    /// overrides exist, so damage is always 0; tallgrass and mushrooms
+    /// force (0, 0, 0) via their class overrides (not the props table).
+    fn native_drop_ids(bid: u8) -> (i32, i32, i32) {
+        match bid {
+            31 | 39 | 40 => (0, 0, 0),
+            _ => {
+                let p = alpha_block_properties_get(bid as u32);
+                (if p.id_dropped != 0 { p.id_dropped } else { bid as i32 }, p.quantity_dropped, 0)
+            }
+        }
+    }
+
+    /// Placement write (mirrors `setBlockWithNotify` minus removal scatter
+    /// and client packets): set the id, run the added-router, notify
+    /// neighbors.
+    fn apply_set_notify(&mut self, x: i32, y: i32, z: i32, id: u8) -> bool {
+        if !self.set_block_id(x, y, z, id) {
+            return false;
+        }
+        self.block_added(x, y, z, id);
+        self.notify_neighbors_of(x, y, z);
+        true
+    }
+
+    /// Id+meta placement write (mirrors `setBlockAndMetadataWithNotify`
+    /// the same way).
+    fn apply_set_meta_notify(&mut self, x: i32, y: i32, z: i32, id: u8, meta: u8) -> bool {
+        if y < 0 || y >= WORLD_HEIGHT {
+            return false;
+        }
+        self.set_block_id(x, y, z, id);
+        self.set_block_meta(x, y, z, meta);
+        self.block_added(x, y, z, id);
+        self.notify_neighbors_of(x, y, z);
+        true
+    }
+
+    /// Neighbor fan-out (mirrors `notifyBlocksOfNeighborChange`).
+    fn notify_neighbors_of(&mut self, x: i32, y: i32, z: i32) {
+        const OFF: [[i32; 3]; 6] =
+            [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]];
+        for o in OFF {
+            self.neighbor_changed(x + o[0], y + o[1], z + o[2]);
+        }
+    }
+
+    /// Placement router (mirrors the `onBlockAdded` overrides).
+    fn block_added(&mut self, x: i32, y: i32, z: i32, bid: u8) {
+        let _guard = TickGuard::enter(self as *mut World);
+        unsafe {
+            match bid {
+                12 | 13 => block_sand_added(&TICK_TABLE, bid, x, y, z),
+                8 | 9 | 10 | 11 => {
+                    let rate = with_tick_world(
+                        |w| {
+                            if w.material_at(x, y, z) == Material::LAVA {
+                                30
+                            } else {
+                                5
+                            }
+                        },
+                        5,
+                    );
+                    block_fluid_added(&TICK_TABLE, bid, rate, x, y, z);
+                }
+                81 => block_cactus_added(&TICK_TABLE, bid, x, y, z),
+                83 => block_reed_added(&TICK_TABLE, bid, x, y, z),
+                18 => block_leaves_added(&TICK_TABLE, bid, x, y, z),
+                6 => block_sapling_added(&TICK_TABLE, bid, x, y, z),
+                59 => block_crops_added(&TICK_TABLE, bid, x, y, z),
+                60 => block_soil_added(&TICK_TABLE, bid, x, y, z),
+                51 => block_fire_added(&fire_table(), bid, 10, x, y, z),
+                _ => {}
+            }
+        }
+    }
+
+    /// Neighbor router (mirrors the `onNeighborBlockChange` overrides,
+    /// plus the inline sign-break check).
+    fn neighbor_changed(&mut self, x: i32, y: i32, z: i32) {
+        let bid = self.get_block_id(x, y, z);
+        if bid == 0 || !Self::native_registered(bid) {
+            return;
+        }
+        let _meta = self.get_block_meta(x, y, z);
+        let _guard = TickGuard::enter(self as *mut World);
+        unsafe {
+            match bid {
+                12 | 13 => block_sand_neighbor(&TICK_TABLE, bid, x, y, z),
+                8 | 9 | 10 | 11 => {
+                    let rate = with_tick_world(
+                        |w| {
+                            if w.material_at(x, y, z) == Material::LAVA {
+                                30
+                            } else {
+                                5
+                            }
+                        },
+                        5,
+                    );
+                    block_fluid_neighbor(&TICK_TABLE, bid, rate, x, y, z);
+                }
+                37 | 38 | 31 => {
+                    let (d, q, g) = Self::native_drop_ids(bid);
+                    block_flower_neighbor(&TICK_TABLE, d, q, g, x, y, z);
+                }
+                39 | 40 => block_mushroom_neighbor(&TICK_TABLE, 0, 0, 0, x, y, z),
+                50 => {
+                    let (d, q, g) = Self::native_drop_ids(bid);
+                    block_torch_neighbor(&TICK_TABLE, d, q, g, x, y, z);
+                }
+                81 => {
+                    let (d, q, g) = Self::native_drop_ids(bid);
+                    block_cactus_neighbor(&TICK_TABLE, bid, d, q, g, x, y, z);
+                }
+                83 => {
+                    let (d, q, g) = Self::native_drop_ids(bid);
+                    block_reed_neighbor(&TICK_TABLE, bid, d, q, g, x, y, z);
+                }
+                18 => {
+                    let mut guard = with_tick_world(|w| w.leaves_guard, 0);
+                    block_leaves_neighbor(&TICK_TABLE, bid, bid, &mut guard, x, y, z);
+                    with_tick_world(|w| w.leaves_guard = guard, ());
+                }
+                6 => {
+                    let (d, q, g) = Self::native_drop_ids(bid);
+                    block_sapling_neighbor(&TICK_TABLE, bid, d, q, g, x, y, z);
+                }
+                59 => block_crops_neighbor(&TICK_TABLE, bid, bid, WHEAT_ITEM_ID, SEEDS_ITEM_ID, x, y, z),
+                60 => block_soil_neighbor(&TICK_TABLE, bid, x, y, z),
+                51 => block_fire_neighbor(&fire_table(), x, y, z),
+                63 | 68 => {}
+                _ => {}
+            }
+        }
+        if bid == 63 || bid == 68 {
+            self.sign_neighbor(x, y, z, bid);
+        }
+    }
+
+    /// Registered-block check (mirrors `blocksList[id] != nullptr` via the
+    /// initBlocks rule: every non-air material gets an instance).
+    fn native_registered(bid: u8) -> bool {
+        bid != 0 && !is_air_material(bid)
+    }
+
+    /// Sign support check (mirrors `BlockSign::onNeighborBlockChange`):
+    /// wall signs need material-solid behind per facing, posts need solid
+    /// below; otherwise drop 323 through the standard base-drop path and
+    /// clear. Requires the tick bridge pointer (callers hold the guard).
+    fn sign_neighbor(&mut self, x: i32, y: i32, z: i32, bid: u8) {
+        let supported = if bid == 68 {
+            match self.get_block_meta(x, y, z) {
+                2 => self.material_at(x, y, z + 1).is_solid(),
+                3 => self.material_at(x, y, z - 1).is_solid(),
+                4 => self.material_at(x + 1, y, z).is_solid(),
+                5 => self.material_at(x - 1, y, z).is_solid(),
+                _ => false,
+            }
+        } else {
+            self.material_at(x, y - 1, z).is_solid()
+        };
+        if !supported {
+            unsafe {
+                block_base_drop(&TICK_TABLE, SIGN_ITEM_ID, 1, 0, x, y, z, 1.0);
+            }
+            self.set_block_id(x, y, z, 0);
+        }
+    }
+
+    /// Scheduled/random-tick router (mirrors the `updateTick` overrides).
+    fn update_block_tick(&mut self, x: i32, y: i32, z: i32) {
+        let bid = self.get_block_id(x, y, z);
+        if bid == 0 {
+            return;
+        }
+        let _guard = TickGuard::enter(self as *mut World);
+        unsafe {
+            match bid {
+                12 | 13 => block_sand_tick(&TICK_TABLE, bid, x, y, z),
+                8 | 9 | 10 | 11 => {
+                    let lava = with_tick_world(|w| w.material_at(x, y, z) == Material::LAVA, false);
+                    block_fluid_tick(&TICK_TABLE, bid, lava, x, y, z);
+                }
+                37 | 38 => {
+                    let (d, q, g) = Self::native_drop_ids(bid);
+                    block_flower_tick(&TICK_TABLE, d, q, g, x, y, z);
+                }
+                81 => {
+                    let (d, q, g) = Self::native_drop_ids(bid);
+                    block_cactus_tick(&TICK_TABLE, bid, d, q, g, x, y, z);
+                }
+                83 => {
+                    let (d, q, g) = Self::native_drop_ids(bid);
+                    block_reed_tick(&TICK_TABLE, bid, d, q, g, x, y, z);
+                }
+                18 => {
+                    let mut guard = with_tick_world(|w| w.leaves_guard, 0);
+                    block_leaves_tick(&TICK_TABLE, bid, bid, 0, 0, 0, &mut guard, x, y, z);
+                    with_tick_world(|w| w.leaves_guard = guard, ());
+                }
+                6 => {
+                    let (d, q, g) = Self::native_drop_ids(bid);
+                    let action = block_sapling_tick(&TICK_TABLE, bid, d, q, g, x, y, z);
+                    drop(_guard);
+                    if action.kind == 1 {
+                        self.grow_sapling(x, y, z, bid, action.seed);
+                    }
+                    return;
+                }
+                59 => block_crops_tick(&TICK_TABLE, bid, bid, WHEAT_ITEM_ID, SEEDS_ITEM_ID, x, y, z),
+                60 => block_soil_tick(&TICK_TABLE, bid, x, y, z),
+                51 => block_fire_tick(&fire_table(), bid, 10, x, y, z),
+                _ => {}
+            }
+        }
+    }
+
+    /// Sapling growth (mirrors the C++ `GrowTree` tail): clear, roll the
+    /// 1/10 big tree, generate through the tree accessor, restore the
+    /// sapling on failure.
+    fn grow_sapling(&mut self, x: i32, y: i32, z: i32, bid: u8, seed: u64) {
+        self.apply_set_notify(x, y, z, 0);
+        let big = self.rng.next_int_bound(10) == 0;
+        let _guard = TickGuard::enter(self as *mut World);
+        let acc = tree_accessor();
+        let ok = unsafe {
+            if big {
+                crate::alpha_generate_big_tree(acc, seed as i64, x, y, z)
+            } else {
+                crate::alpha_generate_tree(acc, seed as i64, x, y, z)
+            }
+        };
+        drop(_guard);
+        if !ok {
+            self.apply_set_notify(x, y, z, bid);
+        }
+    }
+
+    /// Queue a block update (mirrors `scheduleBlockUpdate`; duplicate keys
+    /// keep the first entry like the C++ set).
+    pub fn schedule_block_update(&mut self, x: i32, y: i32, z: i32, block_id: u8, delay: i32) {
+        self.scheduled.entry((self.time + delay as i64, x, y, z)).or_insert(block_id);
+    }
+
+    /// Due scheduled updates, oldest first, capped at 1000 per tick like
+    /// C++ (stale entries die on the id check; missing chunks skip).
+    fn process_scheduled_ticks(&mut self) {
+        let mut ran = 0;
+        while ran < 1000 {
+            let next = self.scheduled.iter().next().map(|(k, v)| (*k, *v));
+            let ((t, x, y, z), bid) = match next {
+                Some(n) => n,
+                None => break,
+            };
+            if t > self.time {
+                break;
+            }
+            self.scheduled.remove(&(t, x, y, z));
+            ran += 1;
+            if !self.has_chunk(x.div_euclid(16), z.div_euclid(16)) {
+                continue;
+            }
+            if bid == 0 || self.get_block_id(x, y, z) != bid {
+                continue;
+            }
+            self.update_block_tick(x, y, z);
+        }
+    }
+
+    /// Random block ticks (mirrors the 80-cells-per-chunk pass over the
+    /// radius-8 loaded chunks around every joined player; chunk order is
+    /// sorted for determinism where C++ iterates an unordered set).
+    fn random_block_ticks(&mut self) {
+        let mut players: Vec<(f64, f64, f64)> = Vec::new();
+        for oid in self.entities.all_ids() {
+            if let Some(Entity::Player(p)) = self.entities.get(oid) {
+                let b = &p.living.body;
+                players.push((b.pos[0], b.pos[1], b.pos[2]));
+            }
+        }
+        if players.is_empty() {
+            return;
+        }
+        let mut keys: Vec<(i32, i32)> = Vec::new();
+        for (px, _, pz) in &players {
+            let (cx, cz) = ((px / 16.0).floor() as i32, (pz / 16.0).floor() as i32);
+            for dx in -8..=8 {
+                for dz in -8..=8 {
+                    keys.push((cx + dx, cz + dz));
+                }
+            }
+        }
+        keys.sort_unstable();
+        keys.dedup();
+        for (cx, cz) in keys {
+            if !self.has_chunk(cx, cz) {
+                continue;
+            }
+            for _ in 0..80 {
+                let bx = (cx << 4) + self.rng.next_int_bound(16);
+                let by = self.rng.next_int_bound(128);
+                let bz = (cz << 4) + self.rng.next_int_bound(16);
+                let id = self.get_block_id(bx, by, bz);
+                if id == 0 {
+                    continue;
+                }
+                if alpha_block_properties_get(id as u32).tick_on_load {
+                    self.update_block_tick(bx, by, bz);
+                }
+            }
+        }
+    }
+
+    /// Periodic unload (mirrors the `worldTime % 100` pass): chunks outside
+    /// the unload radius of every joined player go, except the protected
+    /// spawn area (|cx|,|cz| <= 3). Live rows spill into the chunk lists
+    /// for reload; with no players everything stays (no-server case).
+    fn unload_chunks(&mut self) {
+        if self.time % 100 != 0 {
+            return;
+        }
+        let mut anchors: Vec<(i32, i32)> = Vec::new();
+        for oid in self.entities.all_ids() {
+            if let Some(Entity::Player(p)) = self.entities.get(oid) {
+                anchors.push((
+                    (p.living.body.pos[0].floor() as i32) >> 4,
+                    (p.living.body.pos[2].floor() as i32) >> 4,
+                ));
+            }
+        }
+        if anchors.is_empty() {
+            return;
+        }
+        let r = self.unload_radius;
+        let drop: Vec<(i32, i32)> = self
+            .chunks
+            .keys()
+            .filter(|(cx, cz)| {
+                if cx.abs() <= 3 && cz.abs() <= 3 {
+                    return false;
+                }
+                !anchors.iter().any(|(px, pz)| (cx - px).abs() <= r && (cz - pz).abs() <= r)
+            })
+            .copied()
+            .collect();
+        for (cx, cz) in drop {
+            self.spill_chunk(cx, cz);
+            if let Some(chunk) = self.chunks.remove(&(cx, cz)) {
+                self.unloaded.insert((cx, cz), chunk);
+            }
+        }
+    }
+
+    /// Recall an unloaded chunk and thaw its spill back into rows
+    /// (mirrors the load path; disk fills `unloaded` in the persistence
+    /// slice). Returns false when nothing was staged.
+    pub fn recall_chunk(&mut self, cx: i32, cz: i32) -> bool {
+        if self.chunks.contains_key(&(cx, cz)) {
+            return true;
+        }
+        if let Some(chunk) = self.unloaded.remove(&(cx, cz)) {
+            self.chunks.insert((cx, cz), chunk);
+            self.restore_chunk_entities(cx, cz);
+            return true;
+        }
+        false
+    }
+
+    /// Freeze a chunk's live rows into its pending lists (mirrors the
+    /// unload spill; boats included).
+    fn spill_chunk(&mut self, cx: i32, cz: i32) {
+        let mut gone: Vec<EntityId> = Vec::new();
+        for oid in self.entities.alive_ids() {
+            let e = match self.entities.get(oid) {
+                Some(e) => e,
+                None => continue,
+            };
+            if (e.body().pos[0].floor() as i32) >> 4 != cx
+                || (e.body().pos[2].floor() as i32) >> 4 != cz
+            {
+                continue;
+            }
+            let chunk = match self.chunks.get_mut(&(cx, cz)) {
+                Some(c) => c,
+                None => continue,
+            };
+            match e {
+                Entity::Item(it) => chunk.pending_items.push(crate::chunk::PendingItem {
+                    item_id: it.item_id,
+                    count: it.count,
+                    damage: it.damage,
+                    age: it.age,
+                    pickup_delay: it.pickup_delay,
+                    pos: it.body.pos,
+                }),
+                Entity::Animal(a) => chunk.pending_animals.push(pending_creature(
+                    animal_string_id(a.kind),
+                    &a.living,
+                    a.saddled,
+                    a.sheared,
+                    a.egg_timer,
+                )),
+                Entity::Mob(m) => chunk.pending_monsters.push(pending_creature(
+                    mob_string_id(m.kind),
+                    &m.living,
+                    false,
+                    false,
+                    0,
+                )),
+                Entity::Boat(b) => chunk.pending_boats.push(crate::chunk::PendingBoat {
+                    pos: b.body.pos,
+                    motion: b.body.motion,
+                    yaw: b.body.yaw,
+                    pitch: b.body.pitch,
+                    time_since_hit: b.time_since_hit,
+                    damage_taken: b.damage_taken,
+                    forward_dir: b.forward_dir,
+                }),
+                _ => continue,
+            }
+            gone.push(oid);
+        }
+        gone.sort_unstable();
+        for oid in gone {
+            self.entities.remove(oid);
+        }
+    }
+
+    /// Thaw a chunk's pending lists back into rows (used on load and by
+    /// tests; unknown string ids are skipped like the C++ restore).
+    pub fn restore_chunk_entities(&mut self, cx: i32, cz: i32) {
+        let chunk = match self.chunks.get_mut(&(cx, cz)) {
+            Some(c) => c,
+            None => return,
+        };
+        let items = std::mem::take(&mut chunk.pending_items);
+        let animals = std::mem::take(&mut chunk.pending_animals);
+        let monsters = std::mem::take(&mut chunk.pending_monsters);
+        let boats = std::mem::take(&mut chunk.pending_boats);
+        for it in items {
+            let id = self.entities.alloc_id();
+            let mut b = Body::new(id, 0.25, 0.25, 0.125);
+            b.set_position(it.pos[0], it.pos[1], it.pos[2]);
+            self.entities.insert(Entity::Item(crate::entity_table::ItemEnt {
+                body: b,
+                item_id: it.item_id,
+                count: it.count,
+                damage: it.damage,
+                age: it.age,
+                pickup_delay: it.pickup_delay,
+            }));
+        }
+        for an in animals {
+            if let Some(kind) = animal_kind_of(&an.string_id) {
+                let id = self.entities.alloc_id();
+                let mut a = crate::entity_table::AnimalEnt::new(id, kind);
+                a.living.body.set_position(an.pos[0], an.pos[1], an.pos[2]);
+                a.living.body.motion = an.motion;
+                a.living.body.yaw = an.yaw;
+                a.living.body.pitch = an.pitch;
+                a.living.health = an.health;
+                a.living.max_health = an.max_health;
+                a.saddled = an.saddled;
+                a.sheared = an.sheared;
+                a.egg_timer = an.egg_timer;
+                self.entities.insert(Entity::Animal(a));
+            }
+        }
+        for mo in monsters {
+            if let Some(kind) = mob_kind_of(&mo.string_id) {
+                let id = self.entities.alloc_id();
+                let mut m = crate::entity_table::MobEnt::new(id, kind);
+                m.living.body.set_position(mo.pos[0], mo.pos[1], mo.pos[2]);
+                m.living.body.motion = mo.motion;
+                m.living.body.yaw = mo.yaw;
+                m.living.body.pitch = mo.pitch;
+                m.living.health = mo.health;
+                m.living.max_health = mo.max_health;
+                self.entities.insert(Entity::Mob(m));
+            }
+        }
+        for bt in boats {
+            let id = self.entities.alloc_id();
+            let mut b = Body::new(id, 1.5, 0.6, 0.3);
+            b.set_position(bt.pos[0], bt.pos[1], bt.pos[2]);
+            b.motion = bt.motion;
+            b.yaw = bt.yaw;
+            b.pitch = bt.pitch;
+            self.entities.insert(Entity::Boat(crate::entity_table::BoatEnt {
+                body: b,
+                time_since_hit: bt.time_since_hit,
+                damage_taken: bt.damage_taken,
+                forward_dir: bt.forward_dir,
+            }));
+        }
+    }
+}
+
+/// String id for spill/restore (mirrors `getEntityStringId`).
+fn mob_string_id(kind: MobKind) -> String {
+    match kind {
+        MobKind::Spider => "Spider",
+        MobKind::Zombie => "Zombie",
+        MobKind::Skeleton => "Skeleton",
+        MobKind::Creeper => "Creeper",
+    }
+    .to_string()
+}
+
+/// String id for spill/restore (mirrors `getEntityStringId`).
+fn animal_string_id(kind: AnimalKind) -> String {
+    match kind {
+        AnimalKind::Sheep => "Sheep",
+        AnimalKind::Pig => "Pig",
+        AnimalKind::Chicken => "Chicken",
+        AnimalKind::Cow => "Cow",
+    }
+    .to_string()
+}
+
+fn mob_kind_of(id: &str) -> Option<MobKind> {
+    match id {
+        "Spider" => Some(MobKind::Spider),
+        "Zombie" => Some(MobKind::Zombie),
+        "Skeleton" => Some(MobKind::Skeleton),
+        "Creeper" => Some(MobKind::Creeper),
+        _ => None,
+    }
+}
+
+fn animal_kind_of(id: &str) -> Option<AnimalKind> {
+    match id {
+        "Sheep" => Some(AnimalKind::Sheep),
+        "Pig" => Some(AnimalKind::Pig),
+        "Chicken" => Some(AnimalKind::Chicken),
+        "Cow" => Some(AnimalKind::Cow),
+        _ => None,
+    }
+}
+
+fn pending_creature(
+    string_id: String,
+    living: &LivingBody,
+    saddled: bool,
+    sheared: bool,
+    egg_timer: i32,
+) -> crate::chunk::PendingCreature {
+    crate::chunk::PendingCreature {
+        string_id,
+        pos: living.body.pos,
+        motion: living.body.motion,
+        yaw: living.body.yaw,
+        pitch: living.body.pitch,
+        health: living.health,
+        max_health: living.max_health,
+        saddled,
+        sheared,
+        egg_timer,
     }
 }

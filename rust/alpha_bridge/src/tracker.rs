@@ -780,6 +780,7 @@ mod tests {
             living: l2,
             kind: crate::entity_table::AnimalKind::Cow,
             sheared: false,
+            saddled: false,
             egg_timer: 6000,
             path: Vec::new(),
             path_index: 0,

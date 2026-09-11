@@ -20,7 +20,6 @@
 //!
 //! Deferred (require `World`, entities, or I/O — intentionally not ported):
 //! - `World* worldObj` / cross-chunk lookup (`getChunkFromBlockCoords`)
-//! - `pendingItems` / `pendingAnimals` / `pendingMonsters` / `pendingBoats`
 //! - `TileEntity` map (`addTileEntity` / `removeTileEntity` / `getTileEntity`)
 //! - `getChunkData` (Packet51MapChunk + zlib; needs compression I/O)
 //! - Auto `generateSkylightMap()` call inside `setBlockIDWithMetadata`
@@ -81,6 +80,46 @@ struct LightNode {
     z: i32,
 }
 
+/// Serialized loose item waiting for its chunk to load (mirrors
+/// `ChunkEntityData`; age freezes while unloaded).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PendingItem {
+    pub item_id: i32,
+    pub count: i32,
+    pub damage: i32,
+    pub age: i32,
+    pub pickup_delay: i32,
+    pub pos: [f64; 3],
+}
+
+/// Serialized creature waiting for its chunk to load (mirrors
+/// `ChunkAnimalData`, shared by animals and monsters).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingCreature {
+    pub string_id: String,
+    pub pos: [f64; 3],
+    pub motion: [f64; 3],
+    pub yaw: f32,
+    pub pitch: f32,
+    pub health: i16,
+    pub max_health: i16,
+    pub saddled: bool,
+    pub sheared: bool,
+    pub egg_timer: i32,
+}
+
+/// Serialized boat waiting for its chunk to load (mirrors `ChunkBoatData`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PendingBoat {
+    pub pos: [f64; 3],
+    pub motion: [f64; 3],
+    pub yaw: f32,
+    pub pitch: f32,
+    pub time_since_hit: i32,
+    pub damage_taken: i32,
+    pub forward_dir: i32,
+}
+
 /// Owned chunk data + lighting (no `World`, no entities, no I/O).
 #[derive(Clone, Debug)]
 pub struct Chunk {
@@ -92,6 +131,13 @@ pub struct Chunk {
     pub is_terrain_populated: bool,
     /// Mirrors C++ `isModified` (plain bool; single-threaded port).
     pub is_modified: bool,
+    /// Unload spill (mirrors `pendingItems` / `pendingAnimals` /
+    /// `pendingMonsters` / `pendingBoats`): entities frozen with their
+    /// chunk, restored on load.
+    pub pending_items: Vec<PendingItem>,
+    pub pending_animals: Vec<PendingCreature>,
+    pub pending_monsters: Vec<PendingCreature>,
+    pub pending_boats: Vec<PendingBoat>,
     blocks: [u8; CHUNK_VOLUME],
     data: NibbleArray,
     skylight: NibbleArray,
@@ -107,6 +153,10 @@ impl Chunk {
             z_position: z,
             is_terrain_populated: false,
             is_modified: false,
+            pending_items: Vec::new(),
+            pending_animals: Vec::new(),
+            pending_monsters: Vec::new(),
+            pending_boats: Vec::new(),
             blocks: [0u8; CHUNK_VOLUME],
             data: NibbleArray::with_nibbles(CHUNK_VOLUME),
             skylight: NibbleArray::with_nibbles(CHUNK_VOLUME),
@@ -175,25 +225,10 @@ impl Chunk {
     /// On success the height column is recalculated and `is_modified` is set
     /// (the C++ world-present path; the C++ null-world path leaves it clean).
     pub fn set_block_id(&mut self, x: i32, y: i32, z: i32, block_id: u8) -> bool {
-        let idx = match Self::block_index(x, y, z) {
-            Some(idx) => idx,
-            None => return false,
-        };
-        let old = match self.blocks.get(idx) {
-            Some(v) => *v,
-            None => return false,
-        };
-        if old == block_id {
-            return false;
-        }
-        if let Some(slot) = self.blocks.get_mut(idx) {
-            *slot = block_id;
-        } else {
-            return false;
-        }
-        self.recalculate_height_column(x, z);
-        self.is_modified = true;
-        true
+        // Mirrors `setBlockIDWithMetadata(id, 0)`: the metadata nibble
+        // resets alongside the id (the native world has no lighting sim,
+        // so no skylight rebuild either).
+        self.set_block_id_with_metadata(x, y, z, block_id, 0)
     }
 
     /// Mirrors `setBlockIDWithMetadata` (hardened: OOB is a no-op `false`).

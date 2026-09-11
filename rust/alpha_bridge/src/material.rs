@@ -11,6 +11,12 @@
 //! marks wood, leaves, cloth and tnt as burning.
 
 /// Block material flags. `Copy` so the shared statics stay usable anywhere.
+///
+/// Equality trap (caught live): AIR, PLANTS, FIRE, CIRCUITS, and SNOW all
+/// carry `(false, false, false, false)`, so `==` aliases them — C++
+/// compares singleton *pointers* and never does. Never test "is air" with
+/// `== Material::AIR`; compare the material id byte (see `is_air_material`
+/// in `world.rs`) or match the specific const you mean.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Material {
     is_liquid: bool,
