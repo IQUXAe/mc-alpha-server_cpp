@@ -1,0 +1,756 @@
+//! Safe port of `src/world/Chunk.h` / `src/world/Chunk.cpp` (data + light only).
+//!
+//! Mapping notes:
+//! - Dimensions match Alpha 1.2.6 exactly: 16 x 128 x 16, volume 32768.
+//! - Index formula is 1:1 with C++: `(x << 11) | (z << 7) | y`.
+//! - `blocks` is an owned `[u8; 32768]`; `data` / `skylight` / `blocklight`
+//!   reuse [`crate::nibble::NibbleArray`] (16384 bytes each, 1:1 nibble layout).
+//! - `height_map` is an owned `[u8; 256]`, indexed `(z << 4) | x` like C++.
+//! - `lightOpacity` / `lightValue` are NOT duplicated here: they are read from
+//!   [`crate::block`] via `alpha_block_properties_get` (single source of truth).
+//! - Out-of-range policy: reads return `0`, writes are no-ops returning
+//!   `false` where the C++ signature returns `bool`. This mirrors the safe
+//!   `nibble.rs` behaviour. Note the C++ `setBlockID` family performs no
+//!   bounds check and would write out of bounds; the Rust port deliberately
+//!   hardens that path.
+//! - `is_modified` mirrors C++ `isModified`. C++ only sets it when
+//!   `worldObj && !isPopulating`; the Rust port has no `World`, so any
+//!   successful in-bounds mutation sets it (equivalent to the C++
+//!   world-present path). OOB no-ops never dirty the chunk.
+//!
+//! Deferred (require `World`, entities, or I/O — intentionally not ported):
+//! - `World* worldObj` / cross-chunk lookup (`getChunkFromBlockCoords`)
+//! - `pendingItems` / `pendingAnimals` / `pendingMonsters` / `pendingBoats`
+//! - `TileEntity` map (`addTileEntity` / `removeTileEntity` / `getTileEntity`)
+//! - `getChunkData` (Packet51MapChunk + zlib; needs compression I/O)
+//! - Auto `generateSkylightMap()` call inside `setBlockIDWithMetadata`
+//!   (C++ only runs it when `worldObj` is present; with a null world — as in
+//!   `TestChunk.cpp` — it is skipped, same as here where the caller decides)
+//! - `isTerrainPopulated` is stored but never acted on (needs generator).
+
+use crate::block::alpha_block_properties_get;
+use crate::nibble::NibbleArray;
+use std::collections::VecDeque;
+
+/// Chunk dimensions (Alpha 1.2.6).
+pub const CHUNK_SIZE_X: i32 = 16;
+/// Chunk height (Alpha 1.2.6).
+pub const CHUNK_SIZE_Y: i32 = 128;
+/// Chunk depth (Alpha 1.2.6).
+pub const CHUNK_SIZE_Z: i32 = 16;
+/// 16 * 128 * 16.
+pub const CHUNK_VOLUME: usize = 32768;
+/// 16 * 16.
+pub const CHUNK_AREA: usize = 256;
+/// Backing bytes per nibble array (32768 nibbles).
+pub const CHUNK_NIBBLE_BYTES: usize = CHUNK_VOLUME / 2;
+/// Skylight type id for [`Chunk::get_saved_light_value`].
+pub const SKY_LIGHT: i32 = 0;
+/// Blocklight type id for [`Chunk::get_saved_light_value`].
+pub const BLOCK_LIGHT: i32 = 1;
+
+fn light_opacity(id: u8) -> i32 {
+    alpha_block_properties_get(u32::from(id)).light_opacity
+}
+
+fn light_value(id: u8) -> i32 {
+    alpha_block_properties_get(u32::from(id)).light_value
+}
+
+fn is_transparent(id: u8) -> bool {
+    light_opacity(id) < 15
+}
+
+fn vertical_opacity(id: u8) -> i32 {
+    light_opacity(id)
+}
+
+fn bfs_opacity(id: u8) -> i32 {
+    let op = light_opacity(id);
+    if op < 1 {
+        1
+    } else {
+        op
+    }
+}
+
+#[derive(Clone, Copy)]
+struct LightNode {
+    x: i32,
+    y: i32,
+    z: i32,
+}
+
+/// Owned chunk data + lighting (no `World`, no entities, no I/O).
+#[derive(Clone)]
+pub struct Chunk {
+    /// Chunk X position (mirrors C++ `xPosition`).
+    pub x_position: i32,
+    /// Chunk Z position (mirrors C++ `zPosition`).
+    pub z_position: i32,
+    /// Mirrors C++ `isTerrainPopulated` (stored, never acted on here).
+    pub is_terrain_populated: bool,
+    /// Mirrors C++ `isModified` (plain bool; single-threaded port).
+    pub is_modified: bool,
+    blocks: [u8; CHUNK_VOLUME],
+    data: NibbleArray,
+    skylight: NibbleArray,
+    blocklight: NibbleArray,
+    height_map: [u8; CHUNK_AREA],
+}
+
+impl Chunk {
+    /// New all-air chunk (mirrors `Chunk(world, x, z)` allocation, minus `World`).
+    pub fn new(x: i32, z: i32) -> Self {
+        Self {
+            x_position: x,
+            z_position: z,
+            is_terrain_populated: false,
+            is_modified: false,
+            blocks: [0u8; CHUNK_VOLUME],
+            data: NibbleArray::with_nibbles(CHUNK_VOLUME),
+            skylight: NibbleArray::with_nibbles(CHUNK_VOLUME),
+            blocklight: NibbleArray::with_nibbles(CHUNK_VOLUME),
+            height_map: [0u8; CHUNK_AREA],
+        }
+    }
+
+    /// Index formula matching Alpha exactly: `x << 11 | z << 7 | y`.
+    ///
+    /// Callers must bounds-check first; the value is meaningless for OOB
+    /// coordinates (mirrors C++ arithmetic without the UB on use).
+    #[inline]
+    pub fn get_index(&self, x: i32, y: i32, z: i32) -> usize {
+        ((x as usize) << 11) | ((z as usize) << 7) | (y as usize)
+    }
+
+    /// Same formula as an associated function (no `self` needed).
+    #[inline]
+    pub fn index(x: i32, y: i32, z: i32) -> usize {
+        ((x as usize) << 11) | ((z as usize) << 7) | (y as usize)
+    }
+
+    fn in_bounds(x: i32, y: i32, z: i32) -> bool {
+        x >= 0
+            && x < CHUNK_SIZE_X
+            && y >= 0
+            && y < CHUNK_SIZE_Y
+            && z >= 0
+            && z < CHUNK_SIZE_Z
+    }
+
+    fn column_in_bounds(x: i32, z: i32) -> bool {
+        x >= 0 && x < CHUNK_SIZE_X && z >= 0 && z < CHUNK_SIZE_Z
+    }
+
+    fn block_index(x: i32, y: i32, z: i32) -> Option<usize> {
+        if Self::in_bounds(x, y, z) {
+            Some(Self::index(x, y, z))
+        } else {
+            None
+        }
+    }
+
+    fn height_index(x: i32, z: i32) -> Option<usize> {
+        if Self::column_in_bounds(x, z) {
+            Some((((z as usize) << 4) | (x as usize)) & (CHUNK_AREA - 1))
+        } else {
+            None
+        }
+    }
+
+    /// Mirrors `getBlockID`: OOB returns `0`.
+    pub fn get_block_id(&self, x: i32, y: i32, z: i32) -> u8 {
+        match Self::block_index(x, y, z) {
+            Some(idx) => match self.blocks.get(idx) {
+                Some(v) => *v,
+                None => 0,
+            },
+            None => 0,
+        }
+    }
+
+    /// Mirrors `setBlockID` (hardened: OOB is a no-op returning `false`).
+    ///
+    /// On success the height column is recalculated and `is_modified` is set
+    /// (the C++ world-present path; the C++ null-world path leaves it clean).
+    pub fn set_block_id(&mut self, x: i32, y: i32, z: i32, block_id: u8) -> bool {
+        let idx = match Self::block_index(x, y, z) {
+            Some(idx) => idx,
+            None => return false,
+        };
+        let old = match self.blocks.get(idx) {
+            Some(v) => *v,
+            None => return false,
+        };
+        if old == block_id {
+            return false;
+        }
+        if let Some(slot) = self.blocks.get_mut(idx) {
+            *slot = block_id;
+        } else {
+            return false;
+        }
+        self.recalculate_height_column(x, z);
+        self.is_modified = true;
+        true
+    }
+
+    /// Mirrors `setBlockIDWithMetadata` (hardened: OOB is a no-op `false`).
+    ///
+    /// Unlike C++ this never triggers an automatic skylight rebuild: C++
+    /// only rebuilds when `worldObj` is present, and the isolated port has no
+    /// `World`. Call [`Chunk::generate_skylight_map`] explicitly if needed.
+    pub fn set_block_id_with_metadata(
+        &mut self,
+        x: i32,
+        y: i32,
+        z: i32,
+        block_id: u8,
+        metadata: u8,
+    ) -> bool {
+        if !Self::in_bounds(x, y, z) {
+            return false;
+        }
+        let old_id = self.get_block_id(x, y, z);
+        let old_meta = self.data.get_nibble(x, y, z);
+        if old_id == block_id && old_meta == (metadata & 0xF) {
+            return false;
+        }
+        let idx = match Self::block_index(x, y, z) {
+            Some(idx) => idx,
+            None => return false,
+        };
+        if let Some(slot) = self.blocks.get_mut(idx) {
+            *slot = block_id;
+        } else {
+            return false;
+        }
+        self.data.set_nibble(x, y, z, metadata);
+        self.recalculate_height_column(x, z);
+        self.is_modified = true;
+        true
+    }
+
+    /// Mirrors `getBlockMetadata` (OOB-safe via [`NibbleArray`]).
+    pub fn get_block_metadata(&self, x: i32, y: i32, z: i32) -> u8 {
+        self.data.get_nibble(x, y, z)
+    }
+
+    /// Mirrors `setBlockMetadata` (OOB no-op; only in-bounds writes dirty).
+    pub fn set_block_metadata(&mut self, x: i32, y: i32, z: i32, metadata: u8) {
+        if !Self::in_bounds(x, y, z) {
+            return;
+        }
+        self.data.set_nibble(x, y, z, metadata);
+        self.is_modified = true;
+    }
+
+    /// Mirrors `getSavedLightValue`: `0` = sky, anything else = block.
+    pub fn get_saved_light_value(&self, light_type: i32, x: i32, y: i32, z: i32) -> u8 {
+        if light_type == SKY_LIGHT {
+            self.skylight.get_nibble(x, y, z)
+        } else {
+            self.blocklight.get_nibble(x, y, z)
+        }
+    }
+
+    /// Mirrors `setLightValue` (OOB no-op; only in-bounds writes dirty).
+    pub fn set_light_value(&mut self, light_type: i32, x: i32, y: i32, z: i32, value: u8) {
+        if !Self::in_bounds(x, y, z) {
+            return;
+        }
+        if light_type == SKY_LIGHT {
+            self.skylight.set_nibble(x, y, z, value);
+        } else {
+            self.blocklight.set_nibble(x, y, z, value);
+        }
+        self.is_modified = true;
+    }
+
+    /// Convenience: skylight read.
+    pub fn get_skylight(&self, x: i32, y: i32, z: i32) -> u8 {
+        self.get_saved_light_value(SKY_LIGHT, x, y, z)
+    }
+
+    /// Convenience: blocklight read.
+    pub fn get_blocklight(&self, x: i32, y: i32, z: i32) -> u8 {
+        self.get_saved_light_value(BLOCK_LIGHT, x, y, z)
+    }
+
+    /// Mirrors `getHeightValue`: OOB returns `0`.
+    pub fn get_height_value(&self, x: i32, z: i32) -> i32 {
+        match Self::height_index(x, z) {
+            Some(idx) => match self.height_map.get(idx) {
+                Some(v) => i32::from(*v),
+                None => 0,
+            },
+            None => 0,
+        }
+    }
+
+    /// Clear the dirty flag (mirrors the save-thread consume path).
+    pub fn clear_modified(&mut self) {
+        self.is_modified = false;
+    }
+
+    fn recalculate_height_column(&mut self, x: i32, z: i32) {
+        if !Self::column_in_bounds(x, z) {
+            return;
+        }
+        let mut y: i32 = CHUNK_SIZE_Y - 1;
+        while y > 0 {
+            let below = self.get_block_id(x, y - 1, z);
+            if light_opacity(below) != 0 {
+                break;
+            }
+            y -= 1;
+        }
+        if let Some(idx) = Self::height_index(x, z) {
+            if let Some(slot) = self.height_map.get_mut(idx) {
+                let clamped = if y < 0 {
+                    0u8
+                } else if y > 255 {
+                    255u8
+                } else {
+                    y as u8
+                };
+                *slot = clamped;
+            }
+        }
+    }
+
+    /// Mirrors `generateHeightMap` 1:1.
+    pub fn generate_height_map(&mut self) {
+        let mut x: i32 = 0;
+        while x < CHUNK_SIZE_X {
+            let mut z: i32 = 0;
+            while z < CHUNK_SIZE_Z {
+                self.recalculate_height_column(x, z);
+                z += 1;
+            }
+            x += 1;
+        }
+    }
+
+    /// Single-chunk port of `generateSkylightMap` 1:1 (order + attenuation).
+    ///
+    /// STEP 1 (vertical pass) is identical. STEP 2/3 (BFS spread) keep the
+    /// exact C++ order (`-x, +x, -y, +y, -z, +z`), the same
+    /// `isTransparent = opacity < 15` gate, vertical attenuation
+    /// (`currentSky -= opacity`, floor 0) and BFS attenuation
+    /// (`newLight = current - max(1, opacity)`, propagate iff greater).
+    ///
+    /// Difference: C++ spreads across chunk borders via
+    /// `worldObj->getChunkFromBlockCoords(..., false)`. Without a `World`
+    /// this port stops at the chunk border (equivalent to C++ with all
+    /// neighbours missing).
+    pub fn generate_skylight_map(&mut self) {
+        let mut sky_queue: VecDeque<LightNode> = VecDeque::new();
+        let mut block_queue: VecDeque<LightNode> = VecDeque::new();
+
+        // STEP 1: vertical initial pass + emitter detection.
+        let mut x: i32 = 0;
+        while x < CHUNK_SIZE_X {
+            let mut z: i32 = 0;
+            while z < CHUNK_SIZE_Z {
+                let mut current_sky: i32 = 15;
+                let mut y: i32 = CHUNK_SIZE_Y - 1;
+                while y >= 0 {
+                    let id = self.get_block_id(x, y, z);
+                    if !is_transparent(id) {
+                        current_sky = 0;
+                    } else {
+                        current_sky -= vertical_opacity(id);
+                        if current_sky < 0 {
+                            current_sky = 0;
+                        }
+                    }
+                    let sky_byte = if current_sky > 15 {
+                        15u8
+                    } else if current_sky < 0 {
+                        0u8
+                    } else {
+                        current_sky as u8
+                    };
+                    self.skylight.set_nibble(x, y, z, sky_byte);
+                    if current_sky > 0 {
+                        sky_queue.push_back(LightNode { x, y, z });
+                    }
+
+                    let emission = light_value(id);
+                    let emit_byte = if emission < 0 {
+                        0u8
+                    } else if emission > 15 {
+                        15u8
+                    } else {
+                        emission as u8
+                    };
+                    self.blocklight.set_nibble(x, y, z, emit_byte);
+                    if emission > 0 {
+                        block_queue.push_back(LightNode { x, y, z });
+                    }
+                    y -= 1;
+                }
+                z += 1;
+            }
+            x += 1;
+        }
+
+        // STEP 2: skylight BFS (C++ neighbour order preserved).
+        while let Some(node) = sky_queue.pop_front() {
+            let current_light = i32::from(self.get_saved_light_value(SKY_LIGHT, node.x, node.y, node.z));
+            if current_light <= 1 {
+                continue;
+            }
+            const OFFSETS: [(i32, i32, i32); 6] = [
+                (-1, 0, 0),
+                (1, 0, 0),
+                (0, -1, 0),
+                (0, 1, 0),
+                (0, 0, -1),
+                (0, 0, 1),
+            ];
+            let mut i: usize = 0;
+            while i < OFFSETS.len() {
+                let (dx, dy, dz) = OFFSETS[i];
+                let nx = node.x + dx;
+                let ny = node.y + dy;
+                let nz = node.z + dz;
+                if Self::in_bounds(nx, ny, nz) {
+                    let id = self.get_block_id(nx, ny, nz);
+                    if is_transparent(id) {
+                        let opacity = bfs_opacity(id);
+                        let neighbor_light =
+                            i32::from(self.get_saved_light_value(SKY_LIGHT, nx, ny, nz));
+                        let new_light = current_light - opacity;
+                        if new_light > neighbor_light {
+                            let byte = if new_light < 0 {
+                                0u8
+                            } else if new_light > 15 {
+                                15u8
+                            } else {
+                                new_light as u8
+                            };
+                            // Direct nibble write without dirtying (mirrors C++
+                            // cross-chunk writes that bypass the local flag path
+                            // per-neighbour; final dirty state set once below).
+                            self.skylight.set_nibble(nx, ny, nz, byte);
+                            sky_queue.push_back(LightNode {
+                                x: nx,
+                                y: ny,
+                                z: nz,
+                            });
+                        }
+                    }
+                }
+                i += 1;
+            }
+        }
+
+        // STEP 3: blocklight BFS (same order/rules, type = 1).
+        while let Some(node) = block_queue.pop_front() {
+            let current_light =
+                i32::from(self.get_saved_light_value(BLOCK_LIGHT, node.x, node.y, node.z));
+            if current_light <= 1 {
+                continue;
+            }
+            const OFFSETS: [(i32, i32, i32); 6] = [
+                (-1, 0, 0),
+                (1, 0, 0),
+                (0, -1, 0),
+                (0, 1, 0),
+                (0, 0, -1),
+                (0, 0, 1),
+            ];
+            let mut i: usize = 0;
+            while i < OFFSETS.len() {
+                let (dx, dy, dz) = OFFSETS[i];
+                let nx = node.x + dx;
+                let ny = node.y + dy;
+                let nz = node.z + dz;
+                if Self::in_bounds(nx, ny, nz) {
+                    let id = self.get_block_id(nx, ny, nz);
+                    if is_transparent(id) {
+                        let opacity = bfs_opacity(id);
+                        let neighbor_light =
+                            i32::from(self.get_saved_light_value(BLOCK_LIGHT, nx, ny, nz));
+                        let new_light = current_light - opacity;
+                        if new_light > neighbor_light {
+                            let byte = if new_light < 0 {
+                                0u8
+                            } else if new_light > 15 {
+                                15u8
+                            } else {
+                                new_light as u8
+                            };
+                            self.blocklight.set_nibble(nx, ny, nz, byte);
+                            block_queue.push_back(LightNode {
+                                x: nx,
+                                y: ny,
+                                z: nz,
+                            });
+                        }
+                    }
+                }
+                i += 1;
+            }
+        }
+
+        self.is_modified = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- Mirrors of test/TestChunk.cpp (except zlib getChunkData cases) ----
+
+    #[test]
+    fn index_formula() {
+        let chunk = Chunk::new(0, 0);
+        assert_eq!(chunk.get_index(0, 0, 0), 0);
+        assert_eq!(chunk.get_index(0, 1, 0), 1);
+        assert_eq!(chunk.get_index(1, 0, 0), 1 << 11);
+        assert_eq!(chunk.get_index(0, 0, 1), 1 << 7);
+        assert_eq!(Chunk::index(0, 0, 0), 0);
+        assert_eq!(Chunk::index(1, 0, 0), 1 << 11);
+    }
+
+    #[test]
+    fn initial_all_air() {
+        let chunk = Chunk::new(0, 0);
+        for y in 0..16 {
+            for x in 0..16 {
+                for z in 0..16 {
+                    assert_eq!(chunk.get_block_id(x, y, z), 0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn set_and_get_block_id() {
+        let mut chunk = Chunk::new(0, 0);
+        assert!(chunk.set_block_id(5, 40, 7, 1));
+        assert_eq!(chunk.get_block_id(5, 40, 7), 1);
+    }
+
+    #[test]
+    fn set_block_id_returns_false_for_same() {
+        let mut chunk = Chunk::new(0, 0);
+        assert!(chunk.set_block_id(3, 20, 3, 1));
+        assert!(!chunk.set_block_id(3, 20, 3, 1));
+    }
+
+    #[test]
+    fn set_block_with_metadata() {
+        let mut chunk = Chunk::new(0, 0);
+        assert!(chunk.set_block_id_with_metadata(7, 50, 9, 5, 3));
+        assert_eq!(chunk.get_block_id(7, 50, 9), 5);
+        assert_eq!(chunk.get_block_metadata(7, 50, 9), 3);
+    }
+
+    #[test]
+    fn set_block_with_metadata_returns_false_for_same() {
+        let mut chunk = Chunk::new(0, 0);
+        assert!(chunk.set_block_id_with_metadata(7, 50, 9, 5, 3));
+        assert!(!chunk.set_block_id_with_metadata(7, 50, 9, 5, 3));
+    }
+
+    #[test]
+    fn get_block_id_out_of_range() {
+        let chunk = Chunk::new(0, 0);
+        assert_eq!(chunk.get_block_id(-1, 0, 0), 0);
+        assert_eq!(chunk.get_block_id(16, 0, 0), 0);
+        assert_eq!(chunk.get_block_id(0, -1, 0), 0);
+        assert_eq!(chunk.get_block_id(0, 128, 0), 0);
+        assert_eq!(chunk.get_block_id(0, 0, -1), 0);
+        assert_eq!(chunk.get_block_id(0, 0, 16), 0);
+    }
+
+    #[test]
+    fn set_and_get_metadata() {
+        let mut chunk = Chunk::new(0, 0);
+        chunk.set_block_metadata(2, 30, 4, 0xF);
+        assert_eq!(chunk.get_block_metadata(2, 30, 4), 0xF);
+        assert_eq!(chunk.get_block_metadata(2, 31, 4), 0);
+    }
+
+    #[test]
+    fn height_map_after_set_block() {
+        let mut chunk = Chunk::new(0, 0);
+        chunk.set_block_id(4, 60, 4, 1);
+        assert!(chunk.get_height_value(4, 4) >= 60);
+    }
+
+    #[test]
+    fn height_map_default() {
+        let chunk = Chunk::new(0, 0);
+        assert_eq!(chunk.get_height_value(0, 0), 0);
+        assert_eq!(chunk.get_height_value(15, 15), 0);
+    }
+
+    #[test]
+    fn set_block_preserves_other_blocks() {
+        let mut chunk = Chunk::new(0, 0);
+        chunk.set_block_id(0, 10, 0, 1);
+        chunk.set_block_id(15, 120, 15, 2);
+        assert_eq!(chunk.get_block_id(0, 10, 0), 1);
+        assert_eq!(chunk.get_block_id(15, 120, 15), 2);
+        assert_eq!(chunk.get_block_id(8, 64, 8), 0);
+    }
+
+    #[test]
+    fn generate_height_map_all_air() {
+        let mut chunk = Chunk::new(0, 0);
+        chunk.generate_height_map();
+        assert_eq!(chunk.get_height_value(0, 0), 0);
+        assert_eq!(chunk.get_height_value(7, 7), 0);
+    }
+
+    #[test]
+    fn height_map_out_of_range() {
+        let chunk = Chunk::new(0, 0);
+        assert_eq!(chunk.get_height_value(-1, 0), 0);
+        assert_eq!(chunk.get_height_value(0, 16), 0);
+    }
+
+    // ---- Own coverage: OOB, heightmap tracking, light ----
+
+    #[test]
+    fn oob_set_is_noop_and_stays_clean() {
+        let mut chunk = Chunk::new(0, 0);
+        assert!(!chunk.set_block_id(-1, 0, 0, 1));
+        assert!(!chunk.set_block_id(16, 0, 0, 1));
+        assert!(!chunk.set_block_id(0, -1, 0, 1));
+        assert!(!chunk.set_block_id(0, 128, 0, 1));
+        assert!(!chunk.set_block_id(0, 0, -1, 1));
+        assert!(!chunk.set_block_id(0, 0, 16, 1));
+        assert!(!chunk.set_block_id_with_metadata(-1, 0, 0, 1, 1));
+        assert!(!chunk.set_block_id_with_metadata(0, 200, 0, 1, 1));
+        // No successful write happened, so the chunk must still be clean.
+        assert!(!chunk.is_modified);
+        // Neighbouring in-bounds cell untouched.
+        assert_eq!(chunk.get_block_id(0, 0, 0), 0);
+    }
+
+    #[test]
+    fn oob_metadata_and_light_are_safe() {
+        let mut chunk = Chunk::new(0, 0);
+        chunk.set_block_metadata(-1, 0, 0, 0xF);
+        chunk.set_block_metadata(0, 200, 0, 0xF);
+        assert_eq!(chunk.get_block_metadata(-1, 0, 0), 0);
+        assert_eq!(chunk.get_block_metadata(0, 200, 0), 0);
+        assert_eq!(chunk.get_block_metadata(0, 0, 0), 0);
+        chunk.set_light_value(0, -1, 0, 0, 15);
+        chunk.set_light_value(1, 0, 200, 0, 15);
+        assert_eq!(chunk.get_saved_light_value(0, -1, 0, 0), 0);
+        assert_eq!(chunk.get_saved_light_value(1, 0, 200, 0), 0);
+        assert!(!chunk.is_modified);
+    }
+
+    #[test]
+    fn heightmap_tracks_highest_opaque_after_set() {
+        let mut chunk = Chunk::new(0, 0);
+        chunk.set_block_id(4, 60, 4, 1);
+        assert_eq!(chunk.get_height_value(4, 4), 61);
+        // Higher opaque block moves the height up.
+        chunk.set_block_id(4, 70, 4, 1);
+        assert_eq!(chunk.get_height_value(4, 4), 71);
+        // Removing the top block drops back to the lower one.
+        chunk.set_block_id(4, 70, 4, 0);
+        assert_eq!(chunk.get_height_value(4, 4), 61);
+        // Removing the last opaque block returns to zero.
+        chunk.set_block_id(4, 60, 4, 0);
+        assert_eq!(chunk.get_height_value(4, 4), 0);
+        // Transparent blocks (glass, id 20, opacity 0) do not raise height.
+        chunk.set_block_id(4, 80, 4, 20);
+        assert_eq!(chunk.get_height_value(4, 4), 0);
+    }
+
+    #[test]
+    fn skylight_all_air_is_full_brightness() {
+        let mut chunk = Chunk::new(0, 0);
+        chunk.generate_skylight_map();
+        assert_eq!(chunk.get_skylight(0, 127, 0), 15);
+        assert_eq!(chunk.get_skylight(8, 64, 8), 15);
+        assert_eq!(chunk.get_skylight(15, 0, 15), 15);
+    }
+
+    #[test]
+    fn skylight_blocked_by_stone_floor_wall() {
+        // Opaque floor across the whole chunk: light must not pass through.
+        let mut chunk = Chunk::new(0, 0);
+        for x in 0..16 {
+            for z in 0..16 {
+                chunk.set_block_id(x, 64, z, 1);
+            }
+        }
+        chunk.generate_skylight_map();
+        // Just above the floor: full sky.
+        assert_eq!(chunk.get_skylight(8, 65, 8), 15);
+        // The floor cell itself and everything below: dark.
+        assert_eq!(chunk.get_skylight(8, 64, 8), 0);
+        assert_eq!(chunk.get_skylight(8, 63, 8), 0);
+        assert_eq!(chunk.get_skylight(0, 0, 0), 0);
+        // Sideways BFS must not leak around inside the same chunk either:
+        // every column is capped, so the bottom layer stays dark.
+        for x in 0..16 {
+            for z in 0..16 {
+                assert_eq!(chunk.get_skylight(x, 0, z), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn skylight_attenuates_through_leaves_water_glass() {
+        // Full layers (no sideways leak): vertical pass 15 - opacity must hold.
+        // Leaves opacity 1 -> 14, water opacity 3 -> 12, glass opacity 0 -> 15.
+        let mut leaves = Chunk::new(0, 0);
+        let mut water = Chunk::new(0, 0);
+        let mut glass = Chunk::new(0, 0);
+        for x in 0..16 {
+            for z in 0..16 {
+                leaves.set_block_id(x, 100, z, 18);
+                water.set_block_id(x, 100, z, 8);
+                glass.set_block_id(x, 100, z, 20);
+            }
+        }
+        leaves.generate_skylight_map();
+        water.generate_skylight_map();
+        glass.generate_skylight_map();
+        assert_eq!(leaves.get_skylight(8, 101, 8), 15);
+        assert_eq!(water.get_skylight(8, 101, 8), 15);
+        assert_eq!(glass.get_skylight(8, 101, 8), 15);
+        assert_eq!(leaves.get_skylight(8, 100, 8), 14);
+        assert_eq!(water.get_skylight(8, 100, 8), 12);
+        assert_eq!(glass.get_skylight(8, 100, 8), 15);
+        assert_eq!(leaves.get_skylight(8, 99, 8), 14);
+        assert_eq!(water.get_skylight(8, 99, 8), 12);
+    }
+
+    #[test]
+    fn blocklight_without_emitters_stays_zero() {
+        // Current block table carries no light_value emitters, so a plain
+        // chunk must produce zero blocklight (documents the table state;
+        // emission itself still flows through the shared BFS rules).
+        let mut chunk = Chunk::new(0, 0);
+        chunk.generate_skylight_map();
+        assert_eq!(chunk.get_blocklight(8, 64, 8), 0);
+        assert_eq!(chunk.get_blocklight(0, 127, 0), 0);
+    }
+
+    #[test]
+    fn successful_write_marks_modified() {
+        let mut chunk = Chunk::new(0, 0);
+        assert!(!chunk.is_modified);
+        assert!(chunk.set_block_id(1, 2, 3, 1));
+        assert!(chunk.is_modified);
+        chunk.clear_modified();
+        assert!(!chunk.is_modified);
+        chunk.set_block_metadata(1, 2, 3, 5);
+        assert!(chunk.is_modified);
+    }
+}
