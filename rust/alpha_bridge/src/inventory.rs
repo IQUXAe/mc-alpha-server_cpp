@@ -7,21 +7,6 @@ pub struct FfiItemStack {
     pub item_damage: i32,
 }
 
-#[no_mangle]
-pub extern "C" fn item_stack_create(item_id: i32, stack_size: i32, item_damage: i32) -> FfiItemStack {
-    FfiItemStack {
-        stack_size,
-        animations_to_go: 0,
-        item_id,
-        item_damage,
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn item_stack_copy(stack: *const FfiItemStack) -> FfiItemStack {
-    unsafe { *stack }
-}
-
 // Returns true if the item broke (stack size changed).
 // max_damage is passed from C++ (Rust cannot access Item::itemsList).
 #[no_mangle]

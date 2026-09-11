@@ -61,10 +61,7 @@ bool alpha_player_storage_load(const char* filepath, AlphaPlayerData* out_data);
 
 AlphaBuffer alpha_gzip_compress(const uint8_t* input, size_t input_len, int level);
 AlphaBuffer alpha_gzip_decompress(const uint8_t* input, size_t input_len);
-AlphaBuffer alpha_zstd_compress(const uint8_t* input, size_t input_len, int level);
-AlphaBuffer alpha_zstd_decompress(const uint8_t* input, size_t input_len);
 AlphaBuffer alpha_zlib_compress(const uint8_t* input, size_t input_len, int level);
-AlphaBuffer alpha_zlib_decompress(const uint8_t* input, size_t input_len);
 AlphaBuffer alpha_level_dat_encode(const AlphaLevelDat* level);
 int alpha_level_dat_decode(const uint8_t* input, size_t input_len, AlphaLevelDat* out_level);
 void alpha_level_dat_free(AlphaLevelDat* level);
@@ -103,17 +100,6 @@ typedef struct MobSpawnerBase {
 
 // Noise Generator Functions
 NoiseGeneratorOctaves* alpha_noise_octaves_create(int64_t seed, int octaves);
-void alpha_noise_octaves_create_all(
-    int64_t seed,
-    NoiseGeneratorOctaves** out_705,
-    NoiseGeneratorOctaves** out_704,
-    NoiseGeneratorOctaves** out_703,
-    NoiseGeneratorOctaves** out_702,
-    NoiseGeneratorOctaves** out_701,
-    NoiseGeneratorOctaves** out_715,
-    NoiseGeneratorOctaves** out_714,
-    NoiseGeneratorOctaves** out_713
-);
 void alpha_noise_octaves_free(NoiseGeneratorOctaves* ptr);
 void alpha_noise_octaves_func_648_a(
     NoiseGeneratorOctaves* ptr,
@@ -144,18 +130,6 @@ double alpha_noise_octaves_func_647_a(NoiseGeneratorOctaves* ptr, double x, doub
 
 NoiseGeneratorOctaves2* alpha_noise_octaves2_create(int64_t seed, int octaves);
 void alpha_noise_octaves2_free(NoiseGeneratorOctaves2* ptr);
-void alpha_noise_octaves2_func_4101_a(
-    NoiseGeneratorOctaves2* ptr,
-    double* out_buf,
-    size_t out_len,
-    double x,
-    double y,
-    int x_size,
-    int y_size,
-    double x_scale,
-    double y_scale,
-    double amplitude
-);
 
 // Biome Functions
 void alpha_biome_get_temperatures(
@@ -211,14 +185,6 @@ typedef struct WorldAccessor {
     bool (*is_block_solid)(int32_t x, int32_t y, int32_t z);
     int32_t (*get_height_value)(int32_t x, int32_t z);
 } WorldAccessor;
-
-void alpha_caves_generate(
-    int64_t world_seed,
-    int32_t chunk_x,
-    int32_t chunk_z,
-    uint8_t* blocks,
-    size_t blocks_len
-);
 
 void alpha_decorate_chunk(
     WorldAccessor accessor,
@@ -422,8 +388,6 @@ AlphaChunkData* alpha_chunk_nbt_deserialize(
 );
 
 // ItemStack FFI
-FfiItemStack item_stack_create(int32_t item_id, int32_t stack_size, int32_t item_damage);
-FfiItemStack item_stack_copy(const FfiItemStack* stack);
 bool item_stack_damage(FfiItemStack* stack, int32_t damage, int32_t max_damage);
 
 // TileEntityFurnace FFI
@@ -994,7 +958,6 @@ typedef struct AlphaBlockProperties {
 AlphaBlockProperties alpha_block_properties_get(uint32_t id);
 
 // Thread-safe RNG backed by Rust's global Mutex<JavaRandom> seeded from /dev/urandom.
-int32_t alpha_rng_next_int(int32_t bound);
 float   alpha_rng_next_float(void);
 double  alpha_rng_next_double(void);
 

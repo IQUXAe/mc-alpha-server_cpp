@@ -16,7 +16,6 @@
 static thread_local World* current_world = nullptr;
 #include "../entity/EntityItem.h"
 #include "../entity/EntityFallingSand.h"
-#include "../entity/EntityPlayerMP.h"
 #include "../core/Item.h"
 #include "../MinecraftServer.h"
 #include <iostream>
@@ -1094,25 +1093,4 @@ void Block::dropBlockAsItemWithChance(World* world, int x, int y, int z, int met
             world->spawnEntityInWorld(std::move(entity));
         }
     }
-}
-
-float Block::checkHardness(EntityPlayer* player) const {
-    if (blockHardness < 0.0f) return 0.0f;
-
-    int heldId = 0;
-    bool inWater = false;
-    bool onGround = true;
-
-    if (player) {
-        if (auto* mp = dynamic_cast<EntityPlayerMP*>(player)) {
-            ItemStack* held = mp->inventory.getCurrentItem();
-            if (held && held->stackSize > 0 && held->itemID > 0) {
-                heldId = held->itemID;
-            }
-        }
-        inWater = player->isInWater;
-        onGround = player->onGround;
-    }
-
-    return RustBridge::miningCheckHardness(blockID, heldId, inWater, onGround);
 }

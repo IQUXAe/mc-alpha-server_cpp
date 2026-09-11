@@ -27,16 +27,6 @@ pub struct NbtList {
     pub elements: Vec<NbtTag>,
 }
 
-pub fn read_tag_type<R: Read>(reader: &mut R) -> std::io::Result<u8> {
-    let mut buf = [0u8; 1];
-    reader.read_exact(&mut buf)?;
-    Ok(buf[0])
-}
-
-pub fn write_tag_type<W: Write>(writer: &mut W, tag_type: u8) -> std::io::Result<()> {
-    writer.write_all(&[tag_type])
-}
-
 pub fn read_string<R: Read>(reader: &mut R) -> std::io::Result<String> {
     let mut len_buf = [0u8; 2];
     reader.read_exact(&mut len_buf)?;

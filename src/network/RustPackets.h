@@ -259,10 +259,6 @@ inline RustPacket velocity(int entityId, double vx, double vy, double vz) {
     return p;
 }
 
-inline RustPacket entityVelocity(int entityId, double vx, double vy, double vz) {
-    return velocity(entityId, vx, vy, vz);
-}
-
 inline RustPacket destroyEntity(int entityId) {
     RustPacket p{};
     p.packet_id = 29;

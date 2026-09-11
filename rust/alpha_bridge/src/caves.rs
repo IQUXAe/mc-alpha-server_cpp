@@ -255,19 +255,3 @@ impl MapGenCaves {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn alpha_caves_generate(
-    world_seed: i64,
-    chunk_x: i32,
-    chunk_z: i32,
-    blocks: *mut u8,
-    blocks_len: usize,
-) {
-    if blocks.is_null() || blocks_len < 32768 {
-        return;
-    }
-    let slice = std::slice::from_raw_parts_mut(blocks, 32768);
-    let mut gen = MapGenCaves::new();
-    gen.generate(world_seed, chunk_x, chunk_z, slice);
-}
-

@@ -1,4 +1,4 @@
-use flate2::read::{GzDecoder, GzEncoder, ZlibDecoder, ZlibEncoder};
+use flate2::read::{GzDecoder, GzEncoder, ZlibEncoder};
 use flate2::Compression;
 use libc::{c_char, c_int, c_uchar, size_t};
 use std::io::Read;
@@ -302,38 +302,6 @@ pub extern "C" fn alpha_gzip_decompress(
 }
 
 #[no_mangle]
-pub extern "C" fn alpha_zstd_compress(
-    input: *const c_uchar,
-    input_len: size_t,
-    level: c_int,
-) -> AlphaBuffer {
-    let Some(bytes) = copy_input(input, input_len) else {
-        return AlphaBuffer::empty();
-    };
-
-    let level = level.clamp(1, 22);
-    match zstd::stream::encode_all(bytes.as_slice(), level) {
-        Ok(output) => AlphaBuffer::from_vec(output),
-        Err(_) => AlphaBuffer::empty(),
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn alpha_zstd_decompress(
-    input: *const c_uchar,
-    input_len: size_t,
-) -> AlphaBuffer {
-    let Some(bytes) = copy_input(input, input_len) else {
-        return AlphaBuffer::empty();
-    };
-
-    match zstd::stream::decode_all(bytes.as_slice()) {
-        Ok(output) => AlphaBuffer::from_vec(output),
-        Err(_) => AlphaBuffer::empty(),
-    }
-}
-
-#[no_mangle]
 pub extern "C" fn alpha_level_dat_encode(level: *const AlphaLevelDat) -> AlphaBuffer {
     if level.is_null() {
         return AlphaBuffer::empty();
@@ -422,24 +390,6 @@ pub extern "C" fn alpha_zlib_compress(
     AlphaBuffer::from_vec(output)
 }
 
-#[no_mangle]
-pub extern "C" fn alpha_zlib_decompress(
-    input: *const c_uchar,
-    input_len: size_t,
-) -> AlphaBuffer {
-    let Some(bytes) = copy_input(input, input_len) else {
-        return AlphaBuffer::empty();
-    };
-
-    let mut decoder = ZlibDecoder::new(bytes.as_slice());
-    let mut output = Vec::new();
-    if decoder.read_to_end(&mut output).is_err() {
-        return AlphaBuffer::empty();
-    }
-
-    AlphaBuffer::from_vec(output)
-}
-
 pub mod block;
 pub mod inventory;
 pub mod tile_entity_furnace;
@@ -473,34 +423,6 @@ pub unsafe extern "C" fn alpha_noise_octaves_create(seed: i64, octaves: c_int) -
     let mut rand = JavaRandom::new(seed);
     let gen = NoiseGeneratorOctaves::new(&mut rand, octaves as usize);
     Box::into_raw(Box::new(gen))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn alpha_noise_octaves_create_all(
-    seed: i64,
-    out_705: *mut *mut NoiseGeneratorOctaves,
-    out_704: *mut *mut NoiseGeneratorOctaves,
-    out_703: *mut *mut NoiseGeneratorOctaves,
-    out_702: *mut *mut NoiseGeneratorOctaves,
-    out_701: *mut *mut NoiseGeneratorOctaves,
-    out_715: *mut *mut NoiseGeneratorOctaves,
-    out_714: *mut *mut NoiseGeneratorOctaves,
-    out_713: *mut *mut NoiseGeneratorOctaves,
-) {
-    if out_705.is_null() || out_704.is_null() || out_703.is_null() || out_702.is_null()
-        || out_701.is_null() || out_715.is_null() || out_714.is_null() || out_713.is_null()
-    {
-        return;
-    }
-    let mut rand = JavaRandom::new(seed);
-    *out_705 = Box::into_raw(Box::new(NoiseGeneratorOctaves::new(&mut rand, 16)));
-    *out_704 = Box::into_raw(Box::new(NoiseGeneratorOctaves::new(&mut rand, 16)));
-    *out_703 = Box::into_raw(Box::new(NoiseGeneratorOctaves::new(&mut rand, 8)));
-    *out_702 = Box::into_raw(Box::new(NoiseGeneratorOctaves::new(&mut rand, 4)));
-    *out_701 = Box::into_raw(Box::new(NoiseGeneratorOctaves::new(&mut rand, 4)));
-    *out_715 = Box::into_raw(Box::new(NoiseGeneratorOctaves::new(&mut rand, 10)));
-    *out_714 = Box::into_raw(Box::new(NoiseGeneratorOctaves::new(&mut rand, 16)));
-    *out_713 = Box::into_raw(Box::new(NoiseGeneratorOctaves::new(&mut rand, 8)));
 }
 
 #[no_mangle]
@@ -578,27 +500,6 @@ pub unsafe extern "C" fn alpha_noise_octaves2_free(ptr: *mut NoiseGeneratorOctav
     if !ptr.is_null() {
         let _ = Box::from_raw(ptr);
     }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn alpha_noise_octaves2_func_4101_a(
-    ptr: *mut NoiseGeneratorOctaves2,
-    out_buf: *mut f64,
-    out_len: size_t,
-    x: f64,
-    y: f64,
-    x_size: c_int,
-    y_size: c_int,
-    x_scale: f64,
-    y_scale: f64,
-    amplitude: f64,
-) {
-    if ptr.is_null() || out_buf.is_null() || out_len == 0 {
-        return;
-    }
-    let gen = &*ptr;
-    let slice = slice::from_raw_parts_mut(out_buf, out_len);
-    gen.func_4101_a(slice, x, y, x_size as usize, y_size as usize, x_scale, y_scale, amplitude);
 }
 
 use crate::decorators::WorldAccessor;

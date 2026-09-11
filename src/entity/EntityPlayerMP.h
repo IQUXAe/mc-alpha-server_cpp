@@ -28,13 +28,6 @@ public:
     // Chunk tracking
     int managedPosX = 0;
     int managedPosZ = 0;
-    
-    // Mining state
-    int miningStartX = 0;
-    int miningStartY = 0;
-    int miningStartZ = 0;
-    int64_t miningStartTime = 0;
-    int miningTicks = -1;
 
     // Persisted held item id (restored into NetServerHandler on login)
     int savedHeldItemId = 0;

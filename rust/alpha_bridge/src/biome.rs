@@ -98,10 +98,6 @@ fn init_biome_lookup() -> &'static [MobSpawnerBase; 4096] {
     })
 }
 
-pub fn generate_biome_lookup() {
-    init_biome_lookup();
-}
-
 pub fn get_biome_from_lookup(temp: f64, humid: f64) -> MobSpawnerBase {
     let table = init_biome_lookup();
     let mut t = (temp as f32 * 63.0) as i32;
