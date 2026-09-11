@@ -540,6 +540,19 @@ bool itemBoatThrow(const ItemUseWorld* w, double sx, double sy, double sz,
     return ::item_boat_throw(w, sx, sy, sz, ex, ey, ez, outX, outY, outZ);
 }
 
+bool tileSlotTake(FfiItemStack* slots, size_t len, int32_t idx, int32_t amount, TileTaken* out) {
+    return ::tile_slot_take(slots, len, idx, amount, out);
+}
+
+bool tileSlotStore(FfiItemStack* slots, size_t len, int32_t idx, bool hasItem,
+                   int32_t itemId, int32_t count, int32_t damage, int32_t limit) {
+    return ::tile_slot_store(slots, len, idx, hasItem, itemId, count, damage, limit);
+}
+
+bool tileSlotsClear(FfiItemStack* slots, size_t len) {
+    return ::tile_slots_clear(slots, len);
+}
+
 bool entityResolveMove(const FfiAabb& box, double dx, double dy, double dz,
                        const FfiAabb* boxes, size_t numBoxes, ResolvedMove* out) {
     return ::alpha_entity_resolve_move(&box, dx, dy, dz, boxes, numBoxes, out);

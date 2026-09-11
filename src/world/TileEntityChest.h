@@ -32,40 +32,30 @@ public:
     }
 
     ItemStack* decrStackSize(int slot, int amount) override {
-        if (slot < 0 || slot >= CHEST_SIZE) return nullptr;
-        auto& ffi = state_.slots[slot];
-        if (ffi.item_id < 0) return nullptr;
-
-        if (ffi.stack_size <= amount) {
-            auto result = std::make_unique<ItemStack>(ffi.item_id, ffi.stack_size, ffi.item_damage);
-            ffi.item_id = -1;
-            ffi.stack_size = 0;
-            ffi.item_damage = 0;
-            markDirty();
-            return result.release();
+        RustBridge::TileTaken taken{};
+        if (!RustBridge::tileSlotTake(state_.slots, CHEST_SIZE, slot, amount, &taken)
+            || !taken.has_item) {
+            return nullptr;
         }
-
-        auto result = std::make_unique<ItemStack>(ffi.item_id, amount, ffi.item_damage);
-        ffi.stack_size -= amount;
         markDirty();
+        auto result = std::make_unique<ItemStack>(taken.item_id, taken.count, taken.damage);
         return result.release();
     }
 
     void setInventorySlotContents(int slot, ItemStack* stack) override {
         std::unique_ptr<ItemStack> guard(stack);
-        if (slot < 0 || slot >= CHEST_SIZE) {
-            return;
-        }
+        bool dirty;
         if (stack) {
-            RustBridge::FfiItemStack ffi;
-            std::memcpy(&ffi, stack, sizeof(ffi));
-            state_.slots[slot] = ffi;
-            if (state_.slots[slot].stack_size > getInventoryStackLimit())
-                state_.slots[slot].stack_size = getInventoryStackLimit();
+            dirty = RustBridge::tileSlotStore(state_.slots, CHEST_SIZE, slot, true,
+                                              stack->itemID, stack->stackSize, stack->itemDamage,
+                                              getInventoryStackLimit());
         } else {
-            state_.slots[slot] = RustBridge::FfiItemStack{0, 0, -1, 0};
+            dirty = RustBridge::tileSlotStore(state_.slots, CHEST_SIZE, slot, false,
+                                              0, 0, 0, getInventoryStackLimit());
         }
-        markDirty();
+        if (dirty) {
+            markDirty();
+        }
     }
 
     std::string getInvName() override { return "Chest"; }
@@ -77,10 +67,7 @@ public:
         TileEntity::readFromNBT(nbt);
 
         // Reset state
-        constexpr RustBridge::FfiItemStack emptySlot = {0, 0, -1, 0};
-        for (auto& slot : state_.slots) {
-            slot = emptySlot;
-        }
+        RustBridge::tileSlotsClear(state_.slots, CHEST_SIZE);
 
         // Read Items list from NBT (Java format)
         auto itemsTag = nbt.tags.find("Items");

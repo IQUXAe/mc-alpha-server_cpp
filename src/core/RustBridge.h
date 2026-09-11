@@ -198,6 +198,13 @@ bool itemBoatAim(float prevYaw, float yaw, float prevPitch, float pitch,
 bool itemBoatThrow(const ItemUseWorld* w, double sx, double sy, double sz,
                    double ex, double ey, double ez,
                    int32_t* outX, int32_t* outY, int32_t* outZ);
+
+// Tile-inventory slot ops (NBT/ItemStack stay in C++)
+using TileTaken = ::TileTaken;
+bool tileSlotTake(FfiItemStack* slots, size_t len, int32_t idx, int32_t amount, TileTaken* out);
+bool tileSlotStore(FfiItemStack* slots, size_t len, int32_t idx, bool hasItem,
+                   int32_t itemId, int32_t count, int32_t damage, int32_t limit);
+bool tileSlotsClear(FfiItemStack* slots, size_t len);
 void blockSandAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
 void blockSandNeighbor(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
 void blockSandTick(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);

@@ -1251,6 +1251,20 @@ bool item_boat_throw(const ItemUseWorld* world, double sx, double sy, double sz,
                      double ex, double ey, double ez,
                      int32_t* out_x, int32_t* out_y, int32_t* out_z);
 
+// Tile-inventory slot ops (tile_inventory.rs). NBT translation and
+// ItemStack allocation stay in C++.
+typedef struct TileTaken {
+    bool has_item;
+    int32_t item_id;
+    int32_t count;
+    int32_t damage;
+} TileTaken;
+
+bool tile_slot_take(FfiItemStack* slots, size_t len, int32_t idx, int32_t amount, TileTaken* out);
+bool tile_slot_store(FfiItemStack* slots, size_t len, int32_t idx, bool has_item,
+                     int32_t item_id, int32_t count, int32_t damage, int32_t limit);
+bool tile_slots_clear(FfiItemStack* slots, size_t len);
+
 // Entity physics kernel (entity_physics.rs). Pure collision/fall/push math;
 // the world-dependent half (box gathering, onFall, velocity) stays in C++.
 typedef struct FfiAabb {
