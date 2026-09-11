@@ -391,6 +391,7 @@ pub extern "C" fn alpha_zlib_compress(
 }
 
 pub mod block;
+pub mod block_ticks;
 pub mod byte_buffer;
 pub mod inventory;
 pub mod tile_entity_furnace;
@@ -404,6 +405,7 @@ pub mod caves;
 pub mod decorators;
 pub mod nbt;
 pub mod chunk_loader;
+pub mod chunk;
 pub mod network;
 pub mod generator;
 pub mod pathfinder;

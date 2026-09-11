@@ -24,37 +24,6 @@ static thread_local World* current_world = nullptr;
 
 namespace {
 
-constexpr int kPlantGrowthStageMax = 15;
-
-void scheduleBlockTick(World* world, Block* block, int x, int y, int z) {
-    if (!world || !block) {
-        return;
-    }
-    world->scheduleBlockUpdate(x, y, z, block->blockID, block->tickRate());
-}
-
-bool randomChance(World* world, int oneIn) {
-    if (!world || oneIn <= 1) {
-        return true;
-    }
-    std::uniform_int_distribution<int> dist(0, oneIn - 1);
-    return dist(world->rand) == 0;
-}
-
-bool isChunkAreaLoaded(World* world, int minX, int minZ, int maxX, int maxZ) {
-    if (!world) {
-        return false;
-    }
-    for (int chunkX = minX >> 4; chunkX <= maxX >> 4; ++chunkX) {
-        for (int chunkZ = minZ >> 4; chunkZ <= maxZ >> 4; ++chunkZ) {
-            if (!world->chunkExists(chunkX, chunkZ)) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
 void markBlocksForUpdate(World* world, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
     if (!world) {
         return;
@@ -73,36 +42,216 @@ void markBlocksForUpdate(World* world, int minX, int minY, int minZ, int maxX, i
 
 } // namespace
 
+// Block-behavior FFI trampolines: Rust owns the decisions (block_ticks.rs);
+// these feed it RNG draws, block storage/light, scheduling, and spawning.
+// current_world is set by BlockTickGuard for the duration of each call.
+namespace {
+
+struct BlockTickGuard {
+    explicit BlockTickGuard(World* world) { current_world = world; }
+    ~BlockTickGuard() { current_world = nullptr; }
+};
+
+extern "C" int32_t blockTickNextInt(int32_t bound) {
+    std::uniform_int_distribution<int> dist(0, bound - 1);
+    return dist(current_world->rand);
+}
+
+extern "C" float blockTickNextFloat01() {
+    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+    return dist(current_world->rand);
+}
+
+extern "C" uint64_t blockTickNextU64() {
+    return current_world->rand();
+}
+
+extern "C" uint8_t blockTickGetId(int32_t x, int32_t y, int32_t z) {
+    return current_world->getBlockId(x, y, z);
+}
+
+extern "C" uint8_t blockTickGetIdNc(int32_t x, int32_t y, int32_t z) {
+    return current_world->getBlockIdNoChunkLoad(x, y, z);
+}
+
+extern "C" uint8_t blockTickGetMeta(int32_t x, int32_t y, int32_t z) {
+    return current_world->getBlockMetadata(x, y, z);
+}
+
+extern "C" void blockTickSet(int32_t x, int32_t y, int32_t z, uint8_t id) {
+    current_world->setBlock(x, y, z, id);
+}
+
+extern "C" void blockTickSetMeta(int32_t x, int32_t y, int32_t z, uint8_t meta) {
+    current_world->setBlockMetadata(x, y, z, meta);
+}
+
+extern "C" void blockTickSetNotify(int32_t x, int32_t y, int32_t z, uint8_t id) {
+    current_world->setBlockWithNotify(x, y, z, id);
+}
+
+extern "C" void blockTickSetUpdate(int32_t x, int32_t y, int32_t z, uint8_t id) {
+    current_world->setBlockAndUpdate(x, y, z, id);
+}
+
+extern "C" void blockTickSetMetaNotify(int32_t x, int32_t y, int32_t z, uint8_t id, uint8_t meta) {
+    current_world->setBlockAndMetadataWithNotify(x, y, z, id, meta);
+}
+
+extern "C" void blockTickSetAndMeta(int32_t x, int32_t y, int32_t z, uint8_t id, uint8_t meta) {
+    current_world->setBlockAndMetadata(x, y, z, id, meta);
+}
+
+extern "C" int32_t blockTickLight(int32_t x, int32_t y, int32_t z) {
+    return current_world->getBlockLightValue(x, y, z);
+}
+
+extern "C" bool blockTickSeeSky(int32_t x, int32_t y, int32_t z) {
+    return current_world->canBlockSeeSky(x, y, z);
+}
+
+extern "C" bool blockTickAttachWorld(int32_t x, int32_t y, int32_t z) {
+    return current_world->doesBlockAllowAttachment(x, y, z);
+}
+
+extern "C" bool blockTickAttachTorch(int32_t x, int32_t y, int32_t z) {
+    int id = current_world->getBlockId(x, y, z);
+    if (id == 0) return false;
+    Block* b = Block::blocksList[id];
+    return b && b->blockMaterial->isSolid() && b->isCollidable();
+}
+
+extern "C" bool blockTickIsSolid(int32_t x, int32_t y, int32_t z) {
+    int id = current_world->getBlockId(x, y, z);
+    if (id == 0) return false;
+    Block* b = Block::blocksList[id];
+    return b && b->blockMaterial->isSolid();
+}
+
+extern "C" bool blockTickIsSolidNc(int32_t x, int32_t y, int32_t z) {
+    Material* material = current_world->getBlockMaterialNoChunkLoad(x, y, z);
+    return material && material->isSolid();
+}
+
+extern "C" bool blockTickWaterLava(int32_t x, int32_t y, int32_t z) {
+    int id = current_world->getBlockId(x, y, z);
+    if (id == 0 || id == 51) return true;
+    Block* b = Block::blocksList[id];
+    if (!b) return true;
+    return b->blockMaterial == &Material::water || b->blockMaterial == &Material::lava;
+}
+
+extern "C" bool blockTickIsWater(int32_t x, int32_t y, int32_t z) {
+    return current_world->getBlockMaterial(x, y, z) == &Material::water;
+}
+
+extern "C" bool blockTickRegistered(uint8_t id) {
+    return Block::blocksList[id] != nullptr;
+}
+
+extern "C" bool blockTickCollidableBox(int32_t x, int32_t y, int32_t z) {
+    const int aboveId = current_world->getBlockId(x, y, z);
+    Block* aboveBlock = (aboveId > 0 && aboveId < 256) ? Block::blocksList[aboveId] : nullptr;
+    return aboveBlock && aboveBlock->isCollidable()
+        && aboveBlock->getCollisionBoundingBoxFromPool(current_world, x, y, z).has_value();
+}
+
+extern "C" void blockTickSchedule(int32_t x, int32_t y, int32_t z, uint8_t id, int32_t delay) {
+    current_world->scheduleBlockUpdate(x, y, z, id, delay);
+}
+
+extern "C" void blockTickMark(int32_t x, int32_t y, int32_t z) {
+    current_world->markBlockNeedsUpdate(x, y, z);
+}
+
+extern "C" void blockTickNotifyNeighbors(int32_t x, int32_t y, int32_t z, uint8_t id) {
+    current_world->notifyBlocksOfNeighborChange(x, y, z, id);
+}
+
+extern "C" void blockTickSpawnDrop(int32_t itemId, int32_t count, int32_t damage,
+                                   double fx, double fy, double fz, double spread, double up) {
+    auto entity = std::make_unique<EntityItem>(itemId, count, damage);
+    entity->setPosition(fx, fy, fz);
+    entity->worldObj = current_world;
+    std::uniform_real_distribution<double> dist(-spread, spread);
+    entity->motionX = dist(current_world->rand);
+    entity->motionY = up;
+    entity->motionZ = dist(current_world->rand);
+    current_world->spawnEntityInWorld(std::move(entity));
+}
+
+extern "C" void blockTickSpawnFalling(uint8_t blockId, double fx, double fy, double fz) {
+    auto entity = std::make_unique<EntityFallingSand>(blockId, fx, fy, fz);
+    current_world->spawnEntityInWorld(std::move(entity));
+}
+
+extern "C" void blockTickDropOccupant(int32_t x, int32_t y, int32_t z) {
+    int id = current_world->getBlockId(x, y, z);
+    if (id > 0 && Block::blocksList[id]) {
+        Block::blocksList[id]->dropBlockAsItem(current_world, x, y, z, current_world->getBlockMetadata(x, y, z));
+    }
+}
+
+RustBridge::BlockTickWorld makeBlockTickWorld() {
+    RustBridge::BlockTickWorld w{};
+    w.next_int = &blockTickNextInt;
+    w.next_float01 = &blockTickNextFloat01;
+    w.next_u64 = &blockTickNextU64;
+    w.get_block_id = &blockTickGetId;
+    w.get_block_id_nc = &blockTickGetIdNc;
+    w.get_block_meta = &blockTickGetMeta;
+    w.set_block = &blockTickSet;
+    w.set_block_meta = &blockTickSetMeta;
+    w.set_block_notify = &blockTickSetNotify;
+    w.set_block_update = &blockTickSetUpdate;
+    w.set_block_meta_notify = &blockTickSetMetaNotify;
+    w.set_block_and_meta = &blockTickSetAndMeta;
+    w.get_block_light = &blockTickLight;
+    w.can_see_sky = &blockTickSeeSky;
+    w.attach_world = &blockTickAttachWorld;
+    w.attach_torch = &blockTickAttachTorch;
+    w.is_solid = &blockTickIsSolid;
+    w.is_solid_nc = &blockTickIsSolidNc;
+    w.is_water_or_lava = &blockTickWaterLava;
+    w.is_water = &blockTickIsWater;
+    w.block_registered = &blockTickRegistered;
+    w.collidable_box = &blockTickCollidableBox;
+    w.schedule_update = &blockTickSchedule;
+    w.mark_update = &blockTickMark;
+    w.notify_neighbors = &blockTickNotifyNeighbors;
+    w.spawn_drop = &blockTickSpawnDrop;
+    w.spawn_falling = &blockTickSpawnFalling;
+    w.drop_occupant = &blockTickDropOccupant;
+    return w;
+}
+
+const RustBridge::BlockTickWorld& blockTickWorld() {
+    static const RustBridge::BlockTickWorld table = makeBlockTickWorld();
+    return table;
+}
+
+} // namespace
+
 class BlockSand : public Block {
 public:
     explicit BlockSand(int id) : Block(id) {}
 
     void onBlockAdded(World* world, int x, int y, int z) override {
-        world->scheduleBlockUpdate(x, y, z, blockID, tickRate());
+        BlockTickGuard guard(world);
+        RustBridge::blockSandAdded(&blockTickWorld(), blockID, x, y, z);
     }
 
     void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
-        world->scheduleBlockUpdate(x, y, z, blockID, tickRate());
+        BlockTickGuard guard(world);
+        RustBridge::blockSandNeighbor(&blockTickWorld(), blockID, x, y, z);
     }
 
     void updateTick(World* world, int x, int y, int z) override {
-        if (y >= 0 && canFallBelow(world, x, y - 1, z)) {
-            world->setBlockAndUpdate(x, y, z, 0);
-            auto entity = std::make_unique<EntityFallingSand>(blockID, x + 0.5, y + 0.5, z + 0.5);
-            world->spawnEntityInWorld(std::move(entity));
-        }
+        BlockTickGuard guard(world);
+        RustBridge::blockSandTick(&blockTickWorld(), blockID, x, y, z);
     }
 
     int tickRate() const override { return 3; }
-
-private:
-    static bool canFallBelow(World* world, int x, int y, int z) {
-        int id = world->getBlockId(x, y, z);
-        if (id == 0 || id == 51) return true; // air or fire
-        Block* b = Block::blocksList[id];
-        if (!b) return true;
-        return b->blockMaterial == &Material::water || b->blockMaterial == &Material::lava;
-    }
 };
 
 class BlockFluid : public Block {
@@ -118,86 +267,29 @@ public:
     }
 
     void onBlockAdded(World* world, int x, int y, int z) override {
-        world->scheduleBlockUpdate(x, y, z, blockID, tickRate());
+        BlockTickGuard guard(world);
+        RustBridge::blockFluidAdded(&blockTickWorld(), blockID, tickRate(), x, y, z);
     }
 
     void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
-        world->scheduleBlockUpdate(x, y, z, blockID, tickRate());
+        BlockTickGuard guard(world);
+        RustBridge::blockFluidNeighbor(&blockTickWorld(), blockID, tickRate(), x, y, z);
     }
 
     void updateTick(World* world, int x, int y, int z) override {
-        // Lava creates fire on adjacent burnable blocks (Java BlockStationary)
-        if (blockMaterial == &Material::lava) {
-            if (world->getBlockMetadata(x, y, z) == 0) { // source block or flowing
-                for (int side = 0; side < 6; ++side) {
-                    static const int dx[6] = {1,-1,0,0,0,0};
-                    static const int dy[6] = {0,0,1,-1,0,0};
-                    static const int dz[6] = {0,0,0,0,1,-1};
-                    int nx = x + dx[side], ny = y + dy[side], nz = z + dz[side];
-                    int nid = world->getBlockId(nx, ny, nz);
-                    if (nid == 0 && std::rand() % 4 == 0) {
-                        // Check if block below allows attachment or is burnable
-                        if (world->doesBlockAllowAttachment(nx, ny - 1, nz)
-                            || world->getBlockId(nx, ny - 1, nz) == 87) {
-                            world->setBlockWithNotify(nx, ny, nz, 51);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Very simplified fluid spreading logic
-        int metadata = world->getBlockMetadata(x, y, z);
-        if (metadata >= 8) return; // fully spread
-
-        // Try to flow down first
-        if (canFlowInto(world, x, y - 1, z)) {
-            world->setBlockAndMetadataWithNotify(x, y - 1, z, blockID, 8); // Flowing down
-        } else if (metadata < 7) {
-            // Flow sideways
-            int newMeta = metadata + 1;
-            if (blockMaterial == &Material::lava) newMeta = metadata + 2; // lava flows slower/less
-            
-            if (newMeta < 8) {
-                flowIntoBlock(world, x - 1, y, z, newMeta);
-                flowIntoBlock(world, x + 1, y, z, newMeta);
-                flowIntoBlock(world, x, y, z - 1, newMeta);
-                flowIntoBlock(world, x, y, z + 1, newMeta);
-            }
-        }
+        BlockTickGuard guard(world);
+        RustBridge::blockFluidTick(&blockTickWorld(), blockID, blockMaterial == &Material::lava, x, y, z);
     }
 
     int tickRate() const override {
         return blockMaterial == &Material::water ? 5 : 30;
     }
-    
+
     std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World* world, int x, int y, int z) override {
         return std::nullopt; // Liquids have no collision box
     }
 
     bool isCollidable() const override { return false; }
-
-private:
-    bool canFlowInto(World* world, int x, int y, int z) {
-        int id = world->getBlockId(x, y, z);
-        if (id == 0) return true;
-        if (id == 8 || id == 9 || id == 10 || id == 11) return false; // Don't flow into other liquids
-        // Simplified: flow into passable blocks
-        if (id == 37 || id == 38 || id == 39 || id == 40 || id == 50 || id == 51 || id == 55 || id == 59 || id == 83 || id == 78) return true;
-        return false;
-    }
-
-    void flowIntoBlock(World* world, int x, int y, int z, int newMeta) {
-        if (canFlowInto(world, x, y, z)) {
-            int currentId = world->getBlockId(x, y, z);
-            if (currentId != 0) {
-                if (Block::blocksList[currentId]) {
-                    Block::blocksList[currentId]->dropBlockAsItem(world, x, y, z, world->getBlockMetadata(x, y, z));
-                }
-            }
-            world->setBlockAndMetadataWithNotify(x, y, z, blockID, newMeta);
-        }
-    }
 };
 
 class BlockFlower : public Block {
@@ -205,21 +297,17 @@ public:
     explicit BlockFlower(int id) : Block(id) {} // props from Rust data table
     bool allowsAttachment() const override { return false; }
     bool canBlockStay(World* world, int x, int y, int z) const override {
-        int below = world->getBlockId(x, y - 1, z);
-        return (world->getBlockLightValue(x, y, z) >= 8 || world->canBlockSeeSky(x, y, z))
-            && (below == 2 || below == 3 || below == 60);
+        BlockTickGuard guard(world);
+        return RustBridge::blockFlowerCanStay(&blockTickWorld(), x, y, z);
     }
     void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
-        if (!canBlockStay(world, x, y, z)) {
-            dropBlockAsItem(world, x, y, z, 0);
-            world->setBlockAndUpdate(x, y, z, 0);
-        }
+        BlockTickGuard guard(world);
+        RustBridge::blockFlowerNeighbor(&blockTickWorld(), idDropped(0), quantityDropped(), damageDropped(0), x, y, z);
     }
     void updateTick(World* world, int x, int y, int z) override {
-        if (!canBlockStay(world, x, y, z)) {
-            dropBlockAsItem(world, x, y, z, world->getBlockMetadata(x, y, z));
-            world->setBlockWithNotify(x, y, z, 0);
-        }
+        BlockTickGuard guard(world);
+        RustBridge::blockFlowerTick(&blockTickWorld(), idDropped(world->getBlockMetadata(x, y, z)),
+                                    quantityDropped(), damageDropped(world->getBlockMetadata(x, y, z)), x, y, z);
     }
     bool isReplaceable() const override { return true; }
     std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World*, int, int, int) override { return std::nullopt; }
@@ -233,24 +321,8 @@ public:
         if (!world || !Item::seeds) {
             return;
         }
-
-        std::uniform_real_distribution<float> chanceDist(0.0f, 1.0f);
-        if (chanceDist(world->rand) > chance) {
-            return;
-        }
-
-        if (!randomChance(world, 8)) {
-            return;
-        }
-
-        auto entity = std::make_unique<EntityItem>(Item::seeds->itemID, 1, 0);
-        entity->setPosition(x + 0.5, y + 0.5, z + 0.5);
-        entity->worldObj = world;
-        std::uniform_real_distribution<double> velocityDist(-0.05, 0.05);
-        entity->motionX = velocityDist(world->rand);
-        entity->motionY = 0.15;
-        entity->motionZ = velocityDist(world->rand);
-        world->spawnEntityInWorld(std::move(entity));
+        BlockTickGuard guard(world);
+        RustBridge::blockTallgrassDrop(&blockTickWorld(), Item::seeds->itemID, chance, x, y, z);
     }
 
     int quantityDropped() const override { return 0; }
@@ -262,14 +334,12 @@ public:
     explicit BlockMushroom(int id) : Block(id) {}
     bool allowsAttachment() const override { return false; }
     bool canBlockStay(World* world, int x, int y, int z) const override {
-        int below = world->getBlockId(x, y - 1, z);
-        return below > 0 && Block::blocksList[below] != nullptr;
+        BlockTickGuard guard(world);
+        return RustBridge::blockMushroomCanStay(&blockTickWorld(), x, y, z);
     }
     void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
-        if (!canBlockStay(world, x, y, z)) {
-            dropBlockAsItem(world, x, y, z, 0);
-            world->setBlockAndUpdate(x, y, z, 0);
-        }
+        BlockTickGuard guard(world);
+        RustBridge::blockMushroomNeighbor(&blockTickWorld(), idDropped(0), quantityDropped(), damageDropped(0), x, y, z);
     }
     bool isReplaceable() const override { return true; }
     std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World*, int, int, int) override { return std::nullopt; }
@@ -280,22 +350,11 @@ public:
     explicit BlockTorch(int id) : Block(id) {}
     bool allowsAttachment() const override { return false; }
 
-    // Java: doesBlockAllowAttachment = block is solid and opaque
-    static bool doesBlockAllowAttachment(World* world, int x, int y, int z) {
-        int id = world->getBlockId(x, y, z);
-        if (id == 0) return false;
-        Block* b = Block::blocksList[id];
-        return b && b->blockMaterial->isSolid() && b->isCollidable();
-    }
-
     // Java BlockTorch.onBlockPlaced: sets metadata based on which face was clicked
     // side: 1=bottom(floor), 2=north(+z), 3=south(-z), 4=west(+x), 5=east(-x)
     void onBlockPlaced(World* world, int x, int y, int z, int side) override {
-        uint8_t meta = 5; // default: floor
-        if (side == 2 && doesBlockAllowAttachment(world, x, y, z + 1)) meta = 4;
-        else if (side == 3 && doesBlockAllowAttachment(world, x, y, z - 1)) meta = 3;
-        else if (side == 4 && doesBlockAllowAttachment(world, x + 1, y, z)) meta = 2;
-        else if (side == 5 && doesBlockAllowAttachment(world, x - 1, y, z)) meta = 1;
+        BlockTickGuard guard(world);
+        uint8_t meta = RustBridge::blockTorchAttachMeta(&blockTickWorld(), side, x, y, z);
         world->setBlockAndMetadata(x, y, z, blockID, meta);
         // markBlockNeedsUpdate is called by handlePlace after onBlockPlaced returns
     }
@@ -305,36 +364,20 @@ public:
         // onBlockPlaced yet. This handles world-gen torches and chunk loading.
         // When placed by player, onBlockPlaced sets metadata after us —
         // so we must NOT send markBlockNeedsUpdate here to avoid the flicker.
-        if (world->getBlockMetadata(x, y, z) != 0) return;
-        uint8_t meta = 0;
-        if      (doesBlockAllowAttachment(world, x - 1, y, z)) meta = 1;
-        else if (doesBlockAllowAttachment(world, x + 1, y, z)) meta = 2;
-        else if (doesBlockAllowAttachment(world, x, y, z - 1)) meta = 3;
-        else if (doesBlockAllowAttachment(world, x, y, z + 1)) meta = 4;
-        else if (doesBlockAllowAttachment(world, x, y - 1, z)) meta = 5;
-        if (meta != 0)
-            world->setBlockAndMetadata(x, y, z, blockID, meta);
+        BlockTickGuard guard(world);
+        RustBridge::blockTorchAdded(&blockTickWorld(), blockID, x, y, z);
         // No markBlockNeedsUpdate — setBlockWithNotify calls it after us with final metadata
     }
 
     bool canBlockStay(World* world, int x, int y, int z) const override {
-        return doesBlockAllowAttachment(world, x-1, y, z) || doesBlockAllowAttachment(world, x+1, y, z)
-            || doesBlockAllowAttachment(world, x, y, z-1) || doesBlockAllowAttachment(world, x, y, z+1)
-            || doesBlockAllowAttachment(world, x, y-1, z);
+        BlockTickGuard guard(world);
+        return RustBridge::blockTorchCanStay(&blockTickWorld(), x, y, z);
     }
 
     void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
-        uint8_t meta = world->getBlockMetadata(x, y, z);
-        bool detach = false;
-        if (meta == 1 && !doesBlockAllowAttachment(world, x - 1, y, z)) detach = true;
-        if (meta == 2 && !doesBlockAllowAttachment(world, x + 1, y, z)) detach = true;
-        if (meta == 3 && !doesBlockAllowAttachment(world, x, y, z - 1)) detach = true;
-        if (meta == 4 && !doesBlockAllowAttachment(world, x, y, z + 1)) detach = true;
-        if (meta == 5 && !doesBlockAllowAttachment(world, x, y - 1, z)) detach = true;
-        if (detach) {
-            dropBlockAsItem(world, x, y, z, meta);
-            world->setBlockWithNotify(x, y, z, 0);
-        }
+        BlockTickGuard guard(world);
+        const uint8_t meta = world->getBlockMetadata(x, y, z);
+        RustBridge::blockTorchNeighbor(&blockTickWorld(), idDropped(meta), quantityDropped(), damageDropped(meta), x, y, z);
     }
 
     bool isReplaceable() const override { return true; }
@@ -346,55 +389,22 @@ public:
     explicit BlockCactus(int id) : Block(id) {}
     bool allowsAttachment() const override { return false; }
     void onBlockAdded(World* world, int x, int y, int z) override {
-        scheduleBlockTick(world, this, x, y, z);
+        BlockTickGuard guard(world);
+        RustBridge::blockCactusAdded(&blockTickWorld(), blockID, x, y, z);
     }
     void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
-        if (!canBlockStay(world, x, y, z)) {
-            dropBlockAsItem(world, x, y, z, world->getBlockMetadata(x, y, z));
-            world->setBlockWithNotify(x, y, z, 0);
-            return;
-        }
-        scheduleBlockTick(world, this, x, y, z);
+        BlockTickGuard guard(world);
+        const uint8_t meta = world->getBlockMetadata(x, y, z);
+        RustBridge::blockCactusNeighbor(&blockTickWorld(), blockID, idDropped(meta), quantityDropped(), damageDropped(meta), x, y, z);
     }
     bool canBlockStay(World* world, int x, int y, int z) const override {
-        auto solid = [&](int bx, int by, int bz) {
-            int id = world->getBlockId(bx, by, bz);
-            if (id == 0) return false;
-            Block* b = Block::blocksList[id];
-            return b && b->blockMaterial->isSolid();
-        };
-        if (solid(x-1,y,z) || solid(x+1,y,z) || solid(x,y,z-1) || solid(x,y,z+1)) return false;
-        int below = world->getBlockId(x, y-1, z);
-        return below == 12 || below == 81;
+        BlockTickGuard guard(world);
+        return RustBridge::blockCactusCanStay(&blockTickWorld(), x, y, z);
     }
     void updateTick(World* world, int x, int y, int z) override {
-        if (!canBlockStay(world, x, y, z)) {
-            dropBlockAsItem(world, x, y, z, world->getBlockMetadata(x, y, z));
-            world->setBlockWithNotify(x, y, z, 0);
-            return;
-        }
-
-        if (world->getBlockId(x, y + 1, z) != 0) {
-            scheduleBlockTick(world, this, x, y, z);
-            return;
-        }
-
-        int height = 1;
-        while (world->getBlockId(x, y - height, z) == blockID) {
-            ++height;
-        }
-
-        if (height < 3) {
-            uint8_t age = world->getBlockMetadata(x, y, z);
-            if (age >= kPlantGrowthStageMax) {
-                world->setBlockWithNotify(x, y + 1, z, blockID);
-                world->setBlockMetadata(x, y, z, 0);
-            } else {
-                world->setBlockMetadata(x, y, z, static_cast<uint8_t>(age + 1));
-            }
-        }
-
-        scheduleBlockTick(world, this, x, y, z);
+        BlockTickGuard guard(world);
+        const uint8_t meta = world->getBlockMetadata(x, y, z);
+        RustBridge::blockCactusTick(&blockTickWorld(), blockID, idDropped(meta), quantityDropped(), damageDropped(meta), x, y, z);
     }
     int tickRate() const override { return 20; }
 };
@@ -404,53 +414,20 @@ public:
     explicit BlockReed(int id) : Block(id) {}
     bool allowsAttachment() const override { return false; }
     void onBlockAdded(World* world, int x, int y, int z) override {
-        scheduleBlockTick(world, this, x, y, z);
+        BlockTickGuard guard(world);
+        RustBridge::blockReedAdded(&blockTickWorld(), blockID, x, y, z);
     }
     bool canBlockStay(World* world, int x, int y, int z) const override {
-        int below = world->getBlockId(x, y-1, z);
-        if (below == 83) return true;
-        if (below != 2 && below != 3 && below != 12) return false;
-        return world->getBlockId(x-1,y-1,z) == 8 || world->getBlockId(x-1,y-1,z) == 9
-            || world->getBlockId(x+1,y-1,z) == 8 || world->getBlockId(x+1,y-1,z) == 9
-            || world->getBlockId(x,y-1,z-1) == 8 || world->getBlockId(x,y-1,z-1) == 9
-            || world->getBlockId(x,y-1,z+1) == 8 || world->getBlockId(x,y-1,z+1) == 9;
+        BlockTickGuard guard(world);
+        return RustBridge::blockReedCanStay(&blockTickWorld(), x, y, z);
     }
     void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
-        if (!canBlockStay(world, x, y, z)) {
-            dropBlockAsItem(world, x, y, z, 0);
-            world->setBlockWithNotify(x, y, z, 0);
-            return;
-        }
-        scheduleBlockTick(world, this, x, y, z);
+        BlockTickGuard guard(world);
+        RustBridge::blockReedNeighbor(&blockTickWorld(), blockID, idDropped(0), quantityDropped(), damageDropped(0), x, y, z);
     }
     void updateTick(World* world, int x, int y, int z) override {
-        if (!canBlockStay(world, x, y, z)) {
-            dropBlockAsItem(world, x, y, z, 0);
-            world->setBlockWithNotify(x, y, z, 0);
-            return;
-        }
-
-        if (world->getBlockId(x, y + 1, z) != 0) {
-            scheduleBlockTick(world, this, x, y, z);
-            return;
-        }
-
-        int height = 1;
-        while (world->getBlockId(x, y - height, z) == blockID) {
-            ++height;
-        }
-
-        if (height < 3) {
-            uint8_t age = world->getBlockMetadata(x, y, z);
-            if (age >= kPlantGrowthStageMax) {
-                world->setBlockWithNotify(x, y + 1, z, blockID);
-                world->setBlockMetadata(x, y, z, 0);
-            } else {
-                world->setBlockMetadata(x, y, z, static_cast<uint8_t>(age + 1));
-            }
-        }
-
-        scheduleBlockTick(world, this, x, y, z);
+        BlockTickGuard guard(world);
+        RustBridge::blockReedTick(&blockTickWorld(), blockID, idDropped(0), quantityDropped(), damageDropped(0), x, y, z);
     }
     int tickRate() const override { return 20; }
     bool isReplaceable() const override { return true; }
@@ -529,137 +506,31 @@ public:
     explicit BlockLeaves(int id) : Block(id) {}
     bool allowsAttachment() const override { return false; }
     void onBlockAdded(World* world, int x, int y, int z) override {
-        scheduleBlockTick(world, this, x, y, z);
+        BlockTickGuard guard(world);
+        RustBridge::blockLeavesAdded(&blockTickWorld(), blockID, x, y, z);
     }
     void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
-        field_663_c = 0;
-        updateLeafDistance(world, x, y, z);
+        BlockTickGuard guard(world);
+        RustBridge::blockLeavesNeighbor(&blockTickWorld(), blockID, blockID, &field_663_c, x, y, z);
     }
     void updateTick(World* world, int x, int y, int z) override {
-        if (!world) {
-            return;
-        }
-
-        int metadata = world->getBlockMetadata(x, y, z);
-        if (metadata == 0) {
-            field_663_c = 0;
-            updateLeafDistance(world, x, y, z);
-        } else if (metadata == 1) {
-            dropBlockAsItem(world, x, y, z, metadata);
-            world->setBlockWithNotify(x, y, z, 0);
-        } else if (randomChance(world, 10)) {
-            updateLeafDistance(world, x, y, z);
-        }
+        BlockTickGuard guard(world);
+        const uint8_t meta = world->getBlockMetadata(x, y, z);
+        RustBridge::blockLeavesTick(&blockTickWorld(), blockID, blockID, idDropped(meta), quantityDropped(), damageDropped(meta), &field_663_c, x, y, z);
     }
     int tickRate() const override { return 40; }
     void dropBlockAsItemWithChance(World* world, int x, int y, int z, int metadata, float chance) override {
         if (!world || !Item::itemsList[6]) {
             return;
         }
-
-        std::uniform_real_distribution<float> chanceDist(0.0f, 1.0f);
-        if (chanceDist(world->rand) > chance) {
-            return;
-        }
-
-        if (!randomChance(world, 20)) {
-            return;
-        }
-
-        auto entity = std::make_unique<EntityItem>(6, 1, 0);
-        entity->setPosition(x + 0.5, y + 0.5, z + 0.5);
-        entity->worldObj = world;
-        std::uniform_real_distribution<double> velocityDist(-0.05, 0.05);
-        entity->motionX = velocityDist(world->rand);
-        entity->motionY = 0.15;
-        entity->motionZ = velocityDist(world->rand);
-        world->spawnEntityInWorld(std::move(entity));
+        BlockTickGuard guard(world);
+        RustBridge::blockLeavesDrop(&blockTickWorld(), 6, chance, x, y, z);
     }
     int quantityDropped() const override { return 0; }
     int idDropped(int metadata) const override { return 0; }
 
 private:
     int field_663_c = 0;
-
-    void updateLeafDistance(World* world, int x, int y, int z) {
-        if (!world || field_663_c++ >= 100) {
-            return;
-        }
-
-        // FIX 2: In Alpha 1.2.6, leaves on solid ground don't decay!
-        int candidate = 0;
-        Material* materialBelow = world->getBlockMaterialNoChunkLoad(x, y - 1, z);
-        if (materialBelow && materialBelow->isSolid()) {
-            candidate = 16;
-        }
-
-        int metadata = world->getBlockMetadata(x, y, z);
-        if (metadata == 0) {
-            metadata = 1;
-            world->setBlockMetadata(x, y, z, 1);
-            world->markBlockNeedsUpdate(x, y, z);
-        }
-
-        // Check neighbors (Notch forgot y+1, but we keep it for canopy reliability)
-        candidate = propagateLeafDistance(world, x - 1, y, z, candidate);
-        candidate = propagateLeafDistance(world, x + 1, y, z, candidate);
-        candidate = propagateLeafDistance(world, x, y - 1, z, candidate);
-        candidate = propagateLeafDistance(world, x, y + 1, z, candidate);
-        candidate = propagateLeafDistance(world, x, y, z - 1, candidate);
-        candidate = propagateLeafDistance(world, x, y, z + 1, candidate);
-
-        int newMetadata = candidate - 1;
-        if (newMetadata < 10) {
-            newMetadata = 1; // Charge depleted, order to decay
-        }
-
-        if (newMetadata != metadata) {
-            world->setBlockMetadata(x, y, z, static_cast<uint8_t>(newMetadata));
-            world->markBlockNeedsUpdate(x, y, z); // Packet to client
-            
-            // FIX 1: CRITICAL!
-            // Force neighbors to recalculate their light/life,
-            // otherwise the flood-fill chain reaction stops here!
-            world->notifyBlocksOfNeighborChange(x, y, z, blockID);
-
-            // Specific decay propagation when losing connection to log
-            updateNeighborLeafDistance(world, x - 1, y, z, metadata);
-            updateNeighborLeafDistance(world, x + 1, y, z, metadata);
-            updateNeighborLeafDistance(world, x, y - 1, z, metadata);
-            updateNeighborLeafDistance(world, x, y + 1, z, metadata);
-            updateNeighborLeafDistance(world, x, y, z - 1, metadata);
-            updateNeighborLeafDistance(world, x, y, z + 1, metadata);
-        }
-    }
-
-    int propagateLeafDistance(World* world, int x, int y, int z, int current) const {
-        const int blockId = world->getBlockIdNoChunkLoad(x, y, z);
-        
-        if (blockId == 17) { // 17 = Log
-            return 16; // Maximum life charge
-        }
-        
-        if (blockId == blockID) { // Neighboring leaf
-            const int metadata = world->getBlockMetadata(x, y, z);
-            // If neighbor is alive and its charge is greater than ours, adopt it
-            if (metadata != 0 && metadata > current) {
-                return metadata;
-            }
-        }
-
-        return current;
-    }
-
-    void updateNeighborLeafDistance(World* world, int x, int y, int z, int previousMetadata) {
-        if (world->getBlockIdNoChunkLoad(x, y, z) != blockID) {
-            return;
-        }
-
-        const int metadata = world->getBlockMetadata(x, y, z);
-        if (metadata != 0 && metadata == previousMetadata - 1) {
-            updateLeafDistance(world, x, y, z);
-        }
-    }
 };
 
 class BlockSapling : public Block {
@@ -668,45 +539,34 @@ public:
     bool allowsAttachment() const override { return false; }
 
     void onBlockAdded(World* world, int x, int y, int z) override {
-        scheduleBlockTick(world, this, x, y, z);
+        BlockTickGuard guard(world);
+        RustBridge::blockSaplingAdded(&blockTickWorld(), blockID, x, y, z);
     }
 
     bool canBlockStay(World* world, int x, int y, int z) const override {
-        const int below = world->getBlockId(x, y - 1, z);
-        return (world->getBlockLightValue(x, y, z) >= 8 || world->canBlockSeeSky(x, y, z))
-            && (below == 2 || below == 3 || below == 60);
+        BlockTickGuard guard(world);
+        return RustBridge::blockSaplingCanStay(&blockTickWorld(), x, y, z);
     }
 
     void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
-        if (!canBlockStay(world, x, y, z)) {
-            dropBlockAsItem(world, x, y, z, 0);
-            world->setBlockWithNotify(x, y, z, 0);
-            return;
-        }
-        scheduleBlockTick(world, this, x, y, z);
+        BlockTickGuard guard(world);
+        const uint8_t meta = world->getBlockMetadata(x, y, z);
+        RustBridge::blockSaplingNeighbor(&blockTickWorld(), blockID, idDropped(meta), quantityDropped(), damageDropped(meta), x, y, z);
     }
 
     void updateTick(World* world, int x, int y, int z) override {
-        if (!canBlockStay(world, x, y, z)) {
-            dropBlockAsItem(world, x, y, z, 0);
-            world->setBlockWithNotify(x, y, z, 0);
+        uint8_t meta = world->getBlockMetadata(x, y, z);
+        RustBridge::TickAction action;
+        {
+            BlockTickGuard guard(world);
+            action = RustBridge::blockSaplingTick(&blockTickWorld(), blockID, idDropped(meta),
+                                                  quantityDropped(), damageDropped(meta), x, y, z);
+        }
+        if (action.kind != 1) {
             return;
         }
 
-        if (world->getBlockLightValue(x, y + 1, z) < 9 || !randomChance(world, 5)) {
-            scheduleBlockTick(world, this, x, y, z);
-            return;
-        }
-
-        const uint8_t metadata = world->getBlockMetadata(x, y, z);
-        if (metadata < 15) {
-            world->setBlockMetadata(x, y, z, static_cast<uint8_t>(metadata + 1));
-            world->markBlockNeedsUpdate(x, y, z);
-            scheduleBlockTick(world, this, x, y, z);
-            return;
-        }
-
-        int64_t treeSeed = static_cast<int64_t>(world->rand());
+        const int64_t treeSeed = static_cast<int64_t>(action.seed);
         world->setBlockWithNotify(x, y, z, 0);
 
         current_world = world;
@@ -737,8 +597,11 @@ public:
         };
 
         bool generated = false;
-        if (randomChance(world, 10)) {
-            generated = alpha_generate_big_tree(accessor, treeSeed, x, y, z);
+        {
+            std::uniform_int_distribution<int> bigTreeRoll(0, 9);
+            if (bigTreeRoll(world->rand) == 0) {
+                generated = alpha_generate_big_tree(accessor, treeSeed, x, y, z);
+            }
         }
         if (!generated) {
             generated = alpha_generate_tree(accessor, treeSeed, x, y, z);
@@ -765,66 +628,27 @@ public:
     bool allowsAttachment() const override { return false; }
 
     void onBlockAdded(World* world, int x, int y, int z) override {
-        scheduleBlockTick(world, this, x, y, z);
+        BlockTickGuard guard(world);
+        RustBridge::blockCropsAdded(&blockTickWorld(), blockID, x, y, z);
     }
 
     bool canBlockStay(World* world, int x, int y, int z) const override {
-        return world->getBlockId(x, y - 1, z) == 60
-            && (world->getBlockLightValue(x, y, z) >= 8 || world->canBlockSeeSky(x, y, z));
+        BlockTickGuard guard(world);
+        return RustBridge::blockCropsCanStay(&blockTickWorld(), blockID, x, y, z);
     }
 
     void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
-        if (!canBlockStay(world, x, y, z)) {
-            dropBlockAsItemWithChance(world, x, y, z, world->getBlockMetadata(x, y, z), 1.0f);
-            world->setBlockWithNotify(x, y, z, 0);
-            return;
-        }
-        scheduleBlockTick(world, this, x, y, z);
+        BlockTickGuard guard(world);
+        RustBridge::blockCropsNeighbor(&blockTickWorld(), blockID, blockID,
+                                       Item::wheat ? Item::wheat->itemID : 0,
+                                       Item::seeds ? Item::seeds->itemID : 0, x, y, z);
     }
 
     void updateTick(World* world, int x, int y, int z) override {
-        if (!canBlockStay(world, x, y, z)) {
-            dropBlockAsItemWithChance(world, x, y, z, world->getBlockMetadata(x, y, z), 1.0f);
-            world->setBlockWithNotify(x, y, z, 0);
-            return;
-        }
-
-        if (world->getBlockLightValue(x, y + 1, z) >= 9) {
-            const int metadata = world->getBlockMetadata(x, y, z);
-            if (metadata < 7) {
-                float growthRate = 1.0f;
-                for (int dx = -1; dx <= 1; ++dx) {
-                    for (int dz = -1; dz <= 1; ++dz) {
-                        float soilBonus = 0.0f;
-                        if (world->getBlockId(x + dx, y - 1, z + dz) == 60) {
-                            soilBonus = (dx == 0 && dz == 0) ? 3.0f : 1.0f;
-                            if (dx != 0 || dz != 0) {
-                                soilBonus /= 4.0f;
-                            }
-                        }
-                        growthRate += soilBonus;
-                    }
-                }
-
-                const bool sameRow = world->getBlockId(x - 1, y, z) == blockID || world->getBlockId(x + 1, y, z) == blockID;
-                const bool sameColumn = world->getBlockId(x, y, z - 1) == blockID || world->getBlockId(x, y, z + 1) == blockID;
-                const bool sameDiagonal =
-                    world->getBlockId(x - 1, y, z - 1) == blockID || world->getBlockId(x + 1, y, z - 1) == blockID ||
-                    world->getBlockId(x + 1, y, z + 1) == blockID || world->getBlockId(x - 1, y, z + 1) == blockID;
-                if (sameDiagonal || (sameRow && sameColumn)) {
-                    growthRate /= 2.0f;
-                }
-
-                const int growthChance = std::max(2, static_cast<int>(100.0f / growthRate));
-                std::uniform_int_distribution<int> dist(0, growthChance - 1);
-                if (dist(world->rand) == 0) {
-                    world->setBlockMetadata(x, y, z, static_cast<uint8_t>(metadata + 1));
-                    world->markBlockNeedsUpdate(x, y, z);
-                }
-            }
-        }
-
-        scheduleBlockTick(world, this, x, y, z);
+        BlockTickGuard guard(world);
+        RustBridge::blockCropsTick(&blockTickWorld(), blockID, blockID,
+                                   Item::wheat ? Item::wheat->itemID : 0,
+                                   Item::seeds ? Item::seeds->itemID : 0, x, y, z);
     }
 
     int tickRate() const override { return 20; }
@@ -833,33 +657,9 @@ public:
         if (!world || !Item::seeds || !Item::wheat) {
             return;
         }
-
-        std::uniform_real_distribution<float> chanceDist(0.0f, 1.0f);
-        if (chanceDist(world->rand) > chance) {
-            return;
-        }
-
-        auto spawnDrop = [&](int itemId, int count) {
-            if (count <= 0) {
-                return;
-            }
-            auto entity = std::make_unique<EntityItem>(itemId, count, 0);
-            entity->setPosition(x + 0.5, y + 0.5, z + 0.5);
-            entity->worldObj = world;
-            std::uniform_real_distribution<double> velocityDist(-0.05, 0.05);
-            entity->motionX = velocityDist(world->rand);
-            entity->motionY = 0.15;
-            entity->motionZ = velocityDist(world->rand);
-            world->spawnEntityInWorld(std::move(entity));
-        };
-
-        if (metadata >= 7) {
-            spawnDrop(Item::wheat->itemID, 1);
-            std::uniform_int_distribution<int> seedsDist(0, 2);
-            spawnDrop(Item::seeds->itemID, 1 + seedsDist(world->rand));
-        } else {
-            spawnDrop(Item::seeds->itemID, 1);
-        }
+        BlockTickGuard guard(world);
+        RustBridge::blockCropsDrop(&blockTickWorld(), Item::wheat->itemID, Item::seeds->itemID,
+                                   x, y, z, metadata, chance);
     }
 
     int quantityDropped() const override { return 0; }
@@ -874,7 +674,8 @@ public:
     bool allowsAttachment() const override { return false; }
 
     void onBlockAdded(World* world, int x, int y, int z) override {
-        scheduleBlockTick(world, this, x, y, z);
+        BlockTickGuard guard(world);
+        RustBridge::blockSoilAdded(&blockTickWorld(), blockID, x, y, z);
     }
 
     std::optional<AxisAlignedBB> getCollisionBoundingBoxFromPool(World*, int x, int y, int z) override {
@@ -885,77 +686,27 @@ public:
         if (!world) {
             return;
         }
-
-        if (randomChance(world, 5)) {
-            if (hasNearbyWater(world, x, y, z)) {
-                setMoisture(world, x, y, z, 7);
-            } else {
-                const int moisture = world->getBlockMetadata(x, y, z);
-                if (moisture > 0) {
-                    setMoisture(world, x, y, z, moisture - 1);
-                } else if (!hasCrops(world, x, y, z)) {
-                    world->setBlockWithNotify(x, y, z, 3);
-                    return;
-                }
-            }
-        }
-
-        scheduleBlockTick(world, this, x, y, z);
+        BlockTickGuard guard(world);
+        RustBridge::blockSoilTick(&blockTickWorld(), blockID, x, y, z);
     }
 
     void onEntityWalking(World* world, int x, int y, int z, Entity* entity) override {
         if (!world || !entity) {
             return;
         }
-        if (randomChance(world, 4)) {
-            world->setBlockWithNotify(x, y, z, 3);
-        }
+        BlockTickGuard guard(world);
+        RustBridge::blockSoilWalking(&blockTickWorld(), x, y, z);
     }
 
     void onNeighborBlockChange(World* world, int x, int y, int z, int neighborId) override {
         if (!world) {
             return;
         }
-
-        const int aboveId = world->getBlockId(x, y + 1, z);
-        Block* aboveBlock = (aboveId > 0 && aboveId < 256) ? Block::blocksList[aboveId] : nullptr;
-        if (aboveBlock && aboveBlock->isCollidable()
-            && aboveBlock->getCollisionBoundingBoxFromPool(world, x, y + 1, z).has_value()) {
-            world->setBlockWithNotify(x, y, z, 3);
-            return;
-        }
-
-        scheduleBlockTick(world, this, x, y, z);
+        BlockTickGuard guard(world);
+        RustBridge::blockSoilNeighbor(&blockTickWorld(), blockID, x, y, z);
     }
 
     int idDropped(int metadata) const override { return 3; }
-
-private:
-    static bool hasNearbyWater(World* world, int x, int y, int z) {
-        for (int checkX = x - 4; checkX <= x + 4; ++checkX) {
-            for (int checkY = y; checkY <= y + 1; ++checkY) {
-                for (int checkZ = z - 4; checkZ <= z + 4; ++checkZ) {
-                    Material* material = world->getBlockMaterial(checkX, checkY, checkZ);
-                    if (material == &Material::water) {
-                        return true;
-                    }
-                }
-            }
-        }
-        return false;
-    }
-
-    static bool hasCrops(World* world, int x, int y, int z) {
-        return world->getBlockId(x, y + 1, z) == 59;
-    }
-
-    static void setMoisture(World* world, int x, int y, int z, int moisture) {
-        if (world->getBlockMetadata(x, y, z) == moisture) {
-            return;
-        }
-        world->setBlockMetadata(x, y, z, static_cast<uint8_t>(moisture));
-        world->markBlockNeedsUpdate(x, y, z);
-    }
 };
 
 void Block::initBlocks() {
@@ -1075,22 +826,11 @@ void Block::dropBlockAsItemWithChance(World* world, int x, int y, int z, int met
     // Don't drop items on client side (multiplayerWorld check in Java)
     if (!world->mcServer || !world->mcServer->configManager) return;
     
-    int dropId = idDropped(metadata);
-    if (dropId > 0) {
-        int count = quantityDropped();
-        int dropDamage = damageDropped(metadata);
-        for (int i = 0; i < count; ++i) {
-            auto entity = std::make_unique<EntityItem>(dropId, 1, dropDamage);
-            // Spawn slightly above block center so it doesn't get stuck inside
-            entity->setPosition(x + 0.5, y + 0.7, z + 0.5);
-            entity->worldObj = world;
-
-            std::uniform_real_distribution<double> dist(-0.1, 0.1);
-            entity->motionX = dist(world->rand);
-            entity->motionY = 0.2;
-            entity->motionZ = dist(world->rand);
-
-            world->spawnEntityInWorld(std::move(entity));
-        }
+    const int dropId = idDropped(metadata);
+    if (dropId <= 0) {
+        return;
     }
+    BlockTickGuard guard(world);
+    RustBridge::blockBaseDrop(&blockTickWorld(), dropId, quantityDropped(), damageDropped(metadata),
+                              x, y, z, chance);
 }

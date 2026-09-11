@@ -132,4 +132,50 @@ int32_t spawnPassive(const SpawnerWorld* world,
                      int32_t spawnX, int32_t spawnY, int32_t spawnZ,
                      int32_t worldHeight);
 
+// Block behaviors (Rust owns decisions; C++ owns registry/objects)
+using BlockTickWorld = ::BlockTickWorld;
+using TickAction = ::TickAction;
+void blockSandAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
+void blockSandNeighbor(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
+void blockSandTick(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
+void blockFluidAdded(const BlockTickWorld* w, uint8_t id, int32_t rate, int32_t x, int32_t y, int32_t z);
+void blockFluidNeighbor(const BlockTickWorld* w, uint8_t id, int32_t rate, int32_t x, int32_t y, int32_t z);
+void blockFluidTick(const BlockTickWorld* w, uint8_t id, bool lava, int32_t x, int32_t y, int32_t z);
+bool blockFlowerCanStay(const BlockTickWorld* w, int32_t x, int32_t y, int32_t z);
+void blockFlowerNeighbor(const BlockTickWorld* w, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z);
+void blockFlowerTick(const BlockTickWorld* w, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z);
+void blockTallgrassDrop(const BlockTickWorld* w, int32_t seedsId, float chance, int32_t x, int32_t y, int32_t z);
+bool blockMushroomCanStay(const BlockTickWorld* w, int32_t x, int32_t y, int32_t z);
+void blockMushroomNeighbor(const BlockTickWorld* w, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z);
+uint8_t blockTorchAttachMeta(const BlockTickWorld* w, int32_t side, int32_t x, int32_t y, int32_t z);
+void blockTorchAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
+bool blockTorchCanStay(const BlockTickWorld* w, int32_t x, int32_t y, int32_t z);
+void blockTorchNeighbor(const BlockTickWorld* w, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z);
+bool blockCactusCanStay(const BlockTickWorld* w, int32_t x, int32_t y, int32_t z);
+bool blockReedCanStay(const BlockTickWorld* w, int32_t x, int32_t y, int32_t z);
+void blockCactusAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
+void blockReedAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
+void blockCactusNeighbor(const BlockTickWorld* w, uint8_t id, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z);
+void blockReedNeighbor(const BlockTickWorld* w, uint8_t id, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z);
+void blockCactusTick(const BlockTickWorld* w, uint8_t id, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z);
+void blockReedTick(const BlockTickWorld* w, uint8_t id, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z);
+void blockLeavesAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
+void blockLeavesNeighbor(const BlockTickWorld* w, uint8_t id, uint8_t leavesId, int32_t* guard, int32_t x, int32_t y, int32_t z);
+void blockLeavesTick(const BlockTickWorld* w, uint8_t id, uint8_t leavesId, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t* guard, int32_t x, int32_t y, int32_t z);
+void blockLeavesDrop(const BlockTickWorld* w, int32_t saplingId, float chance, int32_t x, int32_t y, int32_t z);
+void blockSaplingAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
+bool blockSaplingCanStay(const BlockTickWorld* w, int32_t x, int32_t y, int32_t z);
+void blockSaplingNeighbor(const BlockTickWorld* w, uint8_t id, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z);
+TickAction blockSaplingTick(const BlockTickWorld* w, uint8_t id, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z);
+void blockCropsAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
+bool blockCropsCanStay(const BlockTickWorld* w, uint8_t cropId, int32_t x, int32_t y, int32_t z);
+void blockCropsNeighbor(const BlockTickWorld* w, uint8_t id, uint8_t cropId, int32_t wheatId, int32_t seedsId, int32_t x, int32_t y, int32_t z);
+void blockCropsDrop(const BlockTickWorld* w, int32_t wheatId, int32_t seedsId, int32_t x, int32_t y, int32_t z, uint8_t meta, float chance);
+void blockCropsTick(const BlockTickWorld* w, uint8_t id, uint8_t cropId, int32_t wheatId, int32_t seedsId, int32_t x, int32_t y, int32_t z);
+void blockSoilAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
+void blockSoilTick(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
+void blockSoilWalking(const BlockTickWorld* w, int32_t x, int32_t y, int32_t z);
+void blockSoilNeighbor(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
+bool blockBaseDrop(const BlockTickWorld* w, int32_t itemId, int32_t count, int32_t damage, int32_t x, int32_t y, int32_t z, float chance);
+
 } // namespace RustBridge

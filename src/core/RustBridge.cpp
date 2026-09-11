@@ -280,4 +280,131 @@ int32_t spawnPassive(const SpawnerWorld* world,
                                       currentCount, spawnX, spawnY, spawnZ, worldHeight);
 }
 
+void blockSandAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z) {
+    ::block_sand_added(w, id, x, y, z);
+}
+void blockSandNeighbor(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z) {
+    ::block_sand_neighbor(w, id, x, y, z);
+}
+void blockSandTick(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z) {
+    ::block_sand_tick(w, id, x, y, z);
+}
+void blockFluidAdded(const BlockTickWorld* w, uint8_t id, int32_t rate, int32_t x, int32_t y, int32_t z) {
+    ::block_fluid_added(w, id, rate, x, y, z);
+}
+void blockFluidNeighbor(const BlockTickWorld* w, uint8_t id, int32_t rate, int32_t x, int32_t y, int32_t z) {
+    ::block_fluid_neighbor(w, id, rate, x, y, z);
+}
+void blockFluidTick(const BlockTickWorld* w, uint8_t id, bool lava, int32_t x, int32_t y, int32_t z) {
+    ::block_fluid_tick(w, id, lava, x, y, z);
+}
+bool blockFlowerCanStay(const BlockTickWorld* w, int32_t x, int32_t y, int32_t z) {
+    return ::block_flower_can_stay(w, x, y, z);
+}
+void blockFlowerNeighbor(const BlockTickWorld* w, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z) {
+    ::block_flower_neighbor(w, dropId, dropCount, dropDamage, x, y, z);
+}
+void blockFlowerTick(const BlockTickWorld* w, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z) {
+    ::block_flower_tick(w, dropId, dropCount, dropDamage, x, y, z);
+}
+void blockTallgrassDrop(const BlockTickWorld* w, int32_t seedsId, float chance, int32_t x, int32_t y, int32_t z) {
+    ::block_tallgrass_drop(w, seedsId, chance, x, y, z);
+}
+bool blockMushroomCanStay(const BlockTickWorld* w, int32_t x, int32_t y, int32_t z) {
+    return ::block_mushroom_can_stay(w, x, y, z);
+}
+void blockMushroomNeighbor(const BlockTickWorld* w, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z) {
+    ::block_mushroom_neighbor(w, dropId, dropCount, dropDamage, x, y, z);
+}
+uint8_t blockTorchAttachMeta(const BlockTickWorld* w, int32_t side, int32_t x, int32_t y, int32_t z) {
+    return ::block_torch_attach_meta(w, side, x, y, z);
+}
+void blockTorchAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z) {
+    ::block_torch_added(w, id, x, y, z);
+}
+bool blockTorchCanStay(const BlockTickWorld* w, int32_t x, int32_t y, int32_t z) {
+    return ::block_torch_can_stay(w, x, y, z);
+}
+void blockTorchNeighbor(const BlockTickWorld* w, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z) {
+    ::block_torch_neighbor(w, dropId, dropCount, dropDamage, x, y, z);
+}
+bool blockCactusCanStay(const BlockTickWorld* w, int32_t x, int32_t y, int32_t z) {
+    return ::block_cactus_can_stay(w, x, y, z);
+}
+bool blockReedCanStay(const BlockTickWorld* w, int32_t x, int32_t y, int32_t z) {
+    return ::block_reed_can_stay(w, x, y, z);
+}
+void blockCactusAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z) {
+    ::block_cactus_added(w, id, x, y, z);
+}
+void blockReedAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z) {
+    ::block_reed_added(w, id, x, y, z);
+}
+void blockCactusNeighbor(const BlockTickWorld* w, uint8_t id, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z) {
+    ::block_cactus_neighbor(w, id, dropId, dropCount, dropDamage, x, y, z);
+}
+void blockReedNeighbor(const BlockTickWorld* w, uint8_t id, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z) {
+    ::block_reed_neighbor(w, id, dropId, dropCount, dropDamage, x, y, z);
+}
+void blockCactusTick(const BlockTickWorld* w, uint8_t id, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z) {
+    ::block_cactus_tick(w, id, dropId, dropCount, dropDamage, x, y, z);
+}
+void blockReedTick(const BlockTickWorld* w, uint8_t id, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z) {
+    ::block_reed_tick(w, id, dropId, dropCount, dropDamage, x, y, z);
+}
+void blockLeavesAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z) {
+    ::block_leaves_added(w, id, x, y, z);
+}
+void blockLeavesNeighbor(const BlockTickWorld* w, uint8_t id, uint8_t leavesId, int32_t* guard, int32_t x, int32_t y, int32_t z) {
+    ::block_leaves_neighbor(w, id, leavesId, guard, x, y, z);
+}
+void blockLeavesTick(const BlockTickWorld* w, uint8_t id, uint8_t leavesId, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t* guard, int32_t x, int32_t y, int32_t z) {
+    ::block_leaves_tick(w, id, leavesId, dropId, dropCount, dropDamage, guard, x, y, z);
+}
+void blockLeavesDrop(const BlockTickWorld* w, int32_t saplingId, float chance, int32_t x, int32_t y, int32_t z) {
+    ::block_leaves_drop(w, saplingId, chance, x, y, z);
+}
+void blockSaplingAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z) {
+    ::block_sapling_added(w, id, x, y, z);
+}
+bool blockSaplingCanStay(const BlockTickWorld* w, int32_t x, int32_t y, int32_t z) {
+    return ::block_sapling_can_stay(w, x, y, z);
+}
+void blockSaplingNeighbor(const BlockTickWorld* w, uint8_t id, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z) {
+    ::block_sapling_neighbor(w, id, dropId, dropCount, dropDamage, x, y, z);
+}
+TickAction blockSaplingTick(const BlockTickWorld* w, uint8_t id, int32_t dropId, int32_t dropCount, int32_t dropDamage, int32_t x, int32_t y, int32_t z) {
+    return ::block_sapling_tick(w, id, dropId, dropCount, dropDamage, x, y, z);
+}
+void blockCropsAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z) {
+    ::block_crops_added(w, id, x, y, z);
+}
+bool blockCropsCanStay(const BlockTickWorld* w, uint8_t cropId, int32_t x, int32_t y, int32_t z) {
+    return ::block_crops_can_stay(w, cropId, x, y, z);
+}
+void blockCropsNeighbor(const BlockTickWorld* w, uint8_t id, uint8_t cropId, int32_t wheatId, int32_t seedsId, int32_t x, int32_t y, int32_t z) {
+    ::block_crops_neighbor(w, id, cropId, wheatId, seedsId, x, y, z);
+}
+void blockCropsDrop(const BlockTickWorld* w, int32_t wheatId, int32_t seedsId, int32_t x, int32_t y, int32_t z, uint8_t meta, float chance) {
+    ::block_crops_drop_ffi(w, wheatId, seedsId, x, y, z, meta, chance);
+}
+void blockCropsTick(const BlockTickWorld* w, uint8_t id, uint8_t cropId, int32_t wheatId, int32_t seedsId, int32_t x, int32_t y, int32_t z) {
+    ::block_crops_tick(w, id, cropId, wheatId, seedsId, x, y, z);
+}
+void blockSoilAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z) {
+    ::block_soil_added(w, id, x, y, z);
+}
+void blockSoilTick(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z) {
+    ::block_soil_tick(w, id, x, y, z);
+}
+void blockSoilWalking(const BlockTickWorld* w, int32_t x, int32_t y, int32_t z) {
+    ::block_soil_walking(w, x, y, z);
+}
+void blockSoilNeighbor(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z) {
+    ::block_soil_neighbor(w, id, x, y, z);
+}
+bool blockBaseDrop(const BlockTickWorld* w, int32_t itemId, int32_t count, int32_t damage, int32_t x, int32_t y, int32_t z, float chance) {
+    return ::block_base_drop(w, itemId, count, damage, x, y, z, chance);
+}
+
 } // namespace RustBridge
