@@ -497,6 +497,18 @@ impl EntityTable {
         self.rows.remove(&id)
     }
 
+    /// Drop dead rows (mirrors the end-of-tick erase); returns the purged
+    /// ids sorted for determinism.
+    pub fn purge_dead(&mut self) -> Vec<EntityId> {
+        let mut dead: Vec<EntityId> =
+            self.rows.iter().filter(|(_, e)| e.body().dead).map(|(id, _)| *id).collect();
+        dead.sort_unstable();
+        for id in &dead {
+            self.rows.remove(id);
+        }
+        dead
+    }
+
     pub fn len(&self) -> usize {
         self.rows.len()
     }
@@ -507,6 +519,12 @@ impl EntityTable {
 
     pub fn alive_ids(&self) -> Vec<EntityId> {
         self.rows.iter().filter(|(_, e)| !e.body().dead).map(|(id, _)| *id).collect()
+    }
+
+    /// Every row id, dead or not (spawn anchors count dead players like
+    /// the C++ gather).
+    pub fn all_ids(&self) -> Vec<EntityId> {
+        self.rows.keys().copied().collect()
     }
 
     pub fn count_mobs(&self) -> usize {
