@@ -140,6 +140,15 @@ void blockFireTick(const FireWorld* w, uint8_t fireId, int32_t tickRate, int32_t
 bool blockFireCanPlace(const FireWorld* w, int32_t x, int32_t y, int32_t z);
 void blockFireNeighbor(const FireWorld* w, int32_t x, int32_t y, int32_t z);
 void blockFireAdded(const FireWorld* w, uint8_t fireId, int32_t tickRate, int32_t x, int32_t y, int32_t z);
+
+// Container blocks (slot iteration stays in C++)
+using ScatterWorld = ::ScatterWorld;
+int32_t blockChestScatterStack(const ScatterWorld* w, int32_t itemId, int32_t count,
+                               int32_t damage, int32_t x, int32_t y, int32_t z);
+void blockFurnaceScatterStack(const ScatterWorld* w, int32_t itemId, int32_t count,
+                              int32_t damage, int32_t x, int32_t y, int32_t z);
+bool blockChestCanPlace(uint8_t (*getBlockId)(int32_t x, int32_t y, int32_t z),
+                        uint8_t chestId, int32_t x, int32_t y, int32_t z);
 void blockSandAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
 void blockSandNeighbor(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
 void blockSandTick(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);

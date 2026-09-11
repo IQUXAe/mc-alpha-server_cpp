@@ -13,7 +13,4 @@ public:
 
 protected:
     std::unique_ptr<TileEntity> createTileEntity() override;
-
-private:
-    bool hasNeighborChest(World* world, int x, int y, int z);
 };

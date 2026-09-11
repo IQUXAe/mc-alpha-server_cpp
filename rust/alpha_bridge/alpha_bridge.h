@@ -1123,6 +1123,23 @@ void block_fire_neighbor(const FireWorld* world, int32_t x, int32_t y, int32_t z
 void block_fire_added(const FireWorld* world, uint8_t fire_id, int32_t tick_rate,
                       int32_t x, int32_t y, int32_t z);
 
+// Container blocks (block_container.rs). ScatterWorld carries global-RNG
+// draws plus the item-spawn hook; slot iteration stays in C++.
+typedef struct ScatterWorld {
+    int32_t (*next_int)(int32_t bound);
+    float (*next_float01)(void);
+    double (*next_float64_01)(void);
+    void (*spawn_item)(int32_t item_id, int32_t count, int32_t damage,
+                       double fx, double fy, double fz, double mx, double my, double mz);
+} ScatterWorld;
+
+int32_t block_chest_scatter_stack(const ScatterWorld* world, int32_t item_id, int32_t count,
+                                  int32_t damage, int32_t x, int32_t y, int32_t z);
+void block_furnace_scatter_stack(const ScatterWorld* world, int32_t item_id, int32_t count,
+                                 int32_t damage, int32_t x, int32_t y, int32_t z);
+bool block_chest_can_place(uint8_t (*get_block_id)(int32_t x, int32_t y, int32_t z),
+                           uint8_t chest_id, int32_t x, int32_t y, int32_t z);
+
 // Entity physics kernel (entity_physics.rs). Pure collision/fall/push math;
 // the world-dependent half (box gathering, onFall, velocity) stays in C++.
 typedef struct FfiAabb {

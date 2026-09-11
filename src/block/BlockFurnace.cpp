@@ -1,10 +1,10 @@
 #include "BlockFurnace.h"
+#include "BlockTickWorld.h"
 #include "../world/World.h"
 #include "../world/TileEntityFurnace.h"
 #include "../entity/EntityItem.h"
 #include "../entity/EntityPlayerMP.h"
 #include "../network/NetServerHandler.h"
-#include <random>
 
 BlockFurnace::BlockFurnace(int id, bool isActive) 
     : BlockContainer(id), isActive_(isActive) {}
@@ -22,21 +22,17 @@ void BlockFurnace::onBlockRemoval(World* world, int x, int y, int z) {
     if (te) {
         auto* furnace = dynamic_cast<TileEntityFurnace*>(te);
         if (furnace) {
-            // Drop all inventory slots (input, fuel, output)
+            // Drop all inventory slots (input, fuel, output) via Rust.
+            BlockTickGuard guard(world);
             for (int i = 0; i < furnace->getSizeInventory(); ++i) {
                 ItemStack* stack = furnace->getStackInSlot(i);
                 if (!stack || stack->stackSize <= 0) continue;
-                auto entity = std::make_unique<EntityItem>(stack->itemID, stack->stackSize, stack->itemDamage);
-                entity->setPosition(x + 0.5, y + 0.7, z + 0.5);
-                std::uniform_real_distribution<double> dist(-0.1, 0.1);
-                entity->motionX = dist(world->rand);
-                entity->motionY = 0.2;
-                entity->motionZ = dist(world->rand);
-                world->spawnEntityInWorld(std::move(entity));
+                RustBridge::blockFurnaceScatterStack(
+                    &scatterWorld(), stack->itemID, stack->stackSize, stack->itemDamage, x, y, z);
             }
         }
     }
-    
+
     BlockContainer::onBlockRemoval(world, x, y, z);
 }
 

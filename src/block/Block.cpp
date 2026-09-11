@@ -192,6 +192,33 @@ extern "C" void blockTickDetonateTnt(int32_t x, int32_t y, int32_t z) {
     }
 }
 
+extern "C" int32_t scatterNextInt(int32_t bound) {
+    return RustBridge::rngNextInt(bound);
+}
+
+extern "C" float scatterNextFloat01() {
+    return RustBridge::rngNextFloat();
+}
+
+extern "C" double scatterNextFloat64() {
+    return RustBridge::rngNextDouble();
+}
+
+extern "C" void scatterSpawnItem(int32_t itemId, int32_t count, int32_t damage, double fx, double fy,
+                                 double fz, double mx, double my, double mz) {
+    auto entity = std::make_unique<EntityItem>(itemId, count, damage);
+    entity->setPosition(fx, fy, fz);
+    entity->worldObj = gBlockTickWorld;
+    entity->motionX = mx;
+    entity->motionY = my;
+    entity->motionZ = mz;
+    gBlockTickWorld->spawnEntityInWorld(std::move(entity));
+}
+
+extern "C" uint8_t scatterGetBlockId(int32_t x, int32_t y, int32_t z) {
+    return gBlockTickWorld->getBlockId(x, y, z);
+}
+
 class BlockSand : public Block {
 public:
     explicit BlockSand(int id) : Block(id) {}

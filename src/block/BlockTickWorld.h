@@ -55,6 +55,14 @@ extern "C" void blockTickSpawnFalling(uint8_t blockId, double fx, double fy, dou
 extern "C" void blockTickDropOccupant(int32_t x, int32_t y, int32_t z);
 extern "C" void blockTickDetonateTnt(int32_t x, int32_t y, int32_t z);
 
+// Container scatter hooks (global RNG draws + item spawn; slot loops stay in C++).
+extern "C" int32_t scatterNextInt(int32_t bound);
+extern "C" float scatterNextFloat01();
+extern "C" double scatterNextFloat64();
+extern "C" void scatterSpawnItem(int32_t itemId, int32_t count, int32_t damage, double fx, double fy,
+                                 double fz, double mx, double my, double mz);
+extern "C" uint8_t scatterGetBlockId(int32_t x, int32_t y, int32_t z);
+
 inline const RustBridge::BlockTickWorld& blockTickWorld() {
     static const RustBridge::BlockTickWorld table = {
         &blockTickNextInt,
@@ -91,5 +99,15 @@ inline const RustBridge::BlockTickWorld& blockTickWorld() {
 
 inline const RustBridge::FireWorld& fireWorld() {
     static const RustBridge::FireWorld table = {&blockTickWorld(), &blockTickDetonateTnt};
+    return table;
+}
+
+inline const RustBridge::ScatterWorld& scatterWorld() {
+    static const RustBridge::ScatterWorld table = {
+        &scatterNextInt,
+        &scatterNextFloat01,
+        &scatterNextFloat64,
+        &scatterSpawnItem,
+    };
     return table;
 }

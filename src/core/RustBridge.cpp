@@ -432,6 +432,21 @@ void blockFireAdded(const FireWorld* w, uint8_t fireId, int32_t tickRate, int32_
     ::block_fire_added(w, fireId, tickRate, x, y, z);
 }
 
+int32_t blockChestScatterStack(const ScatterWorld* w, int32_t itemId, int32_t count,
+                               int32_t damage, int32_t x, int32_t y, int32_t z) {
+    return ::block_chest_scatter_stack(w, itemId, count, damage, x, y, z);
+}
+
+void blockFurnaceScatterStack(const ScatterWorld* w, int32_t itemId, int32_t count,
+                              int32_t damage, int32_t x, int32_t y, int32_t z) {
+    ::block_furnace_scatter_stack(w, itemId, count, damage, x, y, z);
+}
+
+bool blockChestCanPlace(uint8_t (*getBlockId)(int32_t x, int32_t y, int32_t z),
+                        uint8_t chestId, int32_t x, int32_t y, int32_t z) {
+    return ::block_chest_can_place(getBlockId, chestId, x, y, z);
+}
+
 bool entityResolveMove(const FfiAabb& box, double dx, double dy, double dz,
                        const FfiAabb* boxes, size_t numBoxes, ResolvedMove* out) {
     return ::alpha_entity_resolve_move(&box, dx, dy, dz, boxes, numBoxes, out);
