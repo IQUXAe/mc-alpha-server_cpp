@@ -127,6 +127,10 @@ pub struct World {
     /// `updateFurnaceBlockState`); the server tick drains these and fans
     /// out block changes to chunk-loaded players.
     pub furnace_updates: Vec<[i32; 3]>,
+    /// Population guard (mirrors `World::isPopulating`): decoration
+    /// sets bypass skylight regen exactly like the C++ populate path
+    /// (the write-back regenerates explicitly instead).
+    populating: bool,
     /// Terrain generator, built lazily (eleven octave tables; tests that
     /// never generate pay nothing; skipped in `Debug` dumps).
     generator: Option<crate::generator::RustChunkProviderGenerate>,
@@ -171,6 +175,7 @@ impl World {
             unloaded: HashMap::new(),
             tiles: HashMap::new(),
             furnace_updates: Vec::new(),
+            populating: false,
             generator: None,
             chunks: HashMap::new(),
             entities: EntityTable::new(),
@@ -259,13 +264,30 @@ impl World {
     }
 
     /// Missing chunk or out-of-range Y: no-op returning false (mirrors the
-    /// NoChunkLoad setters swallowing silently).
+    /// NoChunkLoad setters swallowing silently). On change the skylight
+    /// follows the C++ `setBlock` path (full regen while a world holds
+    /// the chunk); population sets bypass it via [`World::populating`].
     pub fn set_block_id(&mut self, x: i32, y: i32, z: i32, id: u8) -> bool {
         if y < 0 || y >= WORLD_HEIGHT {
             return false;
         }
         let (cx, cz, lx, lz) = Self::chunk_of(x, z);
-        self.chunks.get_mut(&(cx, cz)).map(|c| c.set_block_id(lx, y, lz, id)).unwrap_or(false)
+        let changed = self.chunks.get_mut(&(cx, cz)).map(|c| c.set_block_id(lx, y, lz, id)).unwrap_or(false);
+        if changed && !self.populating {
+            self.refresh_skylight(x, z);
+        }
+        changed
+    }
+
+    /// Recompute skylight for the touched column's chunk (mirrors the
+    /// C++ regen on set; the native BFS pass stays single-chunk, so a
+    /// one-cell fringe seam at borders is a known approximation until
+    /// the pass learns cross-chunk spread like the C++ one does).
+    fn refresh_skylight(&mut self, x: i32, z: i32) {
+        let (cx, cz, _, _) = Self::chunk_of(x, z);
+        if let Some(c) = self.chunks.get_mut(&(cx, cz)) {
+            c.generate_skylight_map();
+        }
     }
 
     pub fn set_block_meta(&mut self, x: i32, y: i32, z: i32, meta: u8) -> bool {
@@ -923,6 +945,61 @@ mod tests {
         assert!(!w.set_block_id(1000, 64, 1000, 5));
         assert!(!w.set_block_id(0, 200, 0, 5));
         assert_eq!(w.get_height_value(3, 4), 65);
+    }
+
+    #[test]
+    fn test_set_block_regenerates_skylight() {
+        let mut w = world_with_floor();
+        // Lone pillar: the stone goes dark and the cell below gets
+        // sideways leak (mirrors the C++ setBlock skylight regen; the
+        // fresh world starts fully dark, so any light proves the pass).
+        w.set_block_id(3, 70, 4, 1);
+        assert_eq!(w.saved_light_value(0, 3, 70, 4), 0);
+        assert_eq!(w.saved_light_value(0, 3, 69, 4), 14);
+        // Pull the pillar: full sky again.
+        w.set_block_id(3, 70, 4, 0);
+        assert_eq!(w.saved_light_value(0, 3, 69, 4), 15);
+        assert_eq!(w.saved_light_value(0, 3, 127, 4), 15);
+    }
+
+    fn ceiling_world() -> World {
+        // Two floored chunks with a two-wide stone lid at y=100 hugging
+        // the border from the center side (x=14,15).
+        let mut w = World::new(99);
+        for (cx, cz) in [(0, 0), (1, 0)] {
+            let mut c = Chunk::new(cx, cz);
+            for x in 0..16 {
+                for z in 0..16 {
+                    c.set_block_id(x, 63, z, 1);
+                }
+            }
+            c.generate_height_map();
+            w.insert_chunk(c);
+        }
+        for lx in [14, 15] {
+            w.chunks.get_mut(&(0, 0)).unwrap().set_block_id(lx, 100, 8, 1);
+        }
+        for (cx, cz) in [(0, 0), (1, 0)] {
+            w.chunks.get_mut(&(cx, cz)).unwrap().generate_skylight_map();
+        }
+        w
+    }
+
+    #[test]
+    fn test_set_block_on_border_refreshes_center() {
+        // Same border edit two ways: the world path regenerates the
+        // center chunk (fringe opens 14 -> 15); the chunk-direct path
+        // leaves it stale. The neighbor chunk agrees on both paths by
+        // design: the native BFS stays single-chunk (documented seam;
+        // C++ spreads across, a future pass may teach it).
+        let mut a = ceiling_world();
+        a.set_block_id(15, 100, 8, 0);
+        let mut b = ceiling_world();
+        b.chunks.get_mut(&(0, 0)).unwrap().set_block_id(15, 100, 8, 0);
+        assert_eq!(a.saved_light_value(0, 15, 99, 8), 15);
+        assert_eq!(b.saved_light_value(0, 15, 99, 8), 14);
+        assert_eq!(a.saved_light_value(0, 16, 99, 8), 15);
+        assert_eq!(b.saved_light_value(0, 16, 99, 8), 15);
     }
 
     #[test]
@@ -1977,6 +2054,27 @@ mod tests {
         assert!(w.entities.get(creeper).unwrap().body().dead);
         // Point-blank (d=1): 12 * (1 - 1/3) = 8 damage, no RNG involved.
         assert_eq!(player_health(&w, player), 12);
+    }
+
+    #[test]
+    fn test_creeper_blast_scatters_container() {
+        let mut w = world_with_floor();
+        // Stocked chest with the creeper inside its cell (d=0 destroys
+        // with chance 1, no RNG involved).
+        w.set_block_id(4, 64, 4, 54);
+        let mut ch = crate::tile_entity_chest::chest_create();
+        ch.slots[0] = stk(3, 7, 0);
+        w.tiles.insert((4, 64, 4), TileData::Chest(ch));
+        let creeper = add_mob(&mut w, MobKind::Creeper, 4.5, 64.0, 4.5);
+        w.creeper_explode(creeper);
+        // Chest block and tile row are gone, dirt scattered as items
+        // (mirrors the C++ removal hook on the blast path).
+        assert_eq!(w.get_block_id(4, 64, 4), 0);
+        assert!(w.tiles.get(&(4, 64, 4)).is_none());
+        assert!(w.entities.alive_ids().iter().any(|oid| matches!(
+            w.entities.get(*oid),
+            Some(crate::entity_table::Entity::Item(e)) if e.item_id == 3
+        )));
     }
 
     #[test]
@@ -3919,6 +4017,9 @@ impl World {
                         self.spawn_item_entity(
                             bid as i32, 1, 0, bx as f64 + 0.5, by as f64 + 0.5, bz as f64 + 0.5,
                         );
+                        // Container contents scatter like the C++ removal
+                        // hook on the blast path (tile row cleared too).
+                        self.scatter_container_tile(bx, by, bz);
                         self.set_block_id(bx, by, bz, 0);
                     }
                 }
@@ -5846,6 +5947,9 @@ impl World {
         };
         {
             let _guard = TickGuard::enter(self as *mut World);
+            // Decoration sets bypass skylight regen (mirrors C++
+            // isPopulating); the write-back below regenerates instead.
+            self.populating = true;
             let gen = self.generator();
             unsafe {
                 rust_chunk_provider_populate_batch(
@@ -5858,6 +5962,7 @@ impl World {
                     center_temps.as_ptr(),
                 );
             }
+            self.populating = false;
         }
         // 3. Write back: insert missing, refresh present (tree spillover);
         // only the requested chunk is flagged (canvas neighbors decorate
