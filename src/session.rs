@@ -1248,10 +1248,14 @@ fn put_slot(buf: &mut Vec<u8>, s: Option<FfiItemStack>) {
             put_i8(buf, v.stack_size as i8);
             put_i16(buf, v.item_damage as i16);
         }
+        // Vanilla writes empty slots as a bare -1 (2 bytes, no
+        // count/damage tail). Anything longer desyncs the stream: the
+        // client reads short-only for negative ids, plants phantom
+        // Item(0)s into the following slots, and NPEs rendering the
+        // hotbar (blocksList[0] is null). This crashed real clients
+        // on every fresh login; synthetic tests never render.
         _ => {
             put_i16(buf, -1);
-            put_i8(buf, 0);
-            put_i16(buf, 0);
         }
     }
 }
@@ -3094,6 +3098,25 @@ mod play_tests {
     fn test_pre_chunk_bytes_match_encoder() {
         assert_eq!(pkt_pre_chunk(3, -2, true), vec![50, 0, 0, 0, 3, 255, 255, 255, 254, 1]);
         assert_eq!(pkt_pre_chunk(0, 0, false).last(), Some(&0));
+    }
+
+    #[test]
+    fn test_inventory_section_empty_slots_are_bare() {
+        use crate::inventory::FfiItemStack;
+        let dirt = Some(FfiItemStack {
+            stack_size: 5,
+            animations_to_go: 0,
+            item_id: 3,
+            item_damage: 0,
+        });
+        let pkt = pkt_inventory_section(-1, &[None, dirt, None]);
+        // id 5, type -1, count 3, then FF FF | 00 03 05 00 00 | FF FF.
+        // Empty slots are a bare short(-1): the 5-byte form desyncs
+        // vanilla parsing and NPEs real clients rendering the hotbar.
+        assert_eq!(
+            pkt,
+            vec![5, 255, 255, 255, 255, 0, 3, 255, 255, 0, 3, 5, 0, 0, 255, 255]
+        );
     }
 
     #[test]

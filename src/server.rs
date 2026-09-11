@@ -1607,7 +1607,15 @@ mod tests {
             5 => {
                 r_skip(c, 4);
                 let n = r_u16(c) as usize;
-                r_skip(c, n * 5);
+                // Vanilla slot layout: bare short(-1) when empty,
+                // else short id + byte count + short damage.
+                for _ in 0..n {
+                    let mut b = [0u8; 2];
+                    c.read_exact(&mut b).unwrap();
+                    if i16::from_be_bytes(b) >= 0 {
+                        r_skip(c, 3);
+                    }
+                }
                 String::new()
             }
             6 => {
