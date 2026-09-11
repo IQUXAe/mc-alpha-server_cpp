@@ -35,6 +35,18 @@ fn get_seed_from_os() -> Option<i64> {
 }
 
 #[no_mangle]
+pub extern "C" fn alpha_rng_next_int(bound: i32) -> i32 {
+    // NOTE: never unwrap a Mutex guard on the FFI boundary.
+    // With panic="abort" any panic kills the whole server process.
+    // If the mutex is poisoned (a previous holder panicked), recover
+    // the inner RNG instead of aborting.
+    match global_rng().lock() {
+        Ok(mut rng) => rng.next_int_bound(bound),
+        Err(poisoned) => poisoned.into_inner().next_int_bound(bound),
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn alpha_rng_next_float() -> f32 {
     match global_rng().lock() {
         Ok(mut rng) => rng.next_float(),

@@ -41,3 +41,13 @@ TEST(MobSpawningTest, TooCloseToSpawn) {
     EXPECT_FALSE(RustBridge::spawnTooCloseToSpawn(24.0f, 64.0f, 0.0f, 0, 64, 0));
     EXPECT_TRUE(RustBridge::spawnTooCloseToSpawn(23.5f, 64.0f, 0.0f, 0, 64, 0));
 }
+
+TEST(MobSpawningTest, RngNextIntStaysInBounds) {
+    // Used by EntityMob::getCanSpawnHere light checks (Java nextInt(32)/nextInt(8)).
+    for (int i = 0; i < 500; ++i) {
+        EXPECT_GE(RustBridge::rngNextInt(32), 0);
+        EXPECT_LT(RustBridge::rngNextInt(32), 32);
+        EXPECT_GE(RustBridge::rngNextInt(8), 0);
+        EXPECT_LT(RustBridge::rngNextInt(8), 8);
+    }
+}

@@ -207,8 +207,8 @@ inline bool EntityMob::getCanSpawnHere() const {
     const int x = MathHelper::floor_double(posX);
     const int y = MathHelper::floor_double(boundingBox.minY);
     const int z = MathHelper::floor_double(posZ);
-    if (worldObj->getSavedLightValue(0, x, y, z) > (std::rand() % 32)) return false;
-    if (worldObj->getBlockLightValue(x, y, z) > (std::rand() % 8)) return false;
+    if (worldObj->getSavedLightValue(0, x, y, z) > RustBridge::rngNextInt(32)) return false;
+    if (worldObj->getBlockLightValue(x, y, z) > RustBridge::rngNextInt(8)) return false;
     std::vector<AxisAlignedBB> collisions;
     worldObj->getCollidingBoundingBoxes(const_cast<EntityMob*>(this), boundingBox, collisions);
     return collisions.empty() && !isTouchingLiquid();

@@ -66,6 +66,7 @@ bool savePlayerData(const std::string& filepath, const AlphaPlayerData& data);
 bool loadPlayerData(const std::string& filepath, AlphaPlayerData& outData);
 
 // Thread-safe RNG — backed by Rust's global Mutex<JavaRandom> seeded from /dev/urandom.
+int32_t rngNextInt(int32_t bound);
 float   rngNextFloat();
 double  rngNextDouble();
 

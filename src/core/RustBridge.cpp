@@ -23,6 +23,10 @@ std::vector<uint8_t> fromRustBuffer(AlphaBuffer buffer) {
 
 namespace RustBridge {
 
+int32_t rngNextInt(int32_t bound) {
+    return ::alpha_rng_next_int(bound);
+}
+
 float rngNextFloat() {
     return ::alpha_rng_next_float();
 }
