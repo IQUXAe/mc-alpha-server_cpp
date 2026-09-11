@@ -634,8 +634,15 @@ unsafe fn parse_chunk_nbt(nbt_data: &[u8], chunk_x: i32, chunk_z: i32) -> Option
                         });
                     }
                     "Pig" | "Sheep" | "Cow" | "Chicken" => {
+                        // NOTE: `id` comes from world data on disk (possibly corrupt).
+                        // Never unwrap CString here: panic="abort" would kill the server.
+                        // Sanitize embedded NULs; skip the entity if allocation fails.
+                        let id_raw = match CString::new(id.replace('\0', "?")) {
+                            Ok(s) => s.into_raw() as *const c_char,
+                            Err(_) => continue,
+                        };
                         animals.push(FfiEntityAnimalData {
-                            id: CString::new(id).unwrap().into_raw() as *const c_char,
+                            id: id_raw,
                             x: pos[0], y: pos[1], z: pos[2],
                             motion_x: motion[0], motion_y: motion[1], motion_z: motion[2],
                             rotation_yaw: rotation[0], rotation_pitch: rotation[1],
@@ -646,8 +653,12 @@ unsafe fn parse_chunk_nbt(nbt_data: &[u8], chunk_x: i32, chunk_z: i32) -> Option
                         });
                     }
                     "Zombie" | "Skeleton" | "Spider" | "Creeper" => {
+                        let id_raw = match CString::new(id.replace('\0', "?")) {
+                            Ok(s) => s.into_raw() as *const c_char,
+                            Err(_) => continue,
+                        };
                         monsters.push(FfiEntityMonsterData {
-                            id: CString::new(id).unwrap().into_raw() as *const c_char,
+                            id: id_raw,
                             x: pos[0], y: pos[1], z: pos[2],
                             motion_x: motion[0], motion_y: motion[1], motion_z: motion[2],
                             rotation_yaw: rotation[0], rotation_pitch: rotation[1],

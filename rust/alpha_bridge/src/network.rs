@@ -850,33 +850,50 @@ pub unsafe extern "C" fn rust_network_manager_create(socket_fd: c_int) -> *mut R
         let &(ref lock, ref cv) = &*write_queue_c;
         while is_running_c.load(Ordering::SeqCst) {
             let mut pkt = None;
-            if let Ok(mut q) = lock.lock() {
-                loop {
-                    if !is_running_c.load(Ordering::SeqCst) {
-                        return;
-                    }
-                    
-                    // Prioritize data_packets (non-chunk packets first)
-                    // Find first packet with is_chunk_data == false
-                    let mut found_idx = None;
-                    for (i, (_, is_chunk)) in q.iter().enumerate() {
-                        if !is_chunk {
-                            found_idx = Some(i);
-                            break;
-                        }
-                    }
-                    
-                    if let Some(idx) = found_idx {
-                        pkt = Some(q.remove(idx).unwrap().0);
-                        break;
-                    } else if !q.is_empty() {
-                        pkt = Some(q.pop_front().unwrap().0);
+            // NOTE: with panic="abort" no unwrap() is allowed here:
+            // a panic in this thread would kill the whole server.
+            // A poisoned mutex means another thread panicked; recover
+            // the guard and shut the writer down gracefully instead.
+            let mut guard = match lock.lock() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            loop {
+                if !is_running_c.load(Ordering::SeqCst) {
+                    return;
+                }
+
+                // Prioritize data_packets (non-chunk packets first)
+                // Find first packet with is_chunk_data == false
+                let mut found_idx = None;
+                for (i, (_, is_chunk)) in guard.iter().enumerate() {
+                    if !is_chunk {
+                        found_idx = Some(i);
                         break;
                     }
-                    
-                    q = cv.wait(q).unwrap();
+                }
+
+                if let Some(idx) = found_idx {
+                    // idx was just found via iter().enumerate(): always in bounds,
+                    // but remove() returns Option, so fall back to pop_front().
+                    match guard.remove(idx) {
+                        Some((data, _)) => pkt = Some(data),
+                        None => pkt = guard.pop_front().map(|(d, _)| d),
+                    }
+                    break;
+                } else if !guard.is_empty() {
+                    pkt = guard.pop_front().map(|(d, _)| d);
+                    break;
+                }
+
+                // Spurious wakeups are expected with Condvar: loop and re-check.
+                // On poison, exit the writer instead of aborting the process.
+                match cv.wait(guard) {
+                    Ok(g) => guard = g,
+                    Err(_) => return,
                 }
             }
+            drop(guard);
 
             if let Some(data) = pkt {
                 let len = data.len();
