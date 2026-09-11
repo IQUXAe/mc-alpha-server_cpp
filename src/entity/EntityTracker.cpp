@@ -5,6 +5,7 @@
 #include "EntityAnimals.h"
 #include "EntityFallingSand.h"
 #include "EntityLiving.h"
+#include "../core/RustBridge.h"
 #include "../MinecraftServer.h"
 #include <cmath>
 #include <algorithm>
@@ -27,11 +28,12 @@ bool observerHasEntityChunkLoaded(Entity* entity, EntityPlayerMP* observer) {
 
 TrackerEntry::TrackerEntry(Entity* e, int range, int rate, bool vel)
     : entityId(e->entityId), trackingRange(range), updateRate(rate), sendVelocity(vel) {
-    lastFixedX = (int)(e->posX * 32.0);
-    lastFixedY = (int)(e->posY * 32.0);
-    lastFixedZ = (int)(e->posZ * 32.0);
-    lastYawByte   = static_cast<int8_t>(static_cast<int>(std::floor(e->rotationYaw   * 256.0f / 360.0f)) & 0xFF);
-    lastPitchByte = static_cast<int8_t>(static_cast<int>(std::floor(e->rotationPitch * 256.0f / 360.0f)) & 0xFF);
+    // Fixed-point/angle encoding owned by Rust (tracker_math.rs).
+    lastFixedX = RustBridge::trackerEncodePos(e->posX);
+    lastFixedY = RustBridge::trackerEncodePos(e->posY);
+    lastFixedZ = RustBridge::trackerEncodePos(e->posZ);
+    lastYawByte   = RustBridge::trackerEncodeRot(e->rotationYaw);
+    lastPitchByte = RustBridge::trackerEncodeRot(e->rotationPitch);
     lastMountedEntityId = e->getRidingEntity() ? e->getRidingEntity()->entityId : -1;
     if (auto* living = dynamic_cast<EntityLiving*>(e)) {
         lastHealth = living->health;
@@ -39,19 +41,19 @@ TrackerEntry::TrackerEntry(Entity* e, int range, int rate, bool vel)
 }
 
 std::optional<RustPacket> TrackerEntry::makeSpawnPacket(const Entity* entity) const {
-    int fx = (int)(entity->posX * 32.0);
-    int fy = (int)(entity->posY * 32.0);
-    int fz = (int)(entity->posZ * 32.0);
-    int yaw   = static_cast<int>(std::floor(entity->rotationYaw   * 256.0f / 360.0f)) & 0xFF;
-    int pitch = static_cast<int>(std::floor(entity->rotationPitch * 256.0f / 360.0f)) & 0xFF;
+    int fx = RustBridge::trackerEncodePos(entity->posX);
+    int fy = RustBridge::trackerEncodePos(entity->posY);
+    int fz = RustBridge::trackerEncodePos(entity->posZ);
+    int8_t yaw   = RustBridge::trackerEncodeRot(entity->rotationYaw);
+    int8_t pitch = RustBridge::trackerEncodeRot(entity->rotationPitch);
 
     if (auto* p = dynamic_cast<const EntityPlayerMP*>(entity)) {
         return RustPackets::namedEntitySpawn(
             entity->entityId,
             p->username,
             fx, fy, fz,
-            static_cast<int8_t>(yaw & 0xFF),
-            static_cast<int8_t>(pitch & 0xFF),
+            yaw,
+            pitch,
             lastHeldItemId
         );
     }
@@ -79,8 +81,8 @@ std::optional<RustPacket> TrackerEntry::makeSpawnPacket(const Entity* entity) co
             entity->entityId,
             static_cast<uint8_t>(living->getMobTypeId()),
             fx, fy, fz,
-            static_cast<int8_t>(yaw & 0xFF),
-            static_cast<int8_t>(pitch & 0xFF)
+            yaw,
+            pitch
         );
     }
 
@@ -89,8 +91,8 @@ std::optional<RustPacket> TrackerEntry::makeSpawnPacket(const Entity* entity) co
         entity->entityId,
         90, // pig
         fx, fy, fz,
-        static_cast<int8_t>(yaw & 0xFF),
-        static_cast<int8_t>(pitch & 0xFF)
+        yaw,
+        pitch
     );
 }
 
@@ -121,11 +123,11 @@ void TrackerEntry::sendSpawnTo(EntityPlayerMP* player, const Entity* entity) {
 
     // Sync lastFixed* to what we just sent so sendUpdates doesn't
     // immediately send a stale relative-move or look correction
-    lastFixedX   = (int)(entity->posX * 32.0);
-    lastFixedY   = (int)(entity->posY * 32.0);
-    lastFixedZ   = (int)(entity->posZ * 32.0);
-    lastYawByte  = static_cast<int8_t>(static_cast<int>(std::floor(entity->rotationYaw   * 256.0f / 360.0f)) & 0xFF);
-    lastPitchByte = static_cast<int8_t>(static_cast<int>(std::floor(entity->rotationPitch * 256.0f / 360.0f)) & 0xFF);
+    lastFixedX   = RustBridge::trackerEncodePos(entity->posX);
+    lastFixedY   = RustBridge::trackerEncodePos(entity->posY);
+    lastFixedZ   = RustBridge::trackerEncodePos(entity->posZ);
+    lastYawByte  = RustBridge::trackerEncodeRot(entity->rotationYaw);
+    lastPitchByte = RustBridge::trackerEncodeRot(entity->rotationPitch);
 }
 
 void TrackerEntry::broadcast(const RustPacket& pkt) const {
@@ -145,10 +147,9 @@ void TrackerEntry::updateTracking(const Entity* entity, const std::vector<Entity
     for (auto* player : allPlayers) {
         if (!player || !player->netHandler || player->isDead) continue;
 
-        double dx = player->posX - lastFixedX / 32.0;
-        double dz = player->posZ - lastFixedZ / 32.0;
-        bool inRange = dx >= -trackingRange && dx <= trackingRange
-                    && dz >= -trackingRange && dz <= trackingRange;
+        // Range math owned by Rust (tracker_math.rs); Y intentionally ignored like vanilla.
+        bool inRange = RustBridge::trackerInRange(
+            player->posX, player->posZ, lastFixedX, lastFixedZ, trackingRange);
         bool chunkLoaded = observerHasEntityChunkLoaded(const_cast<Entity*>(entity), player);
 
         bool alreadyTracking = trackingPlayers.count(player) > 0;
@@ -167,11 +168,11 @@ void TrackerEntry::updateTracking(const Entity* entity, const std::vector<Entity
 void TrackerEntry::sendUpdates(const Entity* entity) {
     if (tickCounter++ % updateRate != 0) return;
 
-    int fx = (int)(entity->posX * 32.0);
-    int fy = (int)(entity->posY * 32.0);
-    int fz = (int)(entity->posZ * 32.0);
-    int8_t yaw   = static_cast<int8_t>(static_cast<int>(std::floor(entity->rotationYaw   * 256.0f / 360.0f)) & 0xFF);
-    int8_t pitch = static_cast<int8_t>(static_cast<int>(std::floor(entity->rotationPitch * 256.0f / 360.0f)) & 0xFF);
+    int fx = RustBridge::trackerEncodePos(entity->posX);
+    int fy = RustBridge::trackerEncodePos(entity->posY);
+    int fz = RustBridge::trackerEncodePos(entity->posZ);
+    int8_t yaw   = RustBridge::trackerEncodeRot(entity->rotationYaw);
+    int8_t pitch = RustBridge::trackerEncodeRot(entity->rotationPitch);
 
     int dx = fx - lastFixedX;
     int dy = fy - lastFixedY;
@@ -179,40 +180,38 @@ void TrackerEntry::sendUpdates(const Entity* entity) {
     bool moved  = dx != 0 || dy != 0 || dz != 0;
     bool turned = yaw != lastYawByte || pitch != lastPitchByte;
 
-    // Send velocity update if changed (Java: Packet28, threshold 0.02)
-    if (sendVelocity) {
-        double dvx = entity->motionX - lastMotionX;
-        double dvy = entity->motionY - lastMotionY;
-        double dvz = entity->motionZ - lastMotionZ;
-        double dvSq = dvx*dvx + dvy*dvy + dvz*dvz;
-        bool velStopped = (entity->motionX == 0.0 && entity->motionY == 0.0 && entity->motionZ == 0.0
-                           && (lastMotionX != 0.0 || lastMotionY != 0.0 || lastMotionZ != 0.0));
-        if (dvSq > 0.02*0.02 || velStopped) {
-            lastMotionX = entity->motionX;
-            lastMotionY = entity->motionY;
-            lastMotionZ = entity->motionZ;
-            broadcast(RustPackets::velocity(
-                entity->entityId, entity->motionX, entity->motionY, entity->motionZ));
-        }
+    // Velocity-dirty check owned by Rust (threshold 0.02 + stop packet).
+    if (RustBridge::trackerVelocityChanged(
+            entity->motionX, entity->motionY, entity->motionZ,
+            lastMotionX, lastMotionY, lastMotionZ, sendVelocity)) {
+        lastMotionX = entity->motionX;
+        lastMotionY = entity->motionY;
+        lastMotionZ = entity->motionZ;
+        broadcast(RustPackets::velocity(
+            entity->entityId, entity->motionX, entity->motionY, entity->motionZ));
     }
 
+    // Packet-kind selection owned by Rust: 0=entity, 1=move, 2=look, 3=move+look, 4=teleport.
     RustPacket movePkt;
-    if (dx >= -128 && dx < 128 && dy >= -128 && dy < 128 && dz >= -128 && dz < 128) {
-        if (moved && turned)
+    switch (RustBridge::trackerMoveKind(dx, dy, dz, moved, turned)) {
+        case 3:
             movePkt = RustPackets::relEntityMoveLook(
-                entity->entityId, (int8_t)dx, (int8_t)dy, (int8_t)dz,
-                (int8_t)yaw, (int8_t)pitch);
-        else if (moved)
+                entity->entityId, (int8_t)dx, (int8_t)dy, (int8_t)dz, yaw, pitch);
+            break;
+        case 1:
             movePkt = RustPackets::relEntityMove(
                 entity->entityId, (int8_t)dx, (int8_t)dy, (int8_t)dz);
-        else if (turned)
-            movePkt = RustPackets::entityLook(
-                entity->entityId, (int8_t)yaw, (int8_t)pitch);
-        else
+            break;
+        case 2:
+            movePkt = RustPackets::entityLook(entity->entityId, yaw, pitch);
+            break;
+        case 4:
+            movePkt = RustPackets::entityTeleport(entity->entityId, fx, fy, fz, yaw, pitch);
+            break;
+        case 0:
+        default:
             movePkt = RustPackets::entity(entity->entityId);
-    } else {
-        movePkt = RustPackets::entityTeleport(
-            entity->entityId, fx, fy, fz, (int8_t)yaw, (int8_t)pitch);
+            break;
     }
 
     broadcast(movePkt);

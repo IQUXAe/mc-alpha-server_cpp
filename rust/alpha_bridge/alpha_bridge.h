@@ -998,6 +998,41 @@ int32_t alpha_rng_next_int(int32_t bound);
 float   alpha_rng_next_float(void);
 double  alpha_rng_next_double(void);
 
+// Player digging state machine (player_digging.rs).
+// Owns progressive-digging state; C++ keeps only world access.
+typedef struct FfiDigState {
+    float cur_damage;
+    float block_damage;
+    int32_t initial_cooldown;
+    int32_t target_x;
+    int32_t target_y;
+    int32_t target_z;
+    bool has_target;
+} FfiDigState;
+
+typedef struct FfiDigInput {
+    int32_t block_id;
+    int32_t held_item_id;
+    bool in_water;
+    bool on_ground;
+} FfiDigInput;
+
+FfiDigState alpha_dig_state_new(void);
+void alpha_dig_cancel(FfiDigState* state);
+bool alpha_dig_on_click(FfiDigInput input);
+bool alpha_dig_on_tick(FfiDigState* state, int32_t x, int32_t y, int32_t z, FfiDigInput input);
+
+// Entity tracker math (tracker_math.rs). Pure functions, no allocation.
+int32_t alpha_tracker_encode_pos(double pos);
+int8_t alpha_tracker_encode_rot(float degrees);
+uint8_t alpha_tracker_move_kind(int32_t dx, int32_t dy, int32_t dz, bool moved, bool turned);
+bool alpha_tracker_velocity_changed(double motion_x, double motion_y, double motion_z,
+                                    double last_x, double last_y, double last_z,
+                                    bool send_velocity);
+bool alpha_tracker_in_range(double player_x, double player_z,
+                            int32_t last_fixed_x, int32_t last_fixed_z,
+                            int32_t tracking_range);
+
 #ifdef __cplusplus
 }
 #endif

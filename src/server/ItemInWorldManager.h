@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../core/RustBridge.h"
+
 class World;
 class EntityPlayerMP;
 class ItemStack;
@@ -7,21 +9,14 @@ class ItemStack;
 class ItemInWorldManager {
 public:
     World* worldObj;
-    EntityPlayerMP* thisPlayerMP;
-    
-    // Digging tracking
-    float curblockDamage = 0.0f;
-    int initialDamage = 0;
-    float blockDamage = 0.0f;
-    
-    // Target position
-    int partiallyDestroyedBlockX = 0;
-    int partiallyDestroyedBlockY = 0;
-    int partiallyDestroyedBlockZ = 0;
+    EntityPlayerMP* thisPlayerMP = nullptr;
+
+    // Progressive-digging state is owned by Rust (player_digging.rs).
+    // Stored inline: plain repr(C) value, no pointer, no extra free.
+    RustBridge::FfiDigState digState = RustBridge::digStateNew();
 
     void cancelRemoving() {
-        curblockDamage = 0.0f;
-        initialDamage = 0;
+        RustBridge::digCancel(&digState);
     }
 
     ItemInWorldManager(World* world);

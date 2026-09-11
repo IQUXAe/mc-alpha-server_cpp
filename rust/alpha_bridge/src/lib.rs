@@ -462,6 +462,8 @@ pub mod player_inventory;
 pub mod player_combat;
 pub mod player_movement;
 pub mod player_mining;
+pub mod player_digging;
+pub mod tracker_math;
 
 use crate::random::JavaRandom;
 use crate::noise::{NoiseGeneratorOctaves, NoiseGeneratorOctaves2};

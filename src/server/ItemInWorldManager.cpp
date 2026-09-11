@@ -6,6 +6,29 @@
 #include "../core/Item.h"
 #include "../core/AxisAlignedBB.h"
 #include "../core/Logger.h"
+#include "../core/RustBridge.h"
+
+namespace {
+
+// Build the digging input for Rust from the live player state.
+// Mirrors the held-item/water/ground extraction in Block::checkHardness.
+RustBridge::FfiDigInput makeDigInput(int blockId, EntityPlayerMP* player) {
+    int heldId = 0;
+    bool inWater = false;
+    bool onGround = true;
+    if (player) {
+        if (ItemStack* held = player->inventory.getCurrentItem()) {
+            if (held->stackSize > 0 && held->itemID > 0) {
+                heldId = held->itemID;
+            }
+        }
+        inWater = player->isInWater;
+        onGround = player->onGround;
+    }
+    return RustBridge::FfiDigInput{blockId, heldId, inWater, onGround};
+}
+
+} // namespace
 
 ItemInWorldManager::ItemInWorldManager(World* world) {
     this->worldObj = world;
@@ -20,42 +43,22 @@ void ItemInWorldManager::tick() {
 void ItemInWorldManager::onBlockClicked(int x, int y, int z, int side) {
     int id = worldObj->getBlockId(x, y, z);
     if (id == 0) return;
-    
-    Block* block = Block::blocksList[id];
-    // In Alpha, onBlockClicked is called when player starts digging (status=0)
-    // If block breaks instantly (hardness check >= 1.0), harvest it immediately
-    float hardness = block->checkHardness(thisPlayerMP);
-    if (hardness >= 1.0f) {
-        // Instant break (e.g., flowers, torches)
+
+    // Instant-break decision lives in Rust (hardness >= 1.0).
+    // One FFI call replaces the old Block::blocksList + checkHardness round-trip.
+    if (RustBridge::digOnClick(makeDigInput(id, thisPlayerMP))) {
         harvestBlock(x, y, z);
     }
-    // Otherwise, blockRemoving will handle progressive breaking
+    // Otherwise, blockRemoving will handle progressive breaking.
 }
 
 void ItemInWorldManager::blockRemoving(int x, int y, int z, int side) {
-    if (initialDamage > 0) {
-        initialDamage--;
-    } else {
-        if (x == partiallyDestroyedBlockX && y == partiallyDestroyedBlockY && z == partiallyDestroyedBlockZ) {
-            int id = worldObj->getBlockId(x, y, z);
-            if (id == 0) return;
-            Block* block = Block::blocksList[id];
-            float hardnessTick = block->checkHardness(thisPlayerMP);
-            curblockDamage += hardnessTick;
-            blockDamage += 1.0f;
-            if (curblockDamage >= 1.0f) {
-                harvestBlock(x, y, z);
-                curblockDamage = 0.0f;
-                blockDamage = 0.0f;
-                initialDamage = 5;
-            }
-        } else {
-            curblockDamage = 0.0f;
-            blockDamage = 0.0f;
-            partiallyDestroyedBlockX = x;
-            partiallyDestroyedBlockY = y;
-            partiallyDestroyedBlockZ = z;
-        }
+    // Exact C++ semantics (cooldown tick, target latch, air no-op,
+    // accumulate, break at 1.0) live in Rust now. Air packets also go
+    // through FFI so the cooldown keeps ticking, as before.
+    int id = worldObj->getBlockId(x, y, z);
+    if (RustBridge::digOnTick(&digState, x, y, z, makeDigInput(id, thisPlayerMP))) {
+        harvestBlock(x, y, z);
     }
 }
 

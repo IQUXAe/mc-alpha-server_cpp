@@ -14,17 +14,21 @@ areas already have narrow data-oriented boundaries:
 Those are good first Rust targets because they can be tested independently and exposed
 through a small C ABI without rewriting gameplay.
 
-## First module
+## What lives here now
 
-`alpha_bridge/` is a small `staticlib` crate that exposes:
+`alpha_bridge/` is a `staticlib` crate. It started with compression
+(`alpha_gzip_*`, `alpha_zstd_*`, `alpha_buffer_free`) and has since grown
+into the main migration vehicle — see `alpha_bridge.h` (~1000 lines) for the
+full FFI surface. Current Rust-owned areas include:
 
-- `alpha_gzip_compress`
-- `alpha_gzip_decompress`
-- `alpha_zstd_compress`
-- `alpha_zstd_decompress`
-- `alpha_buffer_free`
-
-The ABI is intentionally tiny so the C++ side can adopt it incrementally.
+- compression: gzip/zstd/zlib + `level.dat` NBT encode/decode
+- worldgen: `noise`, `biome`, `density`, `caves`, `decorators`, `generator`
+- storage: `chunk_loader`, `player_storage`, `nbt`
+- player logic: `player_inventory`, `player_combat`, `player_movement`,
+  `player_mining`, `player_digging` (digging state machine)
+- entities/network: `network` (packet encode + `RustNetworkManager`),
+  `pathfinder`, `tracker_math` (tracking math), `commands`, `block`,
+  `tile_entity_*`, `random`
 
 ## Build locally once Rust is installed
 

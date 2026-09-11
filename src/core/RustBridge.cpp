@@ -209,4 +209,44 @@ int32_t miningGetDestroyTicks(int32_t blockId, int32_t heldItemId, bool inWater,
     return ::alpha_mining_get_destroy_ticks(blockId, heldItemId, inWater, onGround);
 }
 
+FfiDigState digStateNew() {
+    return ::alpha_dig_state_new();
+}
+
+void digCancel(FfiDigState* state) {
+    ::alpha_dig_cancel(state);
+}
+
+bool digOnClick(const FfiDigInput& input) {
+    return ::alpha_dig_on_click(input);
+}
+
+bool digOnTick(FfiDigState* state, int32_t x, int32_t y, int32_t z, const FfiDigInput& input) {
+    return ::alpha_dig_on_tick(state, x, y, z, input);
+}
+
+int32_t trackerEncodePos(double pos) {
+    return ::alpha_tracker_encode_pos(pos);
+}
+
+int8_t trackerEncodeRot(float degrees) {
+    return ::alpha_tracker_encode_rot(degrees);
+}
+
+uint8_t trackerMoveKind(int32_t dx, int32_t dy, int32_t dz, bool moved, bool turned) {
+    return ::alpha_tracker_move_kind(dx, dy, dz, moved, turned);
+}
+
+bool trackerVelocityChanged(double motionX, double motionY, double motionZ,
+                            double lastX, double lastY, double lastZ,
+                            bool sendVelocity) {
+    return ::alpha_tracker_velocity_changed(motionX, motionY, motionZ, lastX, lastY, lastZ, sendVelocity);
+}
+
+bool trackerInRange(double playerX, double playerZ,
+                    int32_t lastFixedX, int32_t lastFixedZ,
+                    int32_t trackingRange) {
+    return ::alpha_tracker_in_range(playerX, playerZ, lastFixedX, lastFixedZ, trackingRange);
+}
+
 } // namespace RustBridge

@@ -94,4 +94,23 @@ float miningGetStrVsBlock(int32_t blockId, int32_t heldItemId);
 float miningCheckHardness(int32_t blockId, int32_t heldItemId, bool inWater, bool onGround);
 int32_t miningGetDestroyTicks(int32_t blockId, int32_t heldItemId, bool inWater, bool onGround);
 
+// Player digging state machine (owns progressive-dig state in Rust)
+using FfiDigState = ::FfiDigState;
+using FfiDigInput = ::FfiDigInput;
+FfiDigState digStateNew();
+void digCancel(FfiDigState* state);
+bool digOnClick(const FfiDigInput& input);
+bool digOnTick(FfiDigState* state, int32_t x, int32_t y, int32_t z, const FfiDigInput& input);
+
+// Entity tracker math (pure functions, no allocation)
+int32_t trackerEncodePos(double pos);
+int8_t trackerEncodeRot(float degrees);
+uint8_t trackerMoveKind(int32_t dx, int32_t dy, int32_t dz, bool moved, bool turned);
+bool trackerVelocityChanged(double motionX, double motionY, double motionZ,
+                            double lastX, double lastY, double lastZ,
+                            bool sendVelocity);
+bool trackerInRange(double playerX, double playerZ,
+                    int32_t lastFixedX, int32_t lastFixedZ,
+                    int32_t trackingRange);
+
 } // namespace RustBridge
