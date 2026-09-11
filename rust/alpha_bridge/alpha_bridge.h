@@ -1140,6 +1140,25 @@ void block_furnace_scatter_stack(const ScatterWorld* world, int32_t item_id, int
 bool block_chest_can_place(uint8_t (*get_block_id)(int32_t x, int32_t y, int32_t z),
                            uint8_t chest_id, int32_t x, int32_t y, int32_t z);
 
+// Small-entity kernels (entity_misc.rs). Pointers and world mutation stay in C++.
+typedef struct ItemMotion {
+    double mx;
+    double my;
+    double mz;
+} ItemMotion;
+
+int8_t alpha_item_push_side(bool free_w, bool free_e, bool free_d, bool free_u,
+                            bool free_n, bool free_s, double lx, double ly, double lz);
+bool alpha_item_damp(bool on_ground, ItemMotion* io);
+uint8_t alpha_falling_land(int32_t block_id, bool on_ground, int32_t by, int32_t land_id,
+                           bool land_replaceable, bool have_block, int32_t fall_time);
+double alpha_boat_water_fraction(double min_x, double min_y, double min_z,
+                                 double max_x, double max_y, double max_z,
+                                 bool (*is_water)(int32_t x, int32_t y, int32_t z));
+bool alpha_boat_steer(double delta_x, double delta_z, float cur_yaw, float* out_yaw);
+bool alpha_boat_rider_offset(float yaw, double* out_x, double* out_z);
+bool alpha_arrow_face_velocity(double mx, double my, double mz, float* out_yaw, float* out_pitch);
+
 // Entity physics kernel (entity_physics.rs). Pure collision/fall/push math;
 // the world-dependent half (box gathering, onFall, velocity) stays in C++.
 typedef struct FfiAabb {

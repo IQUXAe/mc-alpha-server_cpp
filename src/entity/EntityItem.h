@@ -33,17 +33,11 @@ public:
         moveEntity(motionX, motionY, motionZ);
 
         // Java: var1 = 0.98, if onGround: var1 = slipperiness * 0.98 (default slipperiness = 0.6)
-        float var1 = 0.98f;
-        if (onGround) {
-            var1 = 0.6f * 0.98f; // default block slipperiness
-        }
-
-        motionX *= var1;
-        motionY *= 0.98;
-        motionZ *= var1;
-        if (onGround) {
-            motionY *= -0.5;
-        }
+        RustBridge::ItemMotion motion{motionX, motionY, motionZ};
+        RustBridge::itemDamp(onGround, &motion);
+        motionX = motion.mx;
+        motionY = motion.my;
+        motionZ = motion.mz;
 
         if (age >= 6000) isDead = true;
     }
@@ -65,41 +59,14 @@ private:
             return;
         }
 
-        const bool freeWest = !worldObj->isBlockSolidNoChunkLoad(x - 1, y, z);
-        const bool freeEast = !worldObj->isBlockSolidNoChunkLoad(x + 1, y, z);
-        const bool freeDown = !worldObj->isBlockSolidNoChunkLoad(x, y - 1, z);
-        const bool freeUp = !worldObj->isBlockSolidNoChunkLoad(x, y + 1, z);
-        const bool freeNorth = !worldObj->isBlockSolidNoChunkLoad(x, y, z - 1);
-        const bool freeSouth = !worldObj->isBlockSolidNoChunkLoad(x, y, z + 1);
-
-        int bestSide = -1;
-        double bestDistance = 9999.0;
-
-        if (freeWest && localX < bestDistance) {
-            bestDistance = localX;
-            bestSide = 0;
-        }
-        if (freeEast && 1.0 - localX < bestDistance) {
-            bestDistance = 1.0 - localX;
-            bestSide = 1;
-        }
-        if (freeDown && localY < bestDistance) {
-            bestDistance = localY;
-            bestSide = 2;
-        }
-        if (freeUp && 1.0 - localY < bestDistance) {
-            bestDistance = 1.0 - localY;
-            bestSide = 3;
-        }
-        if (freeNorth && localZ < bestDistance) {
-            bestDistance = localZ;
-            bestSide = 4;
-        }
-        if (freeSouth && 1.0 - localZ < bestDistance) {
-            bestDistance = 1.0 - localZ;
-            bestSide = 5;
-        }
-
+        const int8_t bestSide = RustBridge::itemPushSide(
+            !worldObj->isBlockSolidNoChunkLoad(x - 1, y, z),
+            !worldObj->isBlockSolidNoChunkLoad(x + 1, y, z),
+            !worldObj->isBlockSolidNoChunkLoad(x, y - 1, z),
+            !worldObj->isBlockSolidNoChunkLoad(x, y + 1, z),
+            !worldObj->isBlockSolidNoChunkLoad(x, y, z - 1),
+            !worldObj->isBlockSolidNoChunkLoad(x, y, z + 1),
+            localX, localY, localZ);
         if (bestSide < 0) {
             return;
         }

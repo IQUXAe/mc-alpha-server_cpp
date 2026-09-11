@@ -447,6 +447,38 @@ bool blockChestCanPlace(uint8_t (*getBlockId)(int32_t x, int32_t y, int32_t z),
     return ::block_chest_can_place(getBlockId, chestId, x, y, z);
 }
 
+int8_t itemPushSide(bool freeW, bool freeE, bool freeD, bool freeU,
+                    bool freeN, bool freeS, double lx, double ly, double lz) {
+    return ::alpha_item_push_side(freeW, freeE, freeD, freeU, freeN, freeS, lx, ly, lz);
+}
+
+bool itemDamp(bool onGround, ItemMotion* io) {
+    return ::alpha_item_damp(onGround, io);
+}
+
+uint8_t fallingLand(int32_t blockId, bool onGround, int32_t by, int32_t landId,
+                    bool landReplaceable, bool haveBlock, int32_t fallTime) {
+    return ::alpha_falling_land(blockId, onGround, by, landId, landReplaceable, haveBlock, fallTime);
+}
+
+double boatWaterFraction(double minX, double minY, double minZ,
+                         double maxX, double maxY, double maxZ,
+                         bool (*isWater)(int32_t x, int32_t y, int32_t z)) {
+    return ::alpha_boat_water_fraction(minX, minY, minZ, maxX, maxY, maxZ, isWater);
+}
+
+bool boatSteer(double deltaX, double deltaZ, float curYaw, float* outYaw) {
+    return ::alpha_boat_steer(deltaX, deltaZ, curYaw, outYaw);
+}
+
+bool boatRiderOffset(float yaw, double* outX, double* outZ) {
+    return ::alpha_boat_rider_offset(yaw, outX, outZ);
+}
+
+bool arrowFaceVelocity(double mx, double my, double mz, float* outYaw, float* outPitch) {
+    return ::alpha_arrow_face_velocity(mx, my, mz, outYaw, outPitch);
+}
+
 bool entityResolveMove(const FfiAabb& box, double dx, double dy, double dz,
                        const FfiAabb* boxes, size_t numBoxes, ResolvedMove* out) {
     return ::alpha_entity_resolve_move(&box, dx, dy, dz, boxes, numBoxes, out);

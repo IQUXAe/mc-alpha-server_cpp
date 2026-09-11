@@ -17,6 +17,22 @@
 #include <numbers>
 #include <vector>
 
+#include "../core/RustBridge.h"
+
+inline thread_local World* gBoatWorld = nullptr;
+
+extern "C" inline bool boatIsWaterCell(int32_t x, int32_t y, int32_t z) {
+    return gBoatWorld->getBlockMaterialNoChunkLoad(x, y, z) == &Material::water;
+}
+
+struct BoatWorldGuard {
+    explicit BoatWorldGuard(World* world) : prev_(gBoatWorld) { gBoatWorld = world; }
+    ~BoatWorldGuard() { gBoatWorld = prev_; }
+
+private:
+    World* prev_;
+};
+
 class EntityBoat : public Entity {
 public:
     int timeSinceHit = 0;
@@ -151,13 +167,9 @@ public:
         rotationPitch = 0.0f;
         const double deltaX = prevPosX - posX;
         const double deltaZ = prevPosZ - posZ;
-        if (deltaX * deltaX + deltaZ * deltaZ > 0.001) {
-            double targetYaw = std::atan2(deltaZ, deltaX) * 180.0 / std::numbers::pi;
-            double yawDelta = targetYaw - static_cast<double>(rotationYaw);
-            while (yawDelta >= 180.0) yawDelta -= 360.0;
-            while (yawDelta < -180.0) yawDelta += 360.0;
-            yawDelta = std::clamp(yawDelta, -20.0, 20.0);
-            rotationYaw = static_cast<float>(static_cast<double>(rotationYaw) + yawDelta);
+        float steeredYaw = rotationYaw;
+        if (RustBridge::boatSteer(deltaX, deltaZ, rotationYaw, &steeredYaw)) {
+            rotationYaw = steeredYaw;
         }
 
         std::vector<Entity*> nearbyEntities;
@@ -181,9 +193,9 @@ public:
             return;
         }
 
-        const double yawRadians = static_cast<double>(rotationYaw) * std::numbers::pi / 180.0;
-        const double offsetX = std::cos(yawRadians) * 0.4;
-        const double offsetZ = std::sin(yawRadians) * 0.4;
+        double offsetX = 0.4;
+        double offsetZ = 0.0;
+        RustBridge::boatRiderOffset(rotationYaw, &offsetX, &offsetZ);
         rider->setPosition(posX + offsetX, posY + 0.35, posZ + offsetZ);
     }
 
@@ -193,36 +205,10 @@ private:
             return 0.0;
         }
 
-        constexpr int sliceCount = 5;
-        double fraction = 0.0;
-        for (int slice = 0; slice < sliceCount; ++slice) {
-            const double minY = boundingBox.minY + (boundingBox.maxY - boundingBox.minY) * static_cast<double>(slice) / static_cast<double>(sliceCount) - 0.125;
-            const double maxY = boundingBox.minY + (boundingBox.maxY - boundingBox.minY) * static_cast<double>(slice + 1) / static_cast<double>(sliceCount) - 0.125;
-            const int minX = MathHelper::floor_double(boundingBox.minX);
-            const int maxX = MathHelper::floor_double(boundingBox.maxX);
-            const int minBlockY = MathHelper::floor_double(minY);
-            const int maxBlockY = MathHelper::floor_double(maxY);
-            const int minZ = MathHelper::floor_double(boundingBox.minZ);
-            const int maxZ = MathHelper::floor_double(boundingBox.maxZ);
-
-            bool sliceInWater = false;
-            for (int x = minX; x <= maxX && !sliceInWater; ++x) {
-                for (int y = minBlockY; y <= maxBlockY && !sliceInWater; ++y) {
-                    for (int z = minZ; z <= maxZ; ++z) {
-                        if (worldObj->getBlockMaterialNoChunkLoad(x, y, z) == &Material::water) {
-                            sliceInWater = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if (sliceInWater) {
-                fraction += 1.0 / static_cast<double>(sliceCount);
-            }
-        }
-
-        return fraction;
+        BoatWorldGuard guard(worldObj);
+        return RustBridge::boatWaterFraction(boundingBox.minX, boundingBox.minY, boundingBox.minZ,
+                                             boundingBox.maxX, boundingBox.maxY, boundingBox.maxZ,
+                                             &boatIsWaterCell);
     }
 
     void dropMaterials() {

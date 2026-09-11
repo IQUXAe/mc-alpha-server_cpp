@@ -1,0 +1,302 @@
+//! Small-entity kernels ported from C++ `EntityItem`, `EntityFallingSand`,
+//! and `EntityBoat` (mirrors Java `EntityItem`, `EntityFallingSand`,
+//! `EntityBoat`).
+//!
+//! Only closed-form pieces move: push-out side selection, friction damping,
+//! falling-sand landing decisions, water-fraction scan math, and yaw/rider
+//! geometry. Entity pointers, world mutation, and drops stay in C++.
+
+/// Push-out side for an item stuck in a solid block (mirrors
+/// `EntityItem::pushOutOfBlocks` scoring). Free-face flags come in
+/// W,E,D,U,N,S order with the fractional position; returns the side
+/// (0..5) or -1 when fully buried.
+#[no_mangle]
+pub extern "C" fn alpha_item_push_side(
+    free_w: bool,
+    free_e: bool,
+    free_d: bool,
+    free_u: bool,
+    free_n: bool,
+    free_s: bool,
+    lx: f64,
+    ly: f64,
+    lz: f64,
+) -> i8 {
+    let mut best_side: i8 = -1;
+    let mut best = 9999.0f64;
+    if free_w && lx < best {
+        best = lx;
+        best_side = 0;
+    }
+    if free_e && 1.0 - lx < best {
+        best = 1.0 - lx;
+        best_side = 1;
+    }
+    if free_d && ly < best {
+        best = ly;
+        best_side = 2;
+    }
+    if free_u && 1.0 - ly < best {
+        best = 1.0 - ly;
+        best_side = 3;
+    }
+    if free_n && lz < best {
+        best = lz;
+        best_side = 4;
+    }
+    if free_s && 1.0 - lz < best {
+        best = 1.0 - lz;
+        best_side = 5;
+    }
+    best_side
+}
+
+/// In-place motion for the item friction block (mirrors `EntityItem::tick`
+/// damping; gravity and aging stay in C++).
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct ItemMotion {
+    pub mx: f64,
+    pub my: f64,
+    pub mz: f64,
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alpha_item_damp(on_ground: bool, io: *mut ItemMotion) -> bool {
+    if io.is_null() {
+        return false;
+    }
+    let io = unsafe { &mut *io };
+    // Java: 0.98 air, slipperiness(0.6) * 0.98 on ground.
+    let var1: f32 = if on_ground { 0.6f32 * 0.98f32 } else { 0.98f32 };
+    io.mx *= var1 as f64;
+    io.my *= 0.98;
+    io.mz *= var1 as f64;
+    if on_ground {
+        io.my *= -0.5;
+    }
+    true
+}
+
+/// Falling-sand landing decision (mirrors `EntityFallingSand::tick` tail).
+/// Fact gathering (block id, replaceability, registry presence) stays in
+/// C++; returns 0 = keep falling, 1 = place block, 2 = drop as item,
+/// 3 = die (air id).
+#[no_mangle]
+pub extern "C" fn alpha_falling_land(
+    block_id: i32,
+    on_ground: bool,
+    by: i32,
+    land_id: i32,
+    land_replaceable: bool,
+    have_block: bool,
+    fall_time: i32,
+) -> u8 {
+    if block_id == 0 {
+        return 3;
+    }
+    if on_ground {
+        if by >= 0 && by < 128 && (land_id == 0 || land_replaceable) && have_block {
+            return 1;
+        }
+        return 2;
+    }
+    if fall_time > 100 {
+        return 2;
+    }
+    0
+}
+
+/// Water fraction under a box (mirrors `EntityBoat::computeWaterFraction`).
+/// Five vertical slices of the box shrunk by 0.125; a slice counts when any
+/// cell in it is water. `is_water` answers per-cell.
+#[no_mangle]
+pub unsafe extern "C" fn alpha_boat_water_fraction(
+    min_x: f64,
+    min_y: f64,
+    min_z: f64,
+    max_x: f64,
+    max_y: f64,
+    max_z: f64,
+    is_water: Option<extern "C" fn(x: i32, y: i32, z: i32) -> bool>,
+) -> f64 {
+    let Some(is_water) = is_water else {
+        return 0.0;
+    };
+    let mut fraction = 0.0;
+    for slice in 0..5 {
+        let slice_min_y = min_y + (max_y - min_y) * (slice as f64) / 5.0 - 0.125;
+        let slice_max_y = min_y + (max_y - min_y) * ((slice + 1) as f64) / 5.0 - 0.125;
+        let min_by = slice_min_y.floor() as i32;
+        let max_by = slice_max_y.floor() as i32;
+        let mut wet = false;
+        'scan: for x in (min_x.floor() as i32)..=(max_x.floor() as i32) {
+            for y in min_by..=max_by {
+                for z in (min_z.floor() as i32)..=(max_z.floor() as i32) {
+                    if is_water(x, y, z) {
+                        wet = true;
+                        break 'scan;
+                    }
+                }
+            }
+        }
+        if wet {
+            fraction += 1.0 / 5.0;
+        }
+    }
+    fraction
+}
+
+/// Boat yaw steering (mirrors the yaw block in `EntityBoat::tick`).
+/// Writes the new yaw; returns false on null output. Threshold `0.001`
+/// (squared movement) and the ±20 clamp are preserved exactly, including
+/// the asymmetric wrap (`>= 180` first, then `< -180`).
+#[no_mangle]
+pub unsafe extern "C" fn alpha_boat_steer(delta_x: f64, delta_z: f64, cur_yaw: f32, out_yaw: *mut f32) -> bool {
+    if out_yaw.is_null() {
+        return false;
+    }
+    if delta_x * delta_x + delta_z * delta_z <= 0.001 {
+        return false;
+    }
+    let target = (delta_z.atan2(delta_x) * 180.0 / std::f64::consts::PI) as f32 - 90.0;
+    let mut delta = target - cur_yaw;
+    while delta >= 180.0 {
+        delta -= 360.0;
+    }
+    while delta < -180.0 {
+        delta += 360.0;
+    }
+    if delta > 20.0 {
+        delta = 20.0;
+    }
+    if delta < -20.0 {
+        delta = -20.0;
+    }
+    unsafe {
+        *out_yaw = cur_yaw + delta;
+    }
+    true
+}
+
+/// Rider seat offset (mirrors `EntityBoat::updateRiderPosition` geometry;
+/// rider lookup and positioning stay in C++). Plain `std` trig like C++.
+#[no_mangle]
+pub unsafe extern "C" fn alpha_boat_rider_offset(yaw: f32, out_x: *mut f64, out_z: *mut f64) -> bool {
+    if out_x.is_null() || out_z.is_null() {
+        return false;
+    }
+    let radians = yaw as f64 * std::f64::consts::PI / 180.0;
+    unsafe {
+        *out_x = radians.cos() * 0.4;
+        *out_z = radians.sin() * 0.4;
+    }
+    true
+}
+
+/// Yaw/pitch from velocity (mirrors the arrow orientation init:
+/// `atan2(vx, vz)` yaw, `atan2(vy, horizontal)` pitch with `sqrt_float`).
+#[no_mangle]
+pub unsafe extern "C" fn alpha_arrow_face_velocity(
+    mx: f64,
+    my: f64,
+    mz: f64,
+    out_yaw: *mut f32,
+    out_pitch: *mut f32,
+) -> bool {
+    if out_yaw.is_null() || out_pitch.is_null() {
+        return false;
+    }
+    let horizontal = crate::math_helper::sqrt_float((mx * mx + mz * mz) as f32);
+    unsafe {
+        *out_yaw = (mx.atan2(mz) * 180.0 / std::f64::consts::PI) as f32;
+        *out_pitch = (my.atan2(horizontal as f64) * 180.0 / std::f64::consts::PI) as f32;
+    }
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_push_side_picks_nearest_free_face() {
+        // Free west face, close to it.
+        assert_eq!(alpha_item_push_side(true, false, false, false, false, false, 0.1, 0.5, 0.5), 0);
+        // Buried: nothing free.
+        assert_eq!(alpha_item_push_side(false, false, false, false, false, false, 0.1, 0.5, 0.5), -1);
+        // East closer than west.
+        assert_eq!(alpha_item_push_side(true, true, false, false, false, false, 0.9, 0.5, 0.5), 1);
+        // Down wins over far west.
+        assert_eq!(alpha_item_push_side(true, false, true, false, false, false, 0.4, 0.1, 0.5), 2);
+    }
+
+    #[test]
+    fn test_item_damp_ground_and_air() {
+        let mut m = ItemMotion { mx: 1.0, my: -2.0, mz: 1.0 };
+        assert!(unsafe { alpha_item_damp(false, &mut m) });
+        assert!((m.mx - 0.98).abs() < 1e-6);
+        assert!((m.my + 1.96).abs() < 1e-9);
+        let mut m = ItemMotion { mx: 1.0, my: -2.0, mz: 1.0 };
+        assert!(unsafe { alpha_item_damp(true, &mut m) });
+        assert!((m.mx - 0.588).abs() < 1e-6);
+        assert!((m.my - 0.98).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_falling_land_table() {
+        assert_eq!(alpha_falling_land(0, false, 60, 0, false, true, 0), 3);
+        assert_eq!(alpha_falling_land(12, false, 60, 0, false, true, 0), 0);
+        assert_eq!(alpha_falling_land(12, false, 60, 0, false, true, 101), 2);
+        assert_eq!(alpha_falling_land(12, true, 60, 0, false, true, 5), 1);
+        assert_eq!(alpha_falling_land(12, true, 60, 3, false, true, 5), 2);
+        assert_eq!(alpha_falling_land(12, true, 60, 3, true, true, 5), 1);
+        assert_eq!(alpha_falling_land(12, true, 60, 3, true, false, 5), 2);
+        assert_eq!(alpha_falling_land(12, true, 200, 0, false, true, 5), 2);
+    }
+
+    extern "C" fn wet_everywhere(_x: i32, _y: i32, _z: i32) -> bool {
+        true
+    }
+    extern "C" fn dry_everywhere(_x: i32, _y: i32, _z: i32) -> bool {
+        false
+    }
+
+    #[test]
+    fn test_water_fraction_extremes() {
+        let full = unsafe { alpha_boat_water_fraction(0.0, 62.0, 0.0, 2.0, 63.0, 2.0, Some(wet_everywhere)) };
+        assert!((full - 1.0).abs() < 1e-9);
+        let dry = unsafe { alpha_boat_water_fraction(0.0, 62.0, 0.0, 2.0, 63.0, 2.0, Some(dry_everywhere)) };
+        assert_eq!(dry, 0.0);
+        assert_eq!(unsafe { alpha_boat_water_fraction(0.0, 62.0, 0.0, 2.0, 63.0, 2.0, None) }, 0.0);
+    }
+
+    #[test]
+    fn test_boat_steer() {
+        let mut yaw = 0.0f32;
+        // Still: no update.
+        assert!(!unsafe { alpha_boat_steer(0.0, 0.0, 10.0, &mut yaw) });
+        assert_eq!(yaw, 0.0);
+        // Eastward motion from yaw 0: target -90, clamped to -20.
+        assert!(unsafe { alpha_boat_steer(1.0, 0.0, 0.0, &mut yaw) });
+        assert_eq!(yaw, -20.0);
+    }
+
+    #[test]
+    fn test_rider_offset() {
+        let (mut ox, mut oz) = (0.0f64, 0.0f64);
+        assert!(unsafe { alpha_boat_rider_offset(0.0, &mut ox, &mut oz) });
+        assert!((ox - 0.4).abs() < 1e-9);
+        assert!(oz.abs() < 1e-9);
+        assert!(!unsafe { alpha_boat_rider_offset(0.0, std::ptr::null_mut(), &mut oz) });
+    }
+
+    #[test]
+    fn test_arrow_face_velocity() {
+        let (mut yaw, mut pitch) = (0.0f32, 0.0f32);
+        assert!(unsafe { alpha_arrow_face_velocity(0.0, 0.0, 2.0, &mut yaw, &mut pitch) });
+        assert!(yaw.abs() < 1e-6);
+        assert!(pitch.abs() < 1e-6);
+        assert!(!unsafe { alpha_arrow_face_velocity(0.0, 0.0, 2.0, std::ptr::null_mut(), &mut pitch) });
+    }
+}

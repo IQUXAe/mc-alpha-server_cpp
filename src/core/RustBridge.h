@@ -149,6 +149,20 @@ void blockFurnaceScatterStack(const ScatterWorld* w, int32_t itemId, int32_t cou
                               int32_t damage, int32_t x, int32_t y, int32_t z);
 bool blockChestCanPlace(uint8_t (*getBlockId)(int32_t x, int32_t y, int32_t z),
                         uint8_t chestId, int32_t x, int32_t y, int32_t z);
+
+// Small-entity kernels (pointers stay in C++)
+using ItemMotion = ::ItemMotion;
+int8_t itemPushSide(bool freeW, bool freeE, bool freeD, bool freeU,
+                    bool freeN, bool freeS, double lx, double ly, double lz);
+bool itemDamp(bool onGround, ItemMotion* io);
+uint8_t fallingLand(int32_t blockId, bool onGround, int32_t by, int32_t landId,
+                    bool landReplaceable, bool haveBlock, int32_t fallTime);
+double boatWaterFraction(double minX, double minY, double minZ,
+                         double maxX, double maxY, double maxZ,
+                         bool (*isWater)(int32_t x, int32_t y, int32_t z));
+bool boatSteer(double deltaX, double deltaZ, float curYaw, float* outYaw);
+bool boatRiderOffset(float yaw, double* outX, double* outZ);
+bool arrowFaceVelocity(double mx, double my, double mz, float* outYaw, float* outPitch);
 void blockSandAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
 void blockSandNeighbor(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
 void blockSandTick(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);

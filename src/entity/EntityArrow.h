@@ -78,9 +78,12 @@ public:
         motionY = vy;
         motionZ = vz;
 
-        const float horizontal = MathHelper::sqrt_float(static_cast<float>(vx * vx + vz * vz));
-        prevRotationYaw = rotationYaw = static_cast<float>(std::atan2(vx, vz) * 180.0 / std::numbers::pi_v<double>);
-        prevRotationPitch = rotationPitch = static_cast<float>(std::atan2(vy, horizontal) * 180.0 / std::numbers::pi_v<double>);
+        float faceYaw = rotationYaw;
+        float facePitch = rotationPitch;
+        if (RustBridge::arrowFaceVelocity(vx, vy, vz, &faceYaw, &facePitch)) {
+            prevRotationYaw = rotationYaw = faceYaw;
+            prevRotationPitch = rotationPitch = facePitch;
+        }
         ticksInGround = 0;
     }
 
@@ -88,9 +91,12 @@ public:
         Entity::tick();
 
         if (prevRotationPitch == 0.0f && prevRotationYaw == 0.0f) {
-            const float horizontal = MathHelper::sqrt_float(static_cast<float>(motionX * motionX + motionZ * motionZ));
-            prevRotationYaw = rotationYaw = static_cast<float>(std::atan2(motionX, motionZ) * 180.0 / std::numbers::pi_v<double>);
-            prevRotationPitch = rotationPitch = static_cast<float>(std::atan2(motionY, horizontal) * 180.0 / std::numbers::pi_v<double>);
+            float faceYaw = rotationYaw;
+            float facePitch = rotationPitch;
+            if (RustBridge::arrowFaceVelocity(motionX, motionY, motionZ, &faceYaw, &facePitch)) {
+                prevRotationYaw = rotationYaw = faceYaw;
+                prevRotationPitch = rotationPitch = facePitch;
+            }
         }
 
         if (arrowShake > 0) {

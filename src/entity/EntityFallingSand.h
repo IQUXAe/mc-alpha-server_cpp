@@ -36,24 +36,19 @@ public:
         int by = (int)std::floor(posY);
         int bz = (int)std::floor(posZ);
 
-        if (onGround) {
+        const int landId = worldObj->getBlockId(bx, by, bz);
+        Block* landBlock = landId > 0 ? Block::blocksList[landId] : nullptr;
+        const uint8_t action = RustBridge::fallingLand(
+            blockId, onGround, by, landId,
+            landBlock && landBlock->isReplaceable(),
+            Block::blocksList[blockId] != nullptr, fallTime);
+        if (action == 1) {
             isDead = true;
-            if (by >= 0 && by < 128) {
-                int landId = worldObj->getBlockId(bx, by, bz);
-                Block* landBlock = landId > 0 ? Block::blocksList[landId] : nullptr;
-                bool canPlace = (landId == 0) || (landBlock && landBlock->isReplaceable());
-                if (canPlace && Block::blocksList[blockId]) {
-                    worldObj->setBlockWithNotify(bx, by, bz, blockId);
-                } else {
-                    auto drop = std::make_unique<EntityItem>(blockId, 1, 0);
-                    drop->setPosition(posX, posY + 0.5, posZ);
-                    worldObj->spawnEntityInWorld(std::move(drop));
-                }
-            }
-        } else if (fallTime > 100) {
+            worldObj->setBlockWithNotify(bx, by, bz, blockId);
+        } else if (action == 2) {
             isDead = true;
             auto drop = std::make_unique<EntityItem>(blockId, 1, 0);
-            drop->setPosition(posX, posY, posZ);
+            drop->setPosition(posX, onGround ? posY + 0.5 : posY, posZ);
             worldObj->spawnEntityInWorld(std::move(drop));
         }
     }
