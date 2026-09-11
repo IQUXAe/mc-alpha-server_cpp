@@ -489,6 +489,11 @@ DropVelocity playerDropVelocity(double ra, double rb, double rc) {
     return ::alpha_player_drop_velocity(ra, rb, rc);
 }
 
+void chatCommand(const ChatWorld* world, const uint8_t* msgPtr, size_t msgLen,
+                 float playerYaw, float playerPitch) {
+    ::rust_chat_command(world, msgPtr, msgLen, playerYaw, playerPitch);
+}
+
 uint8_t itemFurnaceFacing(float yaw) {
     return ::alpha_item_furnace_facing(yaw);
 }

@@ -425,6 +425,7 @@ pub mod player_mining;
 pub mod player_digging;
 pub mod tracker_math;
 pub mod mob_spawning;
+pub mod server_admin;
 pub mod material;
 pub mod nibble;
 pub mod server_config;

@@ -613,75 +613,67 @@ void NetServerHandler::handleChat(const RustPacket3Chat& pkt) {
     }
 }
 
+// Chat-driver trampolines for server_admin.rs (single definition here).
+// The guard in handleCommand swaps in the issuing handler per call.
+thread_local NetServerHandler* gChatHandler = nullptr;
+
+extern "C" bool chatIsOp() {
+    return gChatHandler && gChatHandler->mcServer_ && gChatHandler->mcServer_->configManager
+        && gChatHandler->player_
+        && gChatHandler->mcServer_->configManager->isOp(gChatHandler->player_->username);
+}
+
+extern "C" bool chatBlockRegistered(int32_t id) {
+    return id >= 0 && id < 256 && Block::blocksList[id] != nullptr;
+}
+
+extern "C" void chatGiveItem(int32_t itemId, int32_t count, int32_t damage) {
+    if (!gChatHandler || !gChatHandler->mcServer_ || !gChatHandler->mcServer_->worldMngr
+        || !gChatHandler->player_) {
+        return;
+    }
+    auto entity = std::make_unique<EntityItem>(itemId, count, damage);
+    entity->setPosition(gChatHandler->player_->posX, gChatHandler->player_->posY,
+                        gChatHandler->player_->posZ);
+    entity->motionX = entity->motionY = entity->motionZ = 0.0;
+    gChatHandler->mcServer_->worldMngr->spawnEntityInWorld(std::move(entity));
+}
+
+extern "C" void chatTeleport(double x, double y, double z, float yaw, float pitch) {
+    if (gChatHandler) {
+        gChatHandler->teleport(x, y, z, yaw, pitch);
+    }
+}
+
+extern "C" void chatSendChat(const uint8_t* msgPtr, size_t msgLen) {
+    if (gChatHandler && msgPtr) {
+        gChatHandler->sendPacket(RustPackets::chat(std::string(reinterpret_cast<const char*>(msgPtr), msgLen)));
+    }
+}
+
+const RustBridge::ChatWorld& chatWorld() {
+    static const RustBridge::ChatWorld table = {
+        &chatIsOp,
+        &chatBlockRegistered,
+        &chatGiveItem,
+        &chatTeleport,
+        &chatSendChat,
+    };
+    return table;
+}
+
 void NetServerHandler::handleCommand(const std::string& msg) {
-    std::vector<std::string> args;
-    std::istringstream ss(msg.substr(1));
-    for (std::string tok; ss >> tok;) args.push_back(tok);
-    if (args.empty()) return;
+    struct ChatGuard {
+        explicit ChatGuard(NetServerHandler* handler) : prev_(gChatHandler) { gChatHandler = handler; }
+        ~ChatGuard() { gChatHandler = prev_; }
 
-    const std::string& cmd = args[0];
-
-    auto toInt = [&](const std::string& s) {
-        int v = 0;
-        auto r = std::from_chars(s.data(), s.data() + s.size(), v);
-        if (r.ec != std::errc()) throw std::invalid_argument("not a number");
-        return v;
+    private:
+        NetServerHandler* prev_;
     };
-    auto toDouble = [&](const std::string& s) {
-        double v = 0;
-        auto r = std::from_chars(s.data(), s.data() + s.size(), v);
-        if (r.ec != std::errc()) throw std::invalid_argument("not a number");
-        return v;
-    };
-
-    const bool isOp = mcServer_->configManager->isOp(player_->username);
-
-    try {
-        if (!isOp && (cmd == "give" || cmd == "tp")) {
-            sendPacket(RustPackets::chat("You do not have permission to use this command"));
-            return;
-        }
-        if (cmd == "give") {
-            if (args.size() < 2) {
-                sendPacket(RustPackets::chat("Usage: /give <itemId> [count] [damage]"));
-                return;
-            }
-            int itemId = toInt(args[1]);
-            int count  = args.size() >= 3 ? toInt(args[2]) : 1;
-            int damage = args.size() >= 4 ? toInt(args[3]) : 0;
-        count = std::clamp(count, 1, 64);
-
-        // Validate: blocks must exist in blocksList, items must be < 32000
-        if (itemId <= 0 || itemId >= 32000) {
-            sendPacket(RustPackets::chat("Invalid item id"));
-            return;
-        }
-        if (itemId < 256 && Block::blocksList[itemId] == nullptr) {
-            sendPacket(RustPackets::chat("Unknown block id: " + std::to_string(itemId)));
-            return;
-        }
-
-        auto entity = std::make_unique<EntityItem>(itemId, count, damage);
-        entity->setPosition(player_->posX, player_->posY, player_->posZ);
-        entity->motionX = entity->motionY = entity->motionZ = 0.0;
-        mcServer_->worldMngr->spawnEntityInWorld(std::move(entity));
-        sendPacket(RustPackets::chat("Gave " + std::to_string(count) + "x " + std::to_string(itemId)));
-    } else if (cmd == "tp") {
-        if (args.size() < 4) {
-            sendPacket(RustPackets::chat("Usage: /tp <x> <y> <z>"));
-            return;
-        }
-        double tx = toDouble(args[1]);
-        double ty = toDouble(args[2]);
-        double tz = toDouble(args[3]);
-        teleport(tx, ty, tz, player_->rotationYaw, player_->rotationPitch);
-        sendPacket(RustPackets::chat("Teleported to " + std::to_string(tx) + ", " + std::to_string(ty) + ", " + std::to_string(tz)));
-    } else {
-        sendPacket(RustPackets::chat("Unknown command: " + cmd));
-    }
-    } catch (const std::exception&) {
-        sendPacket(RustPackets::chat("Invalid command arguments"));
-    }
+    ChatGuard guard(this);
+    RustBridge::chatCommand(&chatWorld(), reinterpret_cast<const uint8_t*>(msg.data()), msg.size(),
+                            player_ ? player_->rotationYaw : 0.0f,
+                            player_ ? player_->rotationPitch : 0.0f);
 }
 
 void NetServerHandler::processMovement(double x, double y, double stance, double z, float yaw, float pitch, bool moving, bool rotating, bool onGround) {

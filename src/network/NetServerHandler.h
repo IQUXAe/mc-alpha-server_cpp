@@ -9,9 +9,18 @@
 #include <string>
 #include <vector>
 #include <unordered_set>
+#include <cstdint>
+#include <cstddef>
 
 class MinecraftServer;
 class EntityPlayerMP;
+
+// Chat-driver trampolines (defined in NetServerHandler.cpp). Prior C-linkage
+// declarations so the friend declarations below bind to them.
+extern "C" bool chatIsOp();
+extern "C" void chatGiveItem(int32_t itemId, int32_t count, int32_t damage);
+extern "C" void chatTeleport(double x, double y, double z, float yaw, float pitch);
+extern "C" void chatSendChat(const uint8_t* msgPtr, size_t msgLen);
 
 class NetServerHandler : public NetHandler {
 public:
@@ -56,6 +65,11 @@ public:
     bool shouldBypassReadTimeout() const override;
 
 private:
+    // Chat-driver trampolines (defined in NetServerHandler.cpp).
+    friend bool chatIsOp();
+    friend void chatGiveItem(int32_t, int32_t, int32_t);
+    friend void chatTeleport(double, double, double, float, float);
+    friend void chatSendChat(const uint8_t*, size_t);
     void processMovement(double x, double y, double stance, double z, float yaw, float pitch, bool moving, bool rotating, bool onGround);
     void handleCommand(const std::string& msg);
     void syncHeldItemSelection();

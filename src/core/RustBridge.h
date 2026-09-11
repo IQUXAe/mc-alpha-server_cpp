@@ -170,6 +170,11 @@ uint8_t playerDeathCause(bool hasAttacker, uint8_t attackerKind, float fallDista
 using DropVelocity = ::DropVelocity;
 DropVelocity playerDropVelocity(double ra, double rb, double rc);
 
+// Server admin (lists are future-server API; chat driver is live)
+using ChatWorld = ::ChatWorld;
+void chatCommand(const ChatWorld* world, const uint8_t* msgPtr, size_t msgLen,
+                 float playerYaw, float playerPitch);
+
 // Item-use kernels (verbs stay in C++)
 uint8_t itemFurnaceFacing(float yaw);
 uint8_t itemSignYawMeta(float yaw);

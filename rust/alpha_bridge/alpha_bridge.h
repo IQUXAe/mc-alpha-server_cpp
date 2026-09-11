@@ -1171,6 +1171,19 @@ typedef struct DropVelocity {
 
 DropVelocity alpha_player_drop_velocity(double ra, double rb, double rc);
 
+// Server admin (server_admin.rs). Name lists are a tested API for the
+// coming Rust server; the chat driver is live via ChatWorld callbacks.
+typedef struct ChatWorld {
+    bool (*is_op)(void);
+    bool (*block_registered)(int32_t id);
+    void (*give_item)(int32_t item_id, int32_t count, int32_t damage);
+    void (*teleport)(double x, double y, double z, float yaw, float pitch);
+    void (*send_chat)(const uint8_t* msg_ptr, size_t msg_len);
+} ChatWorld;
+
+void rust_chat_command(const ChatWorld* world, const uint8_t* msg_ptr, size_t msg_len,
+                       float player_yaw, float player_pitch);
+
 // Item-use kernels (item_use.rs). Verbs stay in C++.
 uint8_t alpha_item_furnace_facing(float yaw);
 uint8_t alpha_item_sign_yaw_meta(float yaw);
