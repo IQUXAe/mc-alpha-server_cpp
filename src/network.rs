@@ -131,6 +131,7 @@ pub enum RustPacket {
         roll: i8,
     },
     VehicleSpawn { entity_id: i32, vehicle_type: i8, x: i32, y: i32, z: i32 },
+    Collect { collected_id: i32, collector_id: i32 },
     MobSpawn {
         entity_id: i32,
         mob_type: u8,
@@ -487,6 +488,11 @@ pub fn encode_packet(pkt: &RustPacket, buf: &mut Vec<u8>) {
             put_i32(buf, *y);
             put_i32(buf, *z);
         }
+        RustPacket::Collect { collected_id, collector_id } => {
+            put_u8(buf, 22);
+            put_i32(buf, *collected_id);
+            put_i32(buf, *collector_id);
+        }
         RustPacket::MobSpawn { entity_id, mob_type, x, y, z, yaw, pitch } => {
             put_u8(buf, 24);
             put_i32(buf, *entity_id);
@@ -597,5 +603,13 @@ mod tests {
             buf,
             vec![24, 0, 0, 0, 9, 50, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 10, 246]
         );
+    }
+
+    #[test]
+    fn test_encode_collect_roundtrip() {
+        let pkt = RustPacket::Collect { collected_id: 9, collector_id: 1 };
+        let mut buf = Vec::new();
+        encode_packet(&pkt, &mut buf);
+        assert_eq!(buf, vec![22, 0, 0, 0, 9, 0, 0, 0, 1]);
     }
 }

@@ -698,6 +698,9 @@ pub struct PlaySession {
     pub held_fallback: Option<FfiItemStack>,
     pub keepalive_tick: u32,
     pub gone: bool,
+    /// Last health byte sent as 0x08 (mirrors the `Packet8` diff-check in
+    /// `EntityPlayerMP`); the server tick pushes on change.
+    pub last_health: i8,
 }
 
 impl PlaySession {
@@ -712,6 +715,7 @@ impl PlaySession {
             held_fallback: None,
             keepalive_tick: 0,
             gone: false,
+            last_health: 20,
         }
     }
 

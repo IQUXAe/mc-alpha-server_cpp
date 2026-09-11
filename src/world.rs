@@ -127,6 +127,12 @@ pub struct World {
     /// `updateFurnaceBlockState`); the server tick drains these and fans
     /// out block changes to chunk-loaded players.
     pub furnace_updates: Vec<[i32; 3]>,
+    /// Full pickups since the last server tick as `(item, player)` pairs
+    /// (mirrors the collect packet in `EntityPlayerMP.onUpdate`); the
+    /// server tick drains these into `Packet22Collect` fan-out plus an
+    /// inventory sync for the picker. Recorded only on full takes, like
+    /// vanilla (partial merges leave the item down with no packet).
+    pub item_pickups: Vec<(EntityId, EntityId)>,
     /// Population guard (mirrors `World::isPopulating`): decoration
     /// sets bypass skylight regen exactly like the C++ populate path
     /// (the write-back regenerates explicitly instead).
@@ -175,6 +181,7 @@ impl World {
             unloaded: HashMap::new(),
             tiles: HashMap::new(),
             furnace_updates: Vec::new(),
+            item_pickups: Vec::new(),
             populating: false,
             generator: None,
             chunks: HashMap::new(),
@@ -1559,6 +1566,8 @@ mod tests {
         // ...and the corpse row was purged.
         assert!(w.entities.get(zombie).is_none());
         assert!(w.entities.get(item).is_none());
+        // The full take was recorded for the server tick's collect fan-out.
+        assert_eq!(w.item_pickups, vec![(item, player)]);
     }
 
     fn furnace_tile_with(input: (i32, i32), fuel: (i32, i32)) -> TileData {
@@ -4688,6 +4697,7 @@ impl World {
                         if let Some(e) = self.entities.get_mut(iid) {
                             e.body_mut().dead = true;
                         }
+                        self.item_pickups.push((iid, *pid));
                     } else if let Some(Entity::Item(e)) = self.entities.get_mut(iid) {
                         e.count = rem;
                     }
@@ -5819,10 +5829,20 @@ impl World {
             rust_chunk_provider_populate_batch,
         };
         // 1. Stage the 2x2 canvas (existing chunks copied, missing generated).
+        // Populate-time climate is always recomputed fresh like Java
+        // `populate` (biome at the far corner, snow temperatures at +8):
+        // the center chunk often already sits staged as a raw neighbor,
+        // so falling back to defaults here decorated whole regions as
+        // snowy plains (no trees, no cacti, snow in deserts).
+        let (center_biome, center_temps) = {
+            let gen = self.generator();
+            let mut center_temps = [0.0f64; 256];
+            crate::generator::chunk_temperatures(gen, cx * 16 + 8, cz * 16 + 8, &mut center_temps);
+            let center_biome = crate::generator::point_biome(gen, cx * 16 + 16, cz * 16 + 16);
+            (center_biome, center_temps)
+        };
         let mut stage_blocks = [[[0u8; 32768]; 2]; 2];
         let mut stage_meta = [[[0u8; 32768]; 2]; 2];
-        let mut center_biome = MobSpawnerBase::DEFAULT;
-        let mut center_temps = [0.0f64; 256];
         for dx in 0..2usize {
             for dz in 0..2usize {
                 let (nx, nz) = (cx + dx as i32, cz + dz as i32);
@@ -5844,10 +5864,6 @@ impl World {
                         &mut humids,
                     );
                     stage_blocks[dx][dz] = blocks;
-                    if dx == 0 && dz == 0 {
-                        center_biome = biomes[8 * 16 + 8];
-                        center_temps = temps;
-                    }
                 }
             }
         }

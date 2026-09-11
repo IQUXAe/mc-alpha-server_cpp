@@ -231,7 +231,7 @@ impl MapGenCaves {
                                         }
                                         if var51 == 1 || var51 == 3 || var51 == 2 {
                                             if var48 < 10 {
-                                                var3[var46] = 11; // lavaStill
+                                                var3[var46] = 10; // lavaStill
                                             } else {
                                                 var3[var46] = 0; // air
                                                 if var47 && var3[var46 - 1] == 3 {

@@ -1,5 +1,19 @@
 use crate::random::JavaRandom;
+use crate::block::alpha_block_properties_get;
+use crate::world::material_of;
 use super::WorldAccessor;
+
+/// True when any horizontal neighbor of a cactus cell is solid
+/// (mirrors the `func_216_a` side checks in `BlockCactus.canBlockStay`).
+fn cactus_blocked(accessor: &WorldAccessor, x: i32, y: i32, z: i32) -> bool {
+    for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+        let id = (accessor.get_block_id)(x + dx, y, z + dz);
+        if material_of(alpha_block_properties_get(id as u32).material).is_solid() {
+            return true;
+        }
+    }
+    false
+}
 
 // ============================================
 // WorldGenLakes
@@ -124,11 +138,36 @@ impl WorldGenFlowers {
             let fx = x + rand.next_int_bound(8) - rand.next_int_bound(8);
             let fy = y + rand.next_int_bound(4) - rand.next_int_bound(4);
             let fz = z + rand.next_int_bound(8) - rand.next_int_bound(8);
-            if (accessor.get_block_id)(fx, fy, fz) == 0 && (accessor.get_block_id)(fx, fy - 1, fz) == 2 {
+            // Java resolves out-of-range cells to air (no placement); the
+            // canvas has no such guard, so skip explicitly (fy < 1 also
+            // keeps the soil read below in range).
+            if !(1..=127).contains(&fy) {
+                continue;
+            }
+            if (accessor.get_block_id)(fx, fy, fz) == 0 && flower_soil_ok(accessor, self.plant_block_id, fx, fy, fz) {
                 (accessor.set_block_id)(fx, fy, fz, self.plant_block_id);
             }
         }
         true
+    }
+}
+
+/// Soil rule (mirrors `BlockFlower.canBlockStay` minus the light half:
+/// skylight is not computed yet during populate, so a light check here
+/// would veto every flower; the block tick pops wrongly lit plants right
+/// after, like vanilla self-correction). Flowers (37/38) need
+/// grass/dirt/tilled soil; mushrooms (39/40) need an opaque block below
+/// (`field_540_p`, i.e. occluding material — read from the canvas, which
+/// already holds the fresh terrain, unlike the live-world fallback).
+fn flower_soil_ok(accessor: &WorldAccessor, plant_id: u8, x: i32, y: i32, z: i32) -> bool {
+    let below = (accessor.get_block_id)(x, y - 1, z);
+    match plant_id {
+        37 | 38 => below == 2 || below == 3 || below == 60,
+        39 | 40 => {
+            below != 0
+                && material_of(alpha_block_properties_get(below as u32).material).is_solid()
+        }
+        _ => false,
     }
 }
 
@@ -156,9 +195,15 @@ impl WorldGenReed {
                     let step1 = rand.next_int_bound(3) + 1;
                     let height = 2 + rand.next_int_bound(step1);
                     for h in 0..height {
+                        // Java ignores out-of-range sets; skip explicitly.
+                        if !(1..=127).contains(&(ry + h)) {
+                            break;
+                        }
                         let below = (accessor.get_block_id)(rx, ry + h - 1, rz);
                         if h == 0 {
-                            if below != 2 && below != 3 && below != 12 { // grass, dirt, sand
+                            // `BlockReed.canPlaceBlockAt`: grass or dirt
+                            // only (sand never hosts reed).
+                            if below != 2 && below != 3 {
                                 break;
                             }
                         } else {
@@ -196,6 +241,10 @@ impl WorldGenCactus {
                 let step1 = rand.next_int_bound(3) + 1;
                 let height = 1 + rand.next_int_bound(step1);
                 for h in 0..height {
+                    // Java ignores out-of-range sets; skip explicitly.
+                    if !(1..=127).contains(&(cy + h)) {
+                        break;
+                    }
                     let below = (accessor.get_block_id)(cx, cy + h - 1, cz);
                     if h == 0 {
                         if below != 12 { // sand
@@ -206,10 +255,9 @@ impl WorldGenCactus {
                             break;
                         }
                     }
-                    if (accessor.get_block_id)(cx - 1, cy + h, cz) != 0 ||
-                       (accessor.get_block_id)(cx + 1, cy + h, cz) != 0 ||
-                       (accessor.get_block_id)(cx, cy + h, cz - 1) != 0 ||
-                       (accessor.get_block_id)(cx, cy + h, cz + 1) != 0 {
+                    // `BlockCactus.canBlockStay`: no *solid* (`func_216_a`)
+                    // neighbor — water and air are both fine.
+                    if cactus_blocked(accessor, cx, cy + h, cz) {
                         break;
                     }
                     if (accessor.get_block_id)(cx, cy + h, cz) == 0 {

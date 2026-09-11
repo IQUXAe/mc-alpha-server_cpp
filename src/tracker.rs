@@ -364,6 +364,18 @@ impl Tracker {
         }
     }
 
+    /// Pickup fan-out (mirrors the collect packet in
+    /// `EntityPlayerMP.onUpdate`): the item's watchers plus the picker
+    /// itself get `Packet22Collect`, so the client plays `random.pop`,
+    /// flies the item to the player and removes it.
+    pub fn collect_fx(&self, item_id: EntityId, picker_id: EntityId, out: &mut Vec<Outbox>) {
+        let bytes = encode(RustPacket::Collect { collected_id: item_id, collector_id: picker_id });
+        self.send_to_watchers(item_id, bytes.clone(), out);
+        if !self.is_tracking(item_id, picker_id) {
+            out.push(Outbox { to: picker_id, bytes });
+        }
+    }
+
     /// Per-entity per-tick update (mirrors `updateTracking` + `sendUpdates`).
     /// `chunk_visible(observer, entity)` answers the chunk-loaded check.
     pub fn tick_entity(
@@ -667,6 +679,32 @@ mod tests {
         t.remove(7, &mut out);
         assert_eq!(out.len(), 1);
         assert_eq!((out[0].to, out[0].bytes[0]), (1, 29));
+    }
+
+    #[test]
+    fn test_collect_fx_to_watchers_and_picker() {
+        // Pickup fan-out (Packet22Collect): the item's watchers plus the
+        // picker animate it; a watching picker gets exactly one copy.
+        let mut t = Tracker::new();
+        let mob = TrackedEntity::mob(7, MobKind::Zombie, [10.5, 64.0, 10.5]);
+        t.add(&mob);
+        let obs = vec![observer(1, 12.0, 12.0)];
+        let mut out = Vec::new();
+        t.tick_entity(&mob, &obs, &always, &mut out);
+        assert!(t.is_tracking(7, 1));
+        let mut out = Vec::new();
+        t.collect_fx(7, 2, &mut out);
+        let mut tos: Vec<EntityId> = out.iter().map(|o| o.to).collect();
+        tos.sort_unstable();
+        assert_eq!(tos, vec![1, 2]);
+        for o in &out {
+            assert_eq!(o.bytes[0], 22);
+            assert_eq!(&o.bytes[1..], &[0, 0, 0, 7, 0, 0, 0, 2]);
+        }
+        let mut out = Vec::new();
+        t.collect_fx(7, 1, &mut out);
+        assert_eq!(out.len(), 1);
+        assert_eq!((out[0].to, out[0].bytes[0]), (1, 22));
     }
 
     #[test]

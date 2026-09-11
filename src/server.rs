@@ -714,10 +714,12 @@ impl Server {
                 None => (pos, 0.0, 0.0),
             };
             play.teleport_to(&mut self.world, eid, ppos[0], ppos[1], ppos[2], yaw, pitch);
-            play.outbox.push(pkt_health(match self.world.entities.get(eid) {
+            let hp = match self.world.entities.get(eid) {
                 Some(Entity::Player(p)) => p.living.health as i8,
                 _ => 20,
-            }));
+            };
+            play.outbox.push(pkt_health(hp));
+            play.last_health = hp;
             play.send_inventory(&self.world);
             play.outbox.push(pkt_time(self.world.time));
         }
@@ -1120,6 +1122,62 @@ impl Server {
 }
 
 impl Server {
+    /// Ship pickup feedback (mirrors the collect packet in
+    /// `EntityPlayerMP.onUpdate` plus the inventory sync): `Packet22Collect`
+    /// to the item's watchers and picker (the client plays `random.pop`,
+    /// flies the item over and removes it), then a full inventory sync for
+    /// the picker. Drained before `tracker_tick` so Collect precedes the
+    /// silent prune of the dead item row.
+    fn drain_pickup_events(&mut self) {
+        let pickups = std::mem::take(&mut self.world.item_pickups);
+        if pickups.is_empty() {
+            return;
+        }
+        let mut out = Vec::new();
+        for (item_id, player_id) in &pickups {
+            self.world.tracker.collect_fx(*item_id, *player_id, &mut out);
+        }
+        self.route_outbox(out);
+        for (_, player_id) in &pickups {
+            if let Some(cid) = self.players.get(player_id).copied() {
+                if let Some(Session { state: SessionState::Play(play, _), .. }) =
+                    self.sessions.get_mut(&cid)
+                {
+                    play.send_inventory(&self.world);
+                }
+            }
+        }
+    }
+
+    /// Health watch (mirrors the `Packet8` send in
+    /// `EntityPlayerMP.func_175_i`): push 0x08 whenever a player's health
+    /// changed since the last send, so fall, mob, burn and drown damage
+    /// all reach the HUD — previously only login/respawn/eat synced it.
+    fn push_health_changes(&mut self) {
+        let mut changed: Vec<(ConnId, i8)> = Vec::new();
+        for (eid, cid) in &self.players {
+            let health = match self.world.entities.get(*eid) {
+                Some(Entity::Player(p)) => p.living.health as i8,
+                _ => continue,
+            };
+            let last = match self.sessions.get(cid) {
+                Some(Session { state: SessionState::Play(play, _), .. }) => play.last_health,
+                _ => continue,
+            };
+            if health != last {
+                changed.push((*cid, health));
+            }
+        }
+        for (cid, health) in changed {
+            if let Some(sess) = self.sessions.get_mut(&cid) {
+                sess.conn.send(pkt_health(health));
+                if let SessionState::Play(play, _) = &mut sess.state {
+                    play.last_health = health;
+                }
+            }
+        }
+    }
+
     /// Ship queued furnace flips as block changes to chunk-loaded
     /// players (mirrors the C++ `markBlockNeedsUpdate` fan-out).
     fn drain_furnace_updates(&mut self) {
@@ -1153,6 +1211,8 @@ impl Server {
             }
         }
         self.world.tick_world();
+        self.drain_pickup_events();
+        self.push_health_changes();
         if self.settings.auto_save_interval > 0
             && self.tick_count % self.settings.auto_save_interval as u64 == 0
         {
@@ -1624,8 +1684,9 @@ mod tests {
                 String::new()
             }
             8 => {
-                r_skip(c, 1);
-                String::new()
+                let mut b = [0u8; 1];
+                c.read_exact(&mut b).unwrap();
+                b[0].to_string()
             }
             9 => String::new(),
             13 => {
@@ -1810,6 +1871,50 @@ mod tests {
         let (mut client, _cid) = pair(&mut srv);
         join(&mut srv, &mut client, "Steve");
         assert_eq!(srv.players.len(), 1);
+    }
+
+    #[test]
+    fn fall_damage_pushes_health_packet() {
+        //Like a 9-block fall: 6 damage must reach the HUD as 0x08 on the
+        // next tick (mirrors the Packet8 diff-check in EntityPlayerMP).
+        let mut srv = mk_server("");
+        let (mut client, _cid) = pair(&mut srv);
+        join(&mut srv, &mut client, "Steve");
+        let eid = *srv.players.keys().next().unwrap();
+        if let Some(Entity::Player(p)) = srv.world.entities.get_mut(eid) {
+            p.respawn_ticks = 0;
+        }
+        srv.world.attack_living(eid, 6, None);
+        let (id, text) =
+            pump_match(&mut client, &mut srv, &|p| p.0 == 8);
+        assert_eq!(id, 8);
+        assert_eq!(text, "14");
+        assert_eq!(srv.world.entities.get(eid).map(|e| e.body().dead), Some(false));
+    }
+
+    #[test]
+    fn pickup_sends_collect_and_inventory() {
+        // Dirt dropped at the player's feet must arrive as Packet22Collect
+        // (pop sound + fly-over animation) plus a full inventory sync.
+        let mut srv = mk_server("");
+        let (mut client, _cid) = pair(&mut srv);
+        join(&mut srv, &mut client, "Steve");
+        let eid = *srv.players.keys().next().unwrap();
+        let pos = match srv.world.entities.get(eid) {
+            Some(e) => e.body().pos,
+            _ => panic!("player row"),
+        };
+        let item = srv.world.spawn_item_entity(3, 5, 0, pos[0], pos[1], pos[2]);
+        if let Some(Entity::Item(e)) = srv.world.entities.get_mut(item) {
+            e.pickup_delay = 0;
+        }
+        assert_eq!(pump_match(&mut client, &mut srv, &|p| p.0 == 22).0, 22);
+        assert_eq!(pump_match(&mut client, &mut srv, &|p| p.0 == 5).0, 5);
+        let dirt: i32 = match srv.world.entities.get(eid).unwrap() {
+            Entity::Player(p) => p.inventory.main.iter().filter_map(|s| *s).map(|s| s.stack_size).sum(),
+            _ => unreachable!(),
+        };
+        assert_eq!(dirt, 5);
     }
 
     /// Login attempt that must end in a kick with the given reason.

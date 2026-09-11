@@ -256,30 +256,32 @@ impl RustChunkProviderGenerate {
     }
 }
 
-pub fn rust_chunk_provider_generate_chunk(
-    gen: &mut RustChunkProviderGenerate,
-    chunk_x: i32,
-    chunk_z: i32,
-    blocks: &mut [u8; 32768],
-    biomes: &mut [MobSpawnerBase; 256],
-    temperatures: &mut [f64; 256],
-    humidities: &mut [f64; 256],
+/// Climate slice (mirrors `WorldChunkManager.loadBlockGeneratorData`):
+/// temperature, humidity and biome lookup for a `w` by `h` area at block
+/// origin `(x0, z0)`, layout `idx = x * h + z` like the terrain pass.
+/// The noise tables are pure in coordinates, so populate-time queries
+/// below evaluate bit-identical values at identical points.
+pub fn climate_into(
+    gen: &RustChunkProviderGenerate,
+    x0: i32,
+    z0: i32,
+    w: usize,
+    h: usize,
+    biomes: &mut [MobSpawnerBase],
+    temperatures: &mut [f64],
+    humidities: &mut [f64],
 ) {
+    let n = w * h;
+    debug_assert_eq!(biomes.len(), n);
+    debug_assert_eq!(temperatures.len(), n);
+    debug_assert_eq!(humidities.len(), n);
+    gen.temp_noise_gen.func_4101_a(temperatures, x0 as f64, z0 as f64, w, h, 0.025, 0.025, 0.25);
+    gen.humid_noise_gen.func_4101_a(humidities, x0 as f64, z0 as f64, w, h, 0.05, 0.05, 1.0 / 3.0);
 
-    let mut rand = JavaRandom::new(
-        (chunk_x as i64)
-            .wrapping_mul(341873128712)
-            .wrapping_add((chunk_z as i64).wrapping_mul(132897987541)),
-    );
+    let mut field_4257_c = vec![0.0; n];
+    gen.noise_gen3.func_4101_a(&mut field_4257_c, x0 as f64, z0 as f64, w, h, 0.25, 0.25, 0.5882352941176471);
 
-    // 1. Load block generator data (biomes & temperatures)
-    gen.temp_noise_gen.func_4101_a(temperatures, (chunk_x * 16) as f64, (chunk_z * 16) as f64, 16, 16, 0.025, 0.025, 0.25);
-    gen.humid_noise_gen.func_4101_a(humidities, (chunk_x * 16) as f64, (chunk_z * 16) as f64, 16, 16, 0.05, 0.05, 1.0 / 3.0);
-
-    let mut field_4257_c = vec![0.0; 256];
-    gen.noise_gen3.func_4101_a(&mut field_4257_c, (chunk_x * 16) as f64, (chunk_z * 16) as f64, 16, 16, 0.25, 0.25, 0.5882352941176471);
-
-    for idx in 0..256 {
+    for idx in 0..n {
         let noise = field_4257_c[idx] * 1.1 + 0.5;
 
         let d1_t = 0.01;
@@ -300,6 +302,57 @@ pub fn rust_chunk_provider_generate_chunk(
         humidities[idx] = humid;
         biomes[idx] = get_biome_from_lookup(temp, humid);
     }
+}
+
+/// Temperature-only slice (mirrors `WorldChunkManager.getTemperatures`),
+/// evaluated at an arbitrary origin. Populate samples snow temperatures
+/// at `(var4 + 8, var5 + 8)`, reaching 8 blocks past the chunk corner.
+pub fn chunk_temperatures(
+    gen: &RustChunkProviderGenerate,
+    x0: i32,
+    z0: i32,
+    out: &mut [f64; 256],
+) {
+    gen.temp_noise_gen.func_4101_a(out, x0 as f64, z0 as f64, 16, 16, 0.025, 0.025, 0.25);
+    let mut field_4257_c = [0.0f64; 256];
+    gen.noise_gen3.func_4101_a(&mut field_4257_c, x0 as f64, z0 as f64, 16, 16, 0.25, 0.25, 0.5882352941176471);
+    for idx in 0..256 {
+        let noise = field_4257_c[idx] * 1.1 + 0.5;
+        let mut temp = (out[idx] * 0.15 + 0.7) * 0.99 + noise * 0.01;
+        temp = 1.0 - (1.0 - temp) * (1.0 - temp);
+        out[idx] = temp.clamp(0.0, 1.0);
+    }
+}
+
+/// Single-point biome (mirrors `WorldChunkManager.func_4067_a`).
+/// Populate samples one biome for the whole chunk at its far corner
+/// `(var4 + 16, var5 + 16)`, not the center.
+pub fn point_biome(gen: &RustChunkProviderGenerate, x: i32, z: i32) -> MobSpawnerBase {
+    let mut biomes = [MobSpawnerBase::DEFAULT; 1];
+    let mut temps = [0.0f64; 1];
+    let mut humids = [0.0f64; 1];
+    climate_into(gen, x, z, 1, 1, &mut biomes, &mut temps, &mut humids);
+    biomes[0]
+}
+
+pub fn rust_chunk_provider_generate_chunk(
+    gen: &mut RustChunkProviderGenerate,
+    chunk_x: i32,
+    chunk_z: i32,
+    blocks: &mut [u8; 32768],
+    biomes: &mut [MobSpawnerBase; 256],
+    temperatures: &mut [f64; 256],
+    humidities: &mut [f64; 256],
+) {
+
+    let mut rand = JavaRandom::new(
+        (chunk_x as i64)
+            .wrapping_mul(341873128712)
+            .wrapping_add((chunk_z as i64).wrapping_mul(132897987541)),
+    );
+
+    // 1. Load block generator data (biomes & temperatures)
+    climate_into(gen, chunk_x * 16, chunk_z * 16, 16, 16, biomes, temperatures, humidities);
 
     // 2. Generate terrain
     let var6 = 4;
@@ -360,7 +413,7 @@ pub fn rust_chunk_provider_generate_chunk(
                                 if temp_val < 0.5 && var13 * 8 + var32 >= var7 - 1 {
                                     var55 = 79; // ice
                                 } else {
-                                    var55 = 8; // waterMoving
+                                    var55 = 9; // waterMoving
                                 }
                             }
 
@@ -432,7 +485,7 @@ pub fn rust_chunk_provider_generate_chunk(
                             }
 
                             if var17_b < var5_biome && var15_b == 0 {
-                                var15_b = 8; // waterMoving
+                                var15_b = 9; // waterMoving
                             }
 
                             var14_b = var13_b;
@@ -510,4 +563,38 @@ pub fn rust_chunk_provider_populate_batch(
 
     // Clear thread local state
     CURRENT_DECORATOR_WORLD.with(|cell| cell.set(std::ptr::null_mut()));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn populate_climate_matches_terrain_on_overlap() {
+        // The populate snow slice at (cx*16+8) must agree bit-exactly
+        // with the terrain temperature slice on their 8x8 overlap, and
+        // the corner biome must match the neighbor chunk's cell (0,0):
+        // all three evaluate the same noise at the same coordinates.
+        let mut gen = RustChunkProviderGenerate::new(12345);
+        let (cx, cz) = (3, -2);
+        let mut blocks = [0u8; 32768];
+        let mut biomes = [MobSpawnerBase::DEFAULT; 256];
+        let mut temps = [0.0f64; 256];
+        let mut humids = [0.0f64; 256];
+        rust_chunk_provider_generate_chunk(&mut gen, cx, cz, &mut blocks, &mut biomes, &mut temps, &mut humids);
+
+        let mut snow = [0.0f64; 256];
+        chunk_temperatures(&gen, cx * 16 + 8, cz * 16 + 8, &mut snow);
+        for i in 8..16 {
+            for j in 8..16 {
+                assert_eq!(snow[(i - 8) * 16 + (j - 8)], temps[i * 16 + j], "cell {i},{j}");
+            }
+        }
+
+        let mut nb = [MobSpawnerBase::DEFAULT; 256];
+        let mut nt = [0.0f64; 256];
+        let mut nh = [0.0f64; 256];
+        climate_into(&gen, (cx + 1) * 16, (cz + 1) * 16, 16, 16, &mut nb, &mut nt, &mut nh);
+        assert_eq!(nb[0].biome_type, point_biome(&gen, cx * 16 + 16, cz * 16 + 16).biome_type);
+    }
 }

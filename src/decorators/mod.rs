@@ -5,6 +5,8 @@ pub mod misc;
 use crate::random::JavaRandom;
 use crate::noise::NoiseGeneratorOctaves;
 use crate::biome::BiomeType;
+use crate::block::alpha_block_properties_get;
+use crate::world::material_of;
 
 use ores::{WorldGenMinable, WorldGenClay};
 use trees::{WorldGenTrees, WorldGenBigTree};
@@ -19,6 +21,29 @@ pub struct WorldAccessor {
     pub allows_attachment: fn(x: i32, y: i32, z: i32) -> bool,
     pub is_block_solid: fn(x: i32, y: i32, z: i32) -> bool,
     pub get_height_value: fn(x: i32, z: i32) -> i32,
+}
+
+/// Top snow-support cell (mirrors `World.func_4075_e`): the first air
+/// cell above the highest occluding-or-liquid block, or -1 when the
+/// column has none. Flowers, torches and snow itself are seen through
+/// (their materials do not occlude); leaves and ice do occlude.
+fn snow_top_y(accessor: &WorldAccessor, x: i32, z: i32) -> i32 {
+    let mat_at = |y: i32| {
+        let id = (accessor.get_block_id)(x, y, z);
+        (id, material_of(alpha_block_properties_get(id as u32).material))
+    };
+    let mut y = 127;
+    while y > 0 && mat_at(y).1.is_solid() {
+        y -= 1;
+    }
+    while y > 0 {
+        let (id, m) = mat_at(y);
+        if id != 0 && (m.is_solid() || m.is_liquid()) {
+            return y + 1;
+        }
+        y -= 1;
+    }
+    -1
 }
 
 pub fn alpha_decorate_chunk(
@@ -59,7 +84,7 @@ pub fn alpha_decorate_chunk(
         let var13 = var4 + rand.next_int_bound(16) + 8;
         let var14 = rand.next_int_bound(128);
         let var15 = var5 + rand.next_int_bound(16) + 8;
-        WorldGenLakes::new(8).generate(&accessor, &mut rand, var13, var14, var15);
+        WorldGenLakes::new(9).generate(&accessor, &mut rand, var13, var14, var15);
     }
 
     // --- Lava lakes ---
@@ -69,7 +94,7 @@ pub fn alpha_decorate_chunk(
         let var14 = rand.next_int_bound(step1);
         let var15 = var5 + rand.next_int_bound(16) + 8;
         if var14 < 64 || rand.next_int_bound(10) == 0 {
-            WorldGenLakes::new(10).generate(&accessor, &mut rand, var13, var14, var15);
+            WorldGenLakes::new(11).generate(&accessor, &mut rand, var13, var14, var15);
         }
     }
 
@@ -268,7 +293,7 @@ pub fn alpha_decorate_chunk(
         let step1 = rand.next_int_bound(120) + 8;
         let sy = rand.next_int_bound(step1);
         let sz = var5 + rand.next_int_bound(16) + 8;
-        WorldGenLiquids::new(9).generate(&accessor, &mut rand, sx, sy, sz);
+        WorldGenLiquids::new(8).generate(&accessor, &mut rand, sx, sy, sz);
     }
 
     // --- Underground lava springs ---
@@ -278,25 +303,33 @@ pub fn alpha_decorate_chunk(
         let step2 = rand.next_int_bound(step1) + 8;
         let sy = rand.next_int_bound(step2);
         let sz = var5 + rand.next_int_bound(16) + 8;
-        WorldGenLiquids::new(11).generate(&accessor, &mut rand, sx, sy, sz);
+        WorldGenLiquids::new(10).generate(&accessor, &mut rand, sx, sy, sz);
     }
 
     // --- Snow ---
+    // `temperatures` covers (var4 + 8, var5 + 8)..+16 like Java's fresh
+    // `getTemperatures` slice, so the (var19, var20) index below samples
+    // the decorated column itself, not the chunk 8 blocks back.
     {
         let temps_slice = temperatures;
         for var17 in (var4 + 8)..(var4 + 8 + 16) {
             for var18 in (var5 + 8)..(var5 + 8 + 16) {
                 let var19 = var17 - (var4 + 8);
                 let var20 = var18 - (var5 + 8);
-                let var21 = (accessor.get_height_value)(var17, var18);
+                let var21 = snow_top_y(accessor, var17, var18);
                 let var22 = temps_slice[(var19 * 16 + var20) as usize] - ((var21 - 64) as f64) / 64.0 * 0.3;
 
                 if var22 < 0.5 && var21 > 0 && var21 < 128
                     && (accessor.get_block_id)(var17, var21, var18) == 0
-                    && (accessor.is_block_solid)(var17, var21 - 1, var18)
-                    && (accessor.get_block_id)(var17, var21 - 1, var18) != 79 // not ice
                 {
-                    (accessor.set_block_id)(var17, var21, var18, 78); // snow layer
+                    // Short-circuit above guarantees var21 - 1 >= 0.
+                    let below_id = (accessor.get_block_id)(var17, var21 - 1, var18);
+                    let below_mat =
+                        material_of(alpha_block_properties_get(below_id as u32).material);
+                    if below_mat.is_solid() && below_id != 79 {
+                        // occluding ground that is not ice
+                        (accessor.set_block_id)(var17, var21, var18, 78); // snow layer
+                    }
                 }
             }
         }

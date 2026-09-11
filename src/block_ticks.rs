@@ -385,8 +385,9 @@ pub fn block_tallgrass_drop(
 // ---- mushroom ----
 
 fn mushroom_can_stay_here(w: &BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
-    let below = q_id(w, x, y - 1, z);
-    below > 0 && q_registered(w, below)
+    // Mirrors `BlockMushroom.canBlockStay`: dim light plus an attachable
+    // (opaque) block below (`field_540_p`).
+    q_light(w, x, y, z) <= 13 && q_attach_world(w, x, y - 1, z)
 }
 
 pub fn block_mushroom_can_stay(world: &BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
@@ -505,7 +506,9 @@ fn reed_can_stay_here(w: &BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
     if below == 83 {
         return true;
     }
-    if below != 2 && below != 3 && below != 12 {
+    // Mirrors `BlockReed.canPlaceBlockAt`: grass or dirt only (sand
+    // never hosts reed), with water adjacent at soil level.
+    if below != 2 && below != 3 {
         return false;
     }
     for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
@@ -1418,13 +1421,19 @@ mod tests {
         assert!(l.iter().any(|e| e.starts_with("drop 6 1 0")), "{l:?}");
         assert!(l.contains(&"notify 0 5 0 0".to_string()), "{l:?}");
 
-        // 15. Reed on sand near water stays; mushroom over void does not.
+        // 15. Reed needs grass/dirt near water (sand never hosts reed,
+        // like Java `BlockReed.canPlaceBlockAt`); mushroom over void
+        // does not stay.
         reset();
         let _ = fake().as_mut().map(|f| {
             f.blocks.insert((0, 5, 0), (83, 0));
             f.blocks.insert((0, 4, 0), (12, 0));
             f.blocks.insert((-1, 4, 0), (8, 0));
             f.blocks.insert((0, 6, 0), (39, 0));
+        });
+        assert!(!block_reed_can_stay(tp, 0, 5, 0));
+        let _ = fake().as_mut().map(|f| {
+            f.blocks.insert((0, 4, 0), (3, 0));
         });
         assert!(block_reed_can_stay(tp, 0, 5, 0));
         assert!(!block_mushroom_can_stay(tp, 5, 6, 0));
