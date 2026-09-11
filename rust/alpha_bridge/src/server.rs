@@ -250,7 +250,7 @@ impl Server {
         world.spawn_monsters = settings.spawn_monsters;
         world.spawn_animals = settings.spawn_animals;
         let store =
-            ChunkStore::open(level_dir).map_err(|e| format!("cannot open chunk store: {e}"))?;
+            ChunkStore::open(&format!("{level_dir}/db")).map_err(|e| format!("cannot open chunk store: {e}"))?;
         if !world.load_level_from(level_dir) {
             Self::find_safe_spawn(&mut world);
             let (scx, scz) = (world.spawn[0].div_euclid(16), world.spawn[2].div_euclid(16));
