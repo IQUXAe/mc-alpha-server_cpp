@@ -436,6 +436,7 @@ pub mod server_constants;
 pub mod vec3d;
 pub mod item_data;
 pub mod item_use;
+pub mod item_verbs;
 
 use crate::random::JavaRandom;
 use crate::noise::{NoiseGeneratorOctaves, NoiseGeneratorOctaves2};

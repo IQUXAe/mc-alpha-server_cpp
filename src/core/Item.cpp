@@ -10,9 +10,162 @@
 #include "AxisAlignedBB.h"
 #include "Material.h"
 #include "MathHelper.h"
+#include "RustBridge.h"
 #include <iostream>
 #include <random>
 #include <numbers>
+
+namespace {
+
+// Verb-driver trampolines for item_verbs.rs (single definition here).
+// The guard swaps in the calling world/player per call; RNG draws stay on
+// World::rand to preserve the historical sequence.
+struct VerbContext {
+    World* world = nullptr;
+    EntityPlayerMP* player = nullptr;
+};
+
+thread_local VerbContext gVerbCtx;
+
+extern "C" int32_t verbNextInt(int32_t bound) {
+    std::uniform_int_distribution<int> dist(0, bound - 1);
+    return dist(gVerbCtx.world->rand);
+}
+
+extern "C" double verbNextF64() {
+    std::uniform_real_distribution<double> dist(0.0, 1.0);
+    return dist(gVerbCtx.world->rand);
+}
+
+extern "C" uint8_t verbGetBlockId(int32_t x, int32_t y, int32_t z) {
+    return gVerbCtx.world->getBlockId(x, y, z);
+}
+
+extern "C" bool verbSetNotify(int32_t x, int32_t y, int32_t z, uint8_t id) {
+    return gVerbCtx.world->setBlockWithNotify(x, y, z, id);
+}
+
+extern "C" bool verbSetMetaNotify(int32_t x, int32_t y, int32_t z, uint8_t id, uint8_t meta) {
+    return gVerbCtx.world->setBlockAndMetadataWithNotify(x, y, z, id, meta);
+}
+
+extern "C" bool verbSetQuiet(int32_t x, int32_t y, int32_t z, uint8_t id) {
+    return gVerbCtx.world->setBlockWithNotifyNoClientUpdate(x, y, z, id);
+}
+
+extern "C" void verbSetMeta(int32_t x, int32_t y, int32_t z, uint8_t meta) {
+    gVerbCtx.world->setBlockMetadata(x, y, z, meta);
+}
+
+extern "C" bool verbDoesAttach(int32_t x, int32_t y, int32_t z) {
+    return gVerbCtx.world->doesBlockAllowAttachment(x, y, z);
+}
+
+extern "C" bool verbMaterialBurning(int32_t x, int32_t y, int32_t z) {
+    return gVerbCtx.world->getBlockMaterial(x, y, z)->getBurning();
+}
+
+extern "C" bool verbMaterialSolid(int32_t x, int32_t y, int32_t z) {
+    return gVerbCtx.world->getBlockMaterial(x, y, z)->isSolid();
+}
+
+extern "C" bool verbCollidableBox(int32_t x, int32_t y, int32_t z) {
+    const int id = gVerbCtx.world->getBlockId(x, y, z);
+    Block* b = (id > 0 && id < 256) ? Block::blocksList[id] : nullptr;
+    return b && b->isCollidable()
+        && b->getCollisionBoundingBoxFromPool(gVerbCtx.world, x, y, z).has_value();
+}
+
+extern "C" bool verbBlockCanStay(uint8_t id, int32_t x, int32_t y, int32_t z) {
+    Block* b = Block::blocksList[id];
+    return b && b->canBlockStay(gVerbCtx.world, x, y, z);
+}
+
+extern "C" bool verbPlacementClear(uint8_t id, int32_t x, int32_t y, int32_t z) {
+    Block* b = Block::blocksList[id];
+    if (!b) return false;
+    auto bb = b->getCollisionBoundingBoxFromPool(gVerbCtx.world, x, y, z);
+    return !bb || gVerbCtx.world->isPlacementVolumeClear(*bb);
+}
+
+extern "C" void verbBlockPlaced(uint8_t id, int32_t x, int32_t y, int32_t z, int32_t side) {
+    Block* b = Block::blocksList[id];
+    if (b) b->onBlockPlaced(gVerbCtx.world, x, y, z, side);
+}
+
+extern "C" bool verbHaveBlock(uint8_t id) {
+    return Block::blocksList[id] != nullptr;
+}
+
+extern "C" void verbSpawnItem(int32_t itemId, int32_t count, int32_t damage,
+                              double fx, double fy, double fz, double mx, double my, double mz) {
+    auto entity = std::make_unique<EntityItem>(itemId, count, damage);
+    entity->setPosition(fx, fy, fz);
+    entity->worldObj = gVerbCtx.world;
+    entity->motionX = mx;
+    entity->motionY = my;
+    entity->motionZ = mz;
+    gVerbCtx.world->spawnEntityInWorld(std::move(entity));
+}
+
+extern "C" void verbSendTePacket(int32_t x, int32_t y, int32_t z) {
+    if (!gVerbCtx.world || !gVerbCtx.player || !gVerbCtx.player->netHandler) {
+        return;
+    }
+    TileEntity* te = gVerbCtx.world->getTileEntity(x, y, z);
+    if (te) {
+        gVerbCtx.player->netHandler->sendTileEntityPacket(te);
+    }
+}
+
+extern "C" bool verbRayTrace(double sx, double sy, double sz, double ex, double ey, double ez,
+                             int32_t* outX, int32_t* outY, int32_t* outZ) {
+    if (!gVerbCtx.world || !outX || !outY || !outZ) {
+        return false;
+    }
+    auto hit = gVerbCtx.world->rayTraceBlocks(Vec3D(sx, sy, sz), Vec3D(ex, ey, ez), true);
+    if (!hit) {
+        return false;
+    }
+    *outX = hit->blockX;
+    *outY = hit->blockY;
+    *outZ = hit->blockZ;
+    return true;
+}
+
+const RustBridge::ItemUseWorld& verbWorld() {
+    static const RustBridge::ItemUseWorld table = {
+        &verbNextInt,
+        &verbNextF64,
+        &verbGetBlockId,
+        &verbSetNotify,
+        &verbSetMetaNotify,
+        &verbSetQuiet,
+        &verbSetMeta,
+        &verbDoesAttach,
+        &verbMaterialBurning,
+        &verbMaterialSolid,
+        &verbCollidableBox,
+        &verbBlockCanStay,
+        &verbPlacementClear,
+        &verbBlockPlaced,
+        &verbHaveBlock,
+        &verbSpawnItem,
+        &verbSendTePacket,
+        &verbRayTrace,
+    };
+    return table;
+}
+
+struct VerbGuard {
+    VerbGuard(World* world, EntityPlayerMP* player) {
+        gVerbCtx.world = world;
+        gVerbCtx.player = player;
+    }
+    ~VerbGuard() { gVerbCtx = VerbContext{}; }
+};
+
+} // namespace
 
 Item* Item::itemsList[32000] = {nullptr};
 Item* Item::shovelSteel = nullptr;
@@ -124,36 +277,10 @@ public:
         if (!stack || !player || !world) {
             return false;
         }
-
-        const int blockId = world->getBlockId(x, y, z);
-        const int aboveId = world->getBlockId(x, y + 1, z);
-        Block* aboveBlock = (aboveId > 0 && aboveId < 256) ? Block::blocksList[aboveId] : nullptr;
-        const bool hasSolidCover = aboveBlock
-            && aboveBlock->isCollidable()
-            && aboveBlock->getCollisionBoundingBoxFromPool(world, x, y + 1, z).has_value();
-
-        if (((hasSolidCover || blockId != 2) && blockId != 3)) {
+        VerbGuard guard(world, player);
+        if (!RustBridge::itemHoeUse(&verbWorld(), Item::seeds ? Item::seeds->itemID : 0, x, y, z)) {
             return false;
         }
-
-        if (!world->setBlockWithNotify(x, y, z, 60)) {
-            return false;
-        }
-
-        if (blockId == 2 && Item::seeds) {
-            std::uniform_int_distribution<int> seedRoll(0, 7);
-            if (seedRoll(world->rand) == 0) {
-                auto entity = std::make_unique<EntityItem>(Item::seeds->itemID, 1, 0);
-                entity->setPosition(x + 0.5, y + 1.1, z + 0.5);
-                entity->worldObj = world;
-                std::uniform_real_distribution<double> velocityDist(-0.05, 0.05);
-                entity->motionX = velocityDist(world->rand);
-                entity->motionY = 0.12;
-                entity->motionZ = velocityDist(world->rand);
-                world->spawnEntityInWorld(std::move(entity));
-            }
-        }
-
         stack->damageItem(1);
         if (stack->stackSize <= 0) {
             player->destroyCurrentEquippedItem();
@@ -170,15 +297,10 @@ public:
         if (!stack || !world || side != 1) {
             return false;
         }
-
-        if (world->getBlockId(x, y, z) != 60 || world->getBlockId(x, y + 1, z) != 0) {
+        VerbGuard guard(world, player);
+        if (!RustBridge::itemSeedsUse(&verbWorld(), x, y, z, side)) {
             return false;
         }
-
-        if (!world->setBlockAndMetadataWithNotify(x, y + 1, z, 59, 0)) {
-            return false;
-        }
-
         if (stack->stackSize > 0) {
             --stack->stackSize;
         }
@@ -203,33 +325,14 @@ void Item::initItems() {
         using Item::Item;
         bool onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side) override {
             if (!stack || !world) return false;
-            // Place fire on the block adjacent to the clicked face
-            static const int dx[6] = {1,-1,0,0,0,0};
-            static const int dy[6] = {0,0,1,-1,0,0};
-            static const int dz[6] = {0,0,0,0,1,-1};
-            int fx = x + dx[side], fy = y + dy[side], fz = z + dz[side];
-            int fid = world->getBlockId(fx, fy, fz);
-            if (fid != 0) return false;
-            if (!world->doesBlockAllowAttachment(fx, fy - 1, fz)
-                && world->getBlockId(fx, fy - 1, fz) != 87) { // netherrack
-                // Check if any adjacent block can burn
-                bool hasFuel = false;
-                static const int cx[6] = {1,-1,0,0,0,0};
-                static const int cy[6] = {0,0,1,-1,0,0};
-                static const int cz[6] = {0,0,0,0,1,-1};
-                for (int i = 0; i < 6; ++i) {
-                    int id = world->getBlockId(fx + cx[i], fy + cy[i], fz + cz[i]);
-                    if (id > 0 && id < 256 && world->getBlockMaterial(fx + cx[i], fy + cy[i], fz + cz[i])->getBurning()) {
-                        hasFuel = true;
-                        break;
-                    }
-                }
-                if (!hasFuel) return false;
+            VerbGuard guard(world, player);
+            RustBridge::FlintOut out{};
+            if (!RustBridge::itemFlintUse(&verbWorld(), stack->itemDamage, maxDamage, x, y, z, side, &out)) {
+                return false;
             }
-            world->setBlockWithNotify(fx, fy, fz, 51);
             // Damage the item
-            stack->itemDamage++;
-            if (stack->itemDamage >= maxDamage) {
+            stack->itemDamage = out.new_damage;
+            if (out.broke) {
                 stack->stackSize = 0;
             }
             return true;
@@ -418,37 +521,13 @@ bool ItemAxe::isEffectiveAgainst(Block* block) const {
 }
 
 bool ItemSign::onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side) {
-    // Cannot place on bottom face
-    if (side == 0) return false;
-    // Target block must be solid
-    if (!world->getBlockMaterial(x, y, z)->isSolid()) return false;
-
-    // Offset target position by face
-    switch (side) {
-        case 1: y++; break;
-        case 2: z--; break;
-        case 3: z++; break;
-        case 4: x--; break;
-        case 5: x++; break;
+    if (!stack || !player || !world) {
+        return false;
     }
-
-    if (y < 0 || y >= 128) return false;
-    if (world->getBlockId(x, y, z) != 0) return false;
-
-    if (side == 1) {
-        // Placed on top face: sign post (ID 63), metadata = yaw direction (0-15)
-        int meta = RustBridge::itemSignYawMeta(player->rotationYaw);
-        world->setBlockAndMetadataWithNotify(x, y, z, 63, static_cast<uint8_t>(meta));
-    } else {
-        // Placed on side face: wall sign (ID 68), metadata = face direction
-        world->setBlockAndMetadataWithNotify(x, y, z, 68, static_cast<uint8_t>(side));
+    VerbGuard guard(world, player);
+    if (!RustBridge::itemSignUse(&verbWorld(), x, y, z, side, player->rotationYaw)) {
+        return false;
     }
-
-    // Send Packet59 so client opens the sign edit GUI
-    TileEntity* te = world->getTileEntity(x, y, z);
-    if (te && player->netHandler)
-        player->netHandler->sendTileEntityPacket(te);
-
     // Double-check stack is still valid before consuming (race condition protection)
     if (stack->stackSize > 0) {
         stack->stackSize--;
@@ -473,60 +552,18 @@ ItemBlock::ItemBlock(int blockId) : blockID(blockId) {
 }
 
 bool ItemBlock::onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side) {
-    // Special case: placing on snow replaces it
-    int existingId = world->getBlockId(x, y, z);
-    if (existingId != 79 /* snow */) { // not snow layer
-        // Offset target position by face direction (mirrors Java ItemBlock)
-        switch (side) {
-            case 0: y--; break;
-            case 1: y++; break;
-            case 2: z--; break;
-            case 3: z++; break;
-            case 4: x--; break;
-            case 5: x++; break;
-        }
-    }
-
-    if (stack->stackSize == 0) return false;
-    if (y < 0 || y >= 128) return false;
-
-    // Target position must be empty (air) or a replaceable fluid/fire/snow
-    // Java func_516_a: var7 == null (air) OR water/lava/fire/snow
-    int targetId = world->getBlockId(x, y, z);
-    if (targetId != 0) {
-        // Allow replacing only water, lava, fire, snow layer
-        if (targetId != 8 && targetId != 9 && targetId != 10 && targetId != 11
-         && targetId != 51 && targetId != 78) return false;
-    }
-
-    Block* block = Block::blocksList[blockID];
-    if (!block) return false;
-
-    // Check block can stay here
-    if (!block->canBlockStay(world, x, y, z)) return false;
-
-    auto bb = block->getCollisionBoundingBoxFromPool(world, x, y, z);
-    if (bb && !world->isPlacementVolumeClear(*bb)) {
+    if (!stack || !player || !world) {
         return false;
     }
-
-    if (world->setBlockWithNotifyNoClientUpdate(x, y, z, blockID)) {
-        Block* placed = Block::blocksList[blockID];
-        if (placed) {
-            // Set facing metadata for furnace (61/62) using player yaw before onBlockPlaced
-            if (blockID == 61 || blockID == 62) {
-                uint8_t meta = RustBridge::itemFurnaceFacing(player->rotationYaw);
-                world->setBlockMetadata(x, y, z, meta);
-            }
-            placed->onBlockPlaced(world, x, y, z, side);
-        }
-        // Double-check stack is still valid before consuming (race condition protection)
-        if (stack->stackSize > 0) {
-            stack->stackSize--;
-        }
-        return true;
+    VerbGuard guard(world, player);
+    if (!RustBridge::itemBlockUse(&verbWorld(), blockID, stack->stackSize, x, y, z, side, player->rotationYaw)) {
+        return false;
     }
-    return false;
+    // Double-check stack is still valid before consuming (race condition protection)
+    if (stack->stackSize > 0) {
+        stack->stackSize--;
+    }
+    return true;
 }
 
 ItemBoat::ItemBoat(int id) : Item(id) {
@@ -538,32 +575,27 @@ ItemStack ItemBoat::onItemRightClick(ItemStack* stack, World* world, EntityPlaye
         return stack ? stack->copy() : ItemStack();
     }
 
-    constexpr float partialTick = 1.0f;
-    const float pitch = player->prevRotationPitch + (player->rotationPitch - player->prevRotationPitch) * partialTick;
-    const float yaw = player->prevRotationYaw + (player->rotationYaw - player->prevRotationYaw) * partialTick;
-    const double startX = player->prevPosX + (player->posX - player->prevPosX) * static_cast<double>(partialTick);
-    const double startY = player->prevPosY + (player->posY - player->prevPosY) * static_cast<double>(partialTick)
-                        + 1.62 - static_cast<double>(player->yOffset);
-    const double startZ = player->prevPosZ + (player->posZ - player->prevPosZ) * static_cast<double>(partialTick);
+    RustBridge::BoatThrow aim{};
+    VerbGuard guard(world, player);
+    if (!RustBridge::itemBoatAim(player->prevRotationYaw, player->rotationYaw,
+                                 player->prevRotationPitch, player->rotationPitch,
+                                 player->prevPosX, player->posX,
+                                 player->prevPosY, player->posY,
+                                 player->prevPosZ, player->posZ,
+                                 static_cast<double>(player->yOffset), &aim)) {
+        return stack->copy();
+    }
 
-    const float cosYaw = MathHelper::cos(-yaw * (static_cast<float>(std::numbers::pi) / 180.0f) - static_cast<float>(std::numbers::pi));
-    const float sinYaw = MathHelper::sin(-yaw * (static_cast<float>(std::numbers::pi) / 180.0f) - static_cast<float>(std::numbers::pi));
-    const float lookHorizontal = -MathHelper::cos(-pitch * (static_cast<float>(std::numbers::pi) / 180.0f));
-    const float lookY = MathHelper::sin(-pitch * (static_cast<float>(std::numbers::pi) / 180.0f));
-    const float lookX = sinYaw * lookHorizontal;
-    const float lookZ = cosYaw * lookHorizontal;
-
-    const Vec3D start(startX, startY, startZ);
-    const Vec3D end = start.addVector(lookX * 5.0, lookY * 5.0, lookZ * 5.0);
-    auto hit = world->rayTraceBlocks(start, end, true);
-    if (!hit) {
+    int32_t hitX = 0, hitY = 0, hitZ = 0;
+    if (!RustBridge::itemBoatThrow(&verbWorld(), aim.sx, aim.sy, aim.sz,
+                                   aim.ex, aim.ey, aim.ez, &hitX, &hitY, &hitZ)) {
         return stack->copy();
     }
 
     auto boatEntity = std::make_unique<EntityBoat>(world,
-        static_cast<double>(hit->blockX) + 0.5,
-        static_cast<double>(hit->blockY) + 1.5,
-        static_cast<double>(hit->blockZ) + 0.5);
+        static_cast<double>(hitX) + 0.5,
+        static_cast<double>(hitY) + 1.5,
+        static_cast<double>(hitZ) + 0.5);
     world->spawnEntityInWorld(std::move(boatEntity));
 
     ItemStack result = stack->copy();

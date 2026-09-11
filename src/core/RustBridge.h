@@ -180,6 +180,24 @@ uint8_t itemFurnaceFacing(float yaw);
 uint8_t itemSignYawMeta(float yaw);
 using FoodBite = ::FoodBite;
 FoodBite itemFoodBite(int32_t count, int32_t healAmount);
+
+// Item verbs (stack bookkeeping stays in C++)
+using ItemUseWorld = ::ItemUseWorld;
+using FlintOut = ::FlintOut;
+using BoatThrow = ::BoatThrow;
+bool itemHoeUse(const ItemUseWorld* w, int32_t seedsId, int32_t x, int32_t y, int32_t z);
+bool itemSeedsUse(const ItemUseWorld* w, int32_t x, int32_t y, int32_t z, int32_t side);
+bool itemFlintUse(const ItemUseWorld* w, int32_t damageIn, int32_t maxDamage,
+                  int32_t x, int32_t y, int32_t z, int32_t side, FlintOut* out);
+bool itemSignUse(const ItemUseWorld* w, int32_t x, int32_t y, int32_t z, int32_t side, float yaw);
+bool itemBlockUse(const ItemUseWorld* w, uint8_t blockId, int32_t stackCount,
+                  int32_t x, int32_t y, int32_t z, int32_t side, float yaw);
+bool itemBoatAim(float prevYaw, float yaw, float prevPitch, float pitch,
+                 double prevX, double x, double prevY, double y,
+                 double prevZ, double z, double yOffset, BoatThrow* out);
+bool itemBoatThrow(const ItemUseWorld* w, double sx, double sy, double sz,
+                   double ex, double ey, double ez,
+                   int32_t* outX, int32_t* outY, int32_t* outZ);
 void blockSandAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
 void blockSandNeighbor(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
 void blockSandTick(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);

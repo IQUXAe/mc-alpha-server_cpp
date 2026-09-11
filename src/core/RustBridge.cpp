@@ -506,6 +506,40 @@ FoodBite itemFoodBite(int32_t count, int32_t healAmount) {
     return ::alpha_item_food_bite(count, healAmount);
 }
 
+bool itemHoeUse(const ItemUseWorld* w, int32_t seedsId, int32_t x, int32_t y, int32_t z) {
+    return ::item_hoe_use(w, seedsId, x, y, z);
+}
+
+bool itemSeedsUse(const ItemUseWorld* w, int32_t x, int32_t y, int32_t z, int32_t side) {
+    return ::item_seeds_use(w, x, y, z, side);
+}
+
+bool itemFlintUse(const ItemUseWorld* w, int32_t damageIn, int32_t maxDamage,
+                  int32_t x, int32_t y, int32_t z, int32_t side, FlintOut* out) {
+    return ::item_flint_use(w, damageIn, maxDamage, x, y, z, side, out);
+}
+
+bool itemSignUse(const ItemUseWorld* w, int32_t x, int32_t y, int32_t z, int32_t side, float yaw) {
+    return ::item_sign_use(w, x, y, z, side, yaw);
+}
+
+bool itemBlockUse(const ItemUseWorld* w, uint8_t blockId, int32_t stackCount,
+                  int32_t x, int32_t y, int32_t z, int32_t side, float yaw) {
+    return ::item_block_use(w, blockId, stackCount, x, y, z, side, yaw);
+}
+
+bool itemBoatAim(float prevYaw, float yaw, float prevPitch, float pitch,
+                 double prevX, double x, double prevY, double y,
+                 double prevZ, double z, double yOffset, BoatThrow* out) {
+    return ::item_boat_aim(prevYaw, yaw, prevPitch, pitch, prevX, x, prevY, y, prevZ, z, yOffset, out);
+}
+
+bool itemBoatThrow(const ItemUseWorld* w, double sx, double sy, double sz,
+                   double ex, double ey, double ez,
+                   int32_t* outX, int32_t* outY, int32_t* outZ) {
+    return ::item_boat_throw(w, sx, sy, sz, ex, ey, ez, outX, outY, outZ);
+}
+
 bool entityResolveMove(const FfiAabb& box, double dx, double dy, double dz,
                        const FfiAabb* boxes, size_t numBoxes, ResolvedMove* out) {
     return ::alpha_entity_resolve_move(&box, dx, dy, dz, boxes, numBoxes, out);

@@ -1195,6 +1195,62 @@ typedef struct FoodBite {
 
 FoodBite alpha_item_food_bite(int32_t count, int32_t heal_amount);
 
+// Item verbs (item_verbs.rs). Stack bookkeeping stays in C++.
+typedef struct ItemUseWorld {
+    int32_t (*next_int)(int32_t bound);
+    double (*next_float64_01)(void);
+    uint8_t (*get_block_id)(int32_t x, int32_t y, int32_t z);
+    bool (*set_block_notify)(int32_t x, int32_t y, int32_t z, uint8_t id);
+    bool (*set_block_meta_notify)(int32_t x, int32_t y, int32_t z, uint8_t id, uint8_t meta);
+    bool (*set_block_quiet)(int32_t x, int32_t y, int32_t z, uint8_t id);
+    void (*set_block_meta)(int32_t x, int32_t y, int32_t z, uint8_t meta);
+    bool (*does_attach)(int32_t x, int32_t y, int32_t z);
+    bool (*material_burning)(int32_t x, int32_t y, int32_t z);
+    bool (*material_solid)(int32_t x, int32_t y, int32_t z);
+    bool (*collidable_box)(int32_t x, int32_t y, int32_t z);
+    bool (*block_can_stay)(uint8_t id, int32_t x, int32_t y, int32_t z);
+    bool (*placement_clear)(uint8_t id, int32_t x, int32_t y, int32_t z);
+    void (*block_placed)(uint8_t id, int32_t x, int32_t y, int32_t z, int32_t side);
+    bool (*have_block)(uint8_t id);
+    void (*spawn_item)(int32_t item_id, int32_t count, int32_t damage,
+                       double fx, double fy, double fz, double mx, double my, double mz);
+    void (*send_te_packet)(int32_t x, int32_t y, int32_t z);
+    bool (*ray_trace)(double sx, double sy, double sz, double ex, double ey, double ez,
+                      int32_t* out_x, int32_t* out_y, int32_t* out_z);
+} ItemUseWorld;
+
+typedef struct FlintOut {
+    bool placed;
+    int32_t new_damage;
+    bool broke;
+} FlintOut;
+
+typedef struct BoatThrow {
+    double lx;
+    double ly;
+    double lz;
+    double sx;
+    double sy;
+    double sz;
+    double ex;
+    double ey;
+    double ez;
+} BoatThrow;
+
+bool item_hoe_use(const ItemUseWorld* world, int32_t seeds_id, int32_t x, int32_t y, int32_t z);
+bool item_seeds_use(const ItemUseWorld* world, int32_t x, int32_t y, int32_t z, int32_t side);
+bool item_flint_use(const ItemUseWorld* world, int32_t damage_in, int32_t max_damage,
+                    int32_t x, int32_t y, int32_t z, int32_t side, FlintOut* out);
+bool item_sign_use(const ItemUseWorld* world, int32_t x, int32_t y, int32_t z, int32_t side, float yaw);
+bool item_block_use(const ItemUseWorld* world, uint8_t block_id, int32_t stack_count,
+                    int32_t x, int32_t y, int32_t z, int32_t side, float yaw);
+bool item_boat_aim(float prev_yaw, float yaw, float prev_pitch, float pitch,
+                   double prev_x, double x, double prev_y, double y,
+                   double prev_z, double z, double y_offset, BoatThrow* out);
+bool item_boat_throw(const ItemUseWorld* world, double sx, double sy, double sz,
+                     double ex, double ey, double ez,
+                     int32_t* out_x, int32_t* out_y, int32_t* out_z);
+
 // Entity physics kernel (entity_physics.rs). Pure collision/fall/push math;
 // the world-dependent half (box gathering, onFall, velocity) stays in C++.
 typedef struct FfiAabb {
