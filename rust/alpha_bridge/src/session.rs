@@ -93,6 +93,7 @@ pub enum ConnEvent {
 pub struct Conn {
     inbound: Receiver<ConnEvent>,
     outbound: Sender<Vec<u8>>,
+    shutdown: Option<TcpStream>,
     pub remote: String,
 }
 
@@ -100,6 +101,7 @@ impl Conn {
     pub fn new(stream: TcpStream) -> std::io::Result<Self> {
         let remote = stream.peer_addr().map(|a| a.to_string()).unwrap_or_default();
         stream.set_read_timeout(Some(Duration::from_secs(30)))?;
+        let shutdown = stream.try_clone().ok();
         let mut reader = stream.try_clone()?;
         let mut writer = stream;
         let (tx_in, inbound) = mpsc::channel();
@@ -138,7 +140,7 @@ impl Conn {
             })
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-        Ok(Self { inbound, outbound, remote })
+        Ok(Self { inbound, outbound, shutdown, remote })
     }
 
     /// Non-blocking drain of queued events.
@@ -153,6 +155,15 @@ impl Conn {
     /// Queue bytes for the socket (drops silently once dead).
     pub fn send(&self, bytes: Vec<u8>) {
         let _ = self.outbound.send(bytes);
+    }
+
+    /// Force the socket shut (unblocks the read thread; the server
+    /// calls this on kick/timeout/shutdown so ghost threads cannot
+    /// linger behind dropped entries).
+    pub fn close(&self) {
+        if let Some(s) = &self.shutdown {
+            let _ = s.shutdown(std::net::Shutdown::Both);
+        }
     }
 }
 
@@ -513,6 +524,29 @@ mod tests {
             Some(LoginEvent::Done) => {}
             _ => panic!("expected duplicate kick"),
         }
+    }
+
+    #[test]
+    fn test_conn_close_unblocks_reader() {
+        let listener = bind_listener("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            Conn::new(stream).unwrap()
+        });
+        let client = TcpStream::connect(addr).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let conn = handle.join().unwrap();
+        conn.close();
+        let mut saw_drop = false;
+        for _ in 0..100 {
+            if conn.drain().iter().any(|e| matches!(e, ConnEvent::Dropped)) {
+                saw_drop = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(saw_drop);
     }
 
     #[test]

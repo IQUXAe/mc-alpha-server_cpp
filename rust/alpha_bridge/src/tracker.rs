@@ -331,6 +331,12 @@ impl Tracker {
         self.entries.get(&id).map(|e| e.tracking.contains(&player)).unwrap_or(false)
     }
 
+    /// Current watchers of an entity (mirrors `TrackerEntry.trackingPlayers`;
+    /// the server uses it for swing fan-out, which skips the source player).
+    pub fn watchers(&self, id: EntityId) -> Vec<EntityId> {
+        self.entries.get(&id).map(|e| e.tracking.iter().copied().collect()).unwrap_or_default()
+    }
+
     /// Send one entity's current state to a single player (login catch-up).
     fn send_spawn_to(&mut self, id: EntityId, e: &TrackedEntity, player: EntityId, out: &mut Vec<Outbox>) {
         out.push(Outbox { to: player, bytes: encode_spawn(e) });
@@ -657,6 +663,8 @@ mod tests {
         let mut out = Vec::new();
         t.tick_entity(&mob, &obs, &always, &mut out);
         assert!(t.is_tracking(7, 1));
+        assert_eq!(t.watchers(7), vec![1]);
+        assert!(t.watchers(999).is_empty());
         // First packet of a fresh watcher is the mob spawn (id 24).
         assert!(!out.is_empty());
         assert_eq!(out[0].to, 1);
