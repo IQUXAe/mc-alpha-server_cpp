@@ -2,6 +2,7 @@
 #include "core/ItemStack.h"
 #include "core/Item.h"
 #include "core/Material.h"
+#include "core/RustBridge.h"
 #include "block/Block.h"
 
 class ItemStackTest : public ::testing::Test {
@@ -225,4 +226,19 @@ TEST_F(ItemStackTest, BaseOnItemUseReturnsFalse) {
     // diamond has no override, uses base Item::onItemUse which returns false
     ASSERT_NE(Item::diamond, nullptr);
     EXPECT_FALSE(Item::diamond->onItemUse(nullptr, nullptr, nullptr, 0, 0, 0, 0));
+}
+
+TEST_F(ItemStackTest, ItemUseKernelsViaBridge) {
+    EXPECT_EQ(RustBridge::itemFurnaceFacing(0.0f), 2);
+    EXPECT_EQ(RustBridge::itemFurnaceFacing(90.0f), 5);
+    EXPECT_EQ(RustBridge::itemFurnaceFacing(180.0f), 3);
+    EXPECT_EQ(RustBridge::itemFurnaceFacing(270.0f), 4);
+    EXPECT_EQ(RustBridge::itemSignYawMeta(0.0f), 8);
+    EXPECT_EQ(RustBridge::itemSignYawMeta(180.0f), 0);
+    const RustBridge::FoodBite bite = RustBridge::itemFoodBite(3, 4);
+    EXPECT_EQ(bite.new_count, 2);
+    EXPECT_EQ(bite.heal, 4);
+    const RustBridge::FoodBite empty = RustBridge::itemFoodBite(0, 4);
+    EXPECT_EQ(empty.new_count, 0);
+    EXPECT_EQ(empty.heal, 0);
 }

@@ -489,6 +489,18 @@ DropVelocity playerDropVelocity(double ra, double rb, double rc) {
     return ::alpha_player_drop_velocity(ra, rb, rc);
 }
 
+uint8_t itemFurnaceFacing(float yaw) {
+    return ::alpha_item_furnace_facing(yaw);
+}
+
+uint8_t itemSignYawMeta(float yaw) {
+    return ::alpha_item_sign_yaw_meta(yaw);
+}
+
+FoodBite itemFoodBite(int32_t count, int32_t healAmount) {
+    return ::alpha_item_food_bite(count, healAmount);
+}
+
 bool entityResolveMove(const FfiAabb& box, double dx, double dy, double dz,
                        const FfiAabb* boxes, size_t numBoxes, ResolvedMove* out) {
     return ::alpha_entity_resolve_move(&box, dx, dy, dz, boxes, numBoxes, out);

@@ -1171,6 +1171,17 @@ typedef struct DropVelocity {
 
 DropVelocity alpha_player_drop_velocity(double ra, double rb, double rc);
 
+// Item-use kernels (item_use.rs). Verbs stay in C++.
+uint8_t alpha_item_furnace_facing(float yaw);
+uint8_t alpha_item_sign_yaw_meta(float yaw);
+
+typedef struct FoodBite {
+    int32_t new_count;
+    int32_t heal;
+} FoodBite;
+
+FoodBite alpha_item_food_bite(int32_t count, int32_t heal_amount);
+
 // Entity physics kernel (entity_physics.rs). Pure collision/fall/push math;
 // the world-dependent half (box gathering, onFall, velocity) stays in C++.
 typedef struct FfiAabb {

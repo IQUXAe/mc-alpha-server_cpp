@@ -169,6 +169,12 @@ uint8_t playerDeathCause(bool hasAttacker, uint8_t attackerKind, float fallDista
                          bool onCactus, bool drowning, bool inLava, bool onFire);
 using DropVelocity = ::DropVelocity;
 DropVelocity playerDropVelocity(double ra, double rb, double rc);
+
+// Item-use kernels (verbs stay in C++)
+uint8_t itemFurnaceFacing(float yaw);
+uint8_t itemSignYawMeta(float yaw);
+using FoodBite = ::FoodBite;
+FoodBite itemFoodBite(int32_t count, int32_t healAmount);
 void blockSandAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
 void blockSandNeighbor(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
 void blockSandTick(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);

@@ -368,9 +368,10 @@ ItemStack ItemFood::onItemRightClick(ItemStack* stack, World* world, EntityPlaye
     }
 
     ItemStack result = stack->copy();
-    if (result.stackSize > 0) {
-        --result.stackSize;
-        player->heal(healAmount_);
+    const RustBridge::FoodBite bite = RustBridge::itemFoodBite(result.stackSize, healAmount_);
+    result.stackSize = bite.new_count;
+    if (bite.heal > 0) {
+        player->heal(bite.heal);
     }
     return result;
 }
@@ -436,8 +437,7 @@ bool ItemSign::onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world,
 
     if (side == 1) {
         // Placed on top face: sign post (ID 63), metadata = yaw direction (0-15)
-        int meta = static_cast<int>(std::floor(
-            static_cast<double>(player->rotationYaw + 180.0f) * 16.0 / 360.0 + 0.5)) & 15;
+        int meta = RustBridge::itemSignYawMeta(player->rotationYaw);
         world->setBlockAndMetadataWithNotify(x, y, z, 63, static_cast<uint8_t>(meta));
     } else {
         // Placed on side face: wall sign (ID 68), metadata = face direction
@@ -470,16 +470,6 @@ float ItemTool::getStrVsBlock(int blockId) const {
 ItemBlock::ItemBlock(int blockId) : blockID(blockId) {
     itemID = blockId;
     itemsList[blockId] = this;
-}
-
-// Helper: convert player yaw to furnace facing metadata (2=N,3=S,4=W,5=E)
-// Mirrors Java BlockFurnace.onBlockPlacedBy logic.
-static uint8_t furnaceFacingFromYaw(float yaw) {
-    // Java: int var6 = MathHelper.floor_double((double)(var5.rotationYaw * 4.0F / 360.0F) + 0.5D) & 3;
-    int facing = static_cast<int>(std::floor(yaw * 4.0f / 360.0f + 0.5)) & 3;
-    // Java: 0→2(N), 1→5(E), 2→3(S), 3→4(W)
-    constexpr uint8_t table[4] = {2, 5, 3, 4};
-    return table[facing];
 }
 
 bool ItemBlock::onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world, int x, int y, int z, int side) {
@@ -525,7 +515,7 @@ bool ItemBlock::onItemUse(ItemStack* stack, EntityPlayerMP* player, World* world
         if (placed) {
             // Set facing metadata for furnace (61/62) using player yaw before onBlockPlaced
             if (blockID == 61 || blockID == 62) {
-                uint8_t meta = furnaceFacingFromYaw(player->rotationYaw);
+                uint8_t meta = RustBridge::itemFurnaceFacing(player->rotationYaw);
                 world->setBlockMetadata(x, y, z, meta);
             }
             placed->onBlockPlaced(world, x, y, z, side);
