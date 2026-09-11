@@ -13,8 +13,9 @@ use std::collections::HashMap;
 use crate::aabb::AxisAlignedBB;
 use crate::block::{BlockMaterial, BlockType, alpha_block_properties_get};
 use crate::chunk::Chunk;
-use crate::entity_table::{EntityId, EntityTable};
+use crate::entity_table::{Body, Entity, EntityId, EntityTable};
 use crate::material::Material;
+use crate::random::JavaRandom;
 use crate::tracker::Tracker;
 
 pub const WORLD_HEIGHT: i32 = 128;
@@ -65,14 +66,21 @@ pub fn material_of(material_id: u8) -> Material {
         _ => Material::AIR,
     }
 }
-
-#[derive(Debug, Default)]
-pub struct World {    pub seed: i64,
+#[derive(Debug)]
+pub struct World {
+    pub seed: i64,
     pub time: i64,
     pub spawn: [i32; 3],
     chunks: HashMap<(i32, i32), Chunk>,
     pub entities: EntityTable,
     pub tracker: Tracker,
+    rng: JavaRandom,
+}
+
+impl Default for World {
+    fn default() -> Self {
+        World::new(0)
+    }
 }
 
 impl World {
@@ -84,6 +92,7 @@ impl World {
             chunks: HashMap::new(),
             entities: EntityTable::new(),
             tracker: Tracker::new(),
+            rng: JavaRandom::new(seed),
         }
     }
 
@@ -259,6 +268,282 @@ impl World {
     }
 }
 
+/// Block types C++ reports as replaceable (mirrors the `isReplaceable`
+/// overrides: flower, tall grass, torch, reed, sapling, crops — notably
+/// NOT mushroom, cactus, leaves, soil, or fluids).
+pub fn is_replaceable(block_id: u8) -> bool {
+    if block_id == 0 {
+        return false;
+    }
+    matches!(
+        alpha_block_properties_get(block_id as u32).block_type,
+        x if x == BlockType::Flower as u8
+            || x == BlockType::TallGrass as u8
+            || x == BlockType::Torch as u8
+            || x == BlockType::Reed as u8
+            || x == BlockType::Sapling as u8
+            || x == BlockType::Crops as u8
+    )
+}
+
+impl World {
+    /// Spawn a loose item into the table (mirrors the common drop shape:
+    /// default 10-tick pickup delay).
+    pub fn spawn_item_entity(&mut self, item_id: i32, count: i32, damage: i32, x: f64, y: f64, z: f64) -> EntityId {
+        use crate::entity_table::ItemEnt;
+        let id = self.entities.alloc_id();
+        let mut b = Body::new(id, 0.25, 0.25, 0.125);
+        b.set_position(x, y, z);
+        self.entities.insert(Entity::Item(ItemEnt {
+            body: b,
+            item_id,
+            count,
+            damage,
+            age: 0,
+            pickup_delay: 10,
+        }));
+        id
+    }
+
+    /// Y-X-Z collision move for one body (mirrors `Entity::moveEntity`
+    /// without the soil-walking sound, which arrives with the block phase).
+    /// Returns the fall event distance when `onFall` must fire.
+    pub fn move_body(&mut self, id: EntityId, dx: f64, dy: f64, dz: f64) -> Option<f32> {
+        let (orig, no_clip, step, was_ground, suppress, fall) = match self.entities.get(id) {
+            Some(e) => {
+                let b = e.body();
+                (
+                    b.bounding_box.clone(),
+                    b.no_clip,
+                    b.step_height,
+                    b.on_ground,
+                    b.suppress_fall_state,
+                    b.fall_distance,
+                )
+            }
+            None => return None,
+        };
+        let (old_x, old_y, old_z) = (dx, dy, dz);
+        let (mut mx, mut my, mut mz) = (dx, dy, dz);
+        let mut work = orig.clone();
+        if no_clip {
+            if let Some(e) = self.entities.get_mut(id) {
+                let b = e.body_mut();
+                let (px, py, pz) = (b.pos[0] + mx, b.pos[1] + my, b.pos[2] + mz);
+                b.set_position(px, py, pz);
+            }
+        } else {
+            let boxes = self.colliding_boxes(&work.add_coord(mx, my, mz));
+            for cb in &boxes {
+                my = cb.calculate_y_offset(&work, my);
+            }
+            work.offset(0.0, my, 0.0);
+            for cb in &boxes {
+                mx = cb.calculate_x_offset(&work, mx);
+            }
+            work.offset(mx, 0.0, 0.0);
+            for cb in &boxes {
+                mz = cb.calculate_z_offset(&work, mz);
+            }
+            work.offset(0.0, 0.0, mz);
+
+            if step > 0.0 && (was_ground || (old_y != my && old_y < 0.0)) && (old_x != mx || old_z != mz) {
+                let boxes = self.colliding_boxes(&orig.add_coord(old_x, step as f64, old_z));
+                let (mut sx, mut sy, mut sz) = (old_x, step as f64, old_z);
+                let mut sbox = orig.clone();
+                for cb in &boxes {
+                    sy = cb.calculate_y_offset(&sbox, sy);
+                }
+                sbox.offset(0.0, sy, 0.0);
+                for cb in &boxes {
+                    sx = cb.calculate_x_offset(&sbox, sx);
+                }
+                sbox.offset(sx, 0.0, 0.0);
+                for cb in &boxes {
+                    sz = cb.calculate_z_offset(&sbox, sz);
+                }
+                sbox.offset(0.0, 0.0, sz);
+                if sx * sx + sz * sz > mx * mx + mz * mz {
+                    work = sbox;
+                    mx = sx;
+                    my = sy;
+                    mz = sz;
+                }
+            }
+
+            let falling = {
+                let e = self.entities.get_mut(id)?;
+                let b = e.body_mut();
+                b.bounding_box = work.clone();
+                b.pos[0] = (work.min_x + work.max_x) / 2.0;
+                b.pos[1] = work.min_y + b.y_offset as f64;
+                b.pos[2] = (work.min_z + work.max_z) / 2.0;
+                b.collided_horiz = old_x != mx || old_z != mz;
+                b.collided_vert = old_y != my;
+                b.on_ground = old_y != my && old_y < 0.0;
+                if old_x != mx {
+                    b.motion[0] = 0.0;
+                }
+                if old_y != my {
+                    b.motion[1] = 0.0;
+                }
+                if old_z != mz {
+                    b.motion[2] = 0.0;
+                }
+                (b.on_ground, my)
+            };
+            if !suppress {
+                let mut ev = -1.0f32;
+                let nd = unsafe {
+                    crate::entity_physics::alpha_entity_fall_step(falling.0, falling.1, fall, &mut ev)
+                };
+                if let Some(e) = self.entities.get_mut(id) {
+                    e.body_mut().fall_distance = nd;
+                }
+                if ev >= 0.0 {
+                    return Some(ev);
+                }
+            }
+        }
+        None
+    }
+
+    /// Item push-out from solid rock (mirrors `pushOutOfBlocks`).
+    pub fn item_push_out(&mut self, id: EntityId) {
+        let (ix, iy, iz, lx, ly, lz) = match self.entities.get(id) {
+            Some(Entity::Item(e)) => {
+                let (x, y, z) = (e.body.pos[0], e.body.pos[1], e.body.pos[2]);
+                (
+                    x.floor() as i32,
+                    y.floor() as i32,
+                    z.floor() as i32,
+                    x - (x.floor()),
+                    y - (y.floor()),
+                    z - (z.floor()),
+                )
+            }
+            _ => return,
+        };
+        if !self.is_solid(ix, iy, iz) {
+            return;
+        }
+        let side = unsafe {
+            crate::entity_misc::alpha_item_push_side(
+                !self.is_solid(ix - 1, iy, iz),
+                !self.is_solid(ix + 1, iy, iz),
+                !self.is_solid(ix, iy - 1, iz),
+                !self.is_solid(ix, iy + 1, iz),
+                !self.is_solid(ix, iy, iz - 1),
+                !self.is_solid(ix, iy, iz + 1),
+                lx,
+                ly,
+                lz,
+            )
+        };
+        if side < 0 {
+            return;
+        }
+        let impulse = self.rng.next_double() * 0.2 + 0.1;
+        if let Some(Entity::Item(e)) = self.entities.get_mut(id) {
+            match side {
+                0 => e.body.motion[0] = -impulse,
+                1 => e.body.motion[0] = impulse,
+                2 => e.body.motion[1] = -impulse,
+                3 => e.body.motion[1] = impulse,
+                4 => e.body.motion[2] = -impulse,
+                _ => e.body.motion[2] = impulse,
+            }
+        }
+    }
+
+    /// Loose-item tick (mirrors `EntityItem::tick`).
+    pub fn tick_item(&mut self, id: EntityId) {
+        self.entities.tick_base(id);
+        let alive = match self.entities.get_mut(id) {
+            Some(Entity::Item(e)) => {
+                if e.pickup_delay > 0 {
+                    e.pickup_delay -= 1;
+                }
+                e.age += 1;
+                if e.age >= 6000 {
+                    e.body.dead = true;
+                    return;
+                }
+                e.body.motion[1] -= 0.04;
+                (e.body.motion[0], e.body.motion[1], e.body.motion[2])
+            }
+            _ => return,
+        };
+        self.item_push_out(id);
+        self.move_body(id, alive.0, alive.1, alive.2);
+        if let Some(Entity::Item(e)) = self.entities.get_mut(id) {
+            let mut m = crate::entity_misc::ItemMotion { mx: e.body.motion[0], my: e.body.motion[1], mz: e.body.motion[2] };
+            unsafe {
+                crate::entity_misc::alpha_item_damp(e.body.on_ground, &mut m);
+            }
+            e.body.motion = [m.mx, m.my, m.mz];
+        }
+    }
+
+    /// Falling-sand tick (mirrors `EntityFallingSand::tick`).
+    pub fn tick_falling(&mut self, id: EntityId) {
+        self.entities.tick_base(id);
+        let (block_id, motion) = match self.entities.get_mut(id) {
+            Some(Entity::Falling(e)) => {
+                if e.block_id == 0 {
+                    e.body.dead = true;
+                    return;
+                }
+                e.fall_time += 1;
+                e.body.motion[1] -= 0.04;
+                (e.block_id, (e.body.motion[0], e.body.motion[1], e.body.motion[2]))
+            }
+            _ => return,
+        };
+        self.move_body(id, motion.0, motion.1, motion.2);
+        if let Some(Entity::Falling(e)) = self.entities.get_mut(id) {
+            e.body.motion[0] *= 0.98;
+            e.body.motion[1] *= 0.98;
+            e.body.motion[2] *= 0.98;
+        }
+        let (on_ground, by, px, py, pz) = match self.entities.get(id) {
+            Some(Entity::Falling(e)) => {
+                (e.body.on_ground, e.body.pos[1].floor() as i32, e.body.pos[0], e.body.pos[1], e.body.pos[2])
+            }
+            _ => return,
+        };
+        let bx = px.floor() as i32;
+        let bz = pz.floor() as i32;
+        let land_id = self.get_block_id(bx, by, bz) as i32;
+        let fall_time = match self.entities.get(id) {
+            Some(Entity::Falling(e)) => e.fall_time,
+            _ => return,
+        };
+        let action = crate::entity_misc::alpha_falling_land(
+            block_id, on_ground, by, land_id,
+            is_replaceable(land_id as u8),
+            (1..256).contains(&block_id),
+            fall_time,
+        );
+        match action {
+            1 => {
+                if let Some(Entity::Falling(e)) = self.entities.get_mut(id) {
+                    e.body.dead = true;
+                }
+                self.set_block_id(bx, by, bz, block_id as u8);
+            }
+            2 => {
+                let drop_y = if on_ground { py + 0.5 } else { py };
+                if let Some(Entity::Falling(e)) = self.entities.get_mut(id) {
+                    e.body.dead = true;
+                }
+                self.spawn_item_entity(block_id, 1, 0, px, drop_y, pz);
+            }
+            _ => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,5 +630,74 @@ mod tests {
         assert_eq!(w.closest_player(3.0, 64.0, 4.0, 4.0), None);
         // Boundary is exclusive like C++ (strict <).
         assert_eq!(w.closest_player(24.0, 64.0, 0.0, 24.0), None);
+    }
+
+    fn add_item(w: &mut World, x: f64, y: f64, z: f64) -> EntityId {
+        w.spawn_item_entity(35, 1, 0, x, y, z)
+    }
+
+    #[test]
+    fn test_move_body_lands_on_floor() {
+        let mut w = world_with_floor();
+        let id = add_item(&mut w, 3.5, 70.0, 4.5);
+        // Fall until resting: big steps converge on y=64 top face.
+        for _ in 0..40 {
+            w.move_body(id, 0.0, -3.0, 0.0);
+        }
+        let b = w.entities.get(id).unwrap().body().clone();
+        assert!(b.on_ground);
+        assert!((b.pos[1] - 64.125).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_tick_item_falls_and_ages_out() {
+        let mut w = world_with_floor();
+        let id = add_item(&mut w, 3.5, 66.0, 4.5);
+        for _ in 0..60 {
+            w.tick_item(id);
+            if w.entities.get(id).unwrap().body().on_ground {
+                break;
+            }
+        }
+        assert!(w.entities.get(id).unwrap().body().on_ground);
+        // Age-out kills at 6000 regardless of rest.
+        if let Some(crate::entity_table::Entity::Item(e)) = w.entities.get_mut(id) {
+            e.age = 5999;
+        }
+        w.tick_item(id);
+        assert!(w.entities.get(id).unwrap().body().dead);
+    }
+
+    #[test]
+    fn test_tick_falling_places_on_landing() {
+        use crate::entity_table::{Body, FallingEnt};
+        let mut w = world_with_floor();
+        let id = w.entities.alloc_id();
+        let mut b = Body::new(id, 0.98, 0.98, 0.49);
+        b.set_position(3.5, 70.0, 4.5);
+        w.entities.insert(crate::entity_table::Entity::Falling(FallingEnt {
+            body: b,
+            block_id: 12,
+            fall_time: 0,
+        }));
+        for _ in 0..60 {
+            w.tick_falling(id);
+            if w.entities.get(id).unwrap().body().dead {
+                break;
+            }
+        }
+        assert!(w.entities.get(id).unwrap().body().dead);
+        // Landed on the floor top (y=64) and placed sand there.
+        assert_eq!(w.get_block_id(3, 64, 4), 12);
+    }
+
+    #[test]
+    fn test_is_replaceable_table() {
+        assert!(is_replaceable(37));
+        assert!(is_replaceable(83));
+        assert!(is_replaceable(50));
+        assert!(!is_replaceable(39));
+        assert!(!is_replaceable(12));
+        assert!(!is_replaceable(0));
     }
 }

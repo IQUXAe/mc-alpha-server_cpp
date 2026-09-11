@@ -52,6 +52,7 @@ pub struct Body {
     pub in_water: bool,
     pub dimension: i32,
     pub fire_resistance: i32,
+    pub suppress_fall_state: bool,
     pub riding: EntityId,
     pub ridden_by: EntityId,
 }
@@ -86,6 +87,7 @@ impl Body {
             in_water: false,
             dimension: 0,
             fire_resistance: 1,
+            suppress_fall_state: false,
             riding: NO_ENTITY,
             ridden_by: NO_ENTITY,
         }

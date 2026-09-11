@@ -109,19 +109,15 @@ pub extern "C" fn alpha_falling_land(
 /// Water fraction under a box (mirrors `EntityBoat::computeWaterFraction`).
 /// Five vertical slices of the box shrunk by 0.125; a slice counts when any
 /// cell in it is water. `is_water` answers per-cell.
-#[no_mangle]
-pub unsafe extern "C" fn alpha_boat_water_fraction(
+pub fn water_fraction_scan(
     min_x: f64,
     min_y: f64,
     min_z: f64,
     max_x: f64,
     max_y: f64,
     max_z: f64,
-    is_water: Option<extern "C" fn(x: i32, y: i32, z: i32) -> bool>,
+    mut is_water: impl FnMut(i32, i32, i32) -> bool,
 ) -> f64 {
-    let Some(is_water) = is_water else {
-        return 0.0;
-    };
     let mut fraction = 0.0;
     for slice in 0..5 {
         let slice_min_y = min_y + (max_y - min_y) * (slice as f64) / 5.0 - 0.125;
@@ -144,6 +140,22 @@ pub unsafe extern "C" fn alpha_boat_water_fraction(
         }
     }
     fraction
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alpha_boat_water_fraction(
+    min_x: f64,
+    min_y: f64,
+    min_z: f64,
+    max_x: f64,
+    max_y: f64,
+    max_z: f64,
+    is_water: Option<extern "C" fn(x: i32, y: i32, z: i32) -> bool>,
+) -> f64 {
+    let Some(is_water) = is_water else {
+        return 0.0;
+    };
+    water_fraction_scan(min_x, min_y, min_z, max_x, max_y, max_z, |x, y, z| is_water(x, y, z))
 }
 
 /// Boat yaw steering (mirrors the yaw block in `EntityBoat::tick`).
