@@ -415,6 +415,14 @@ pub mod player_mining;
 pub mod player_digging;
 pub mod tracker_math;
 pub mod mob_spawning;
+pub mod material;
+pub mod nibble;
+pub mod server_config;
+pub mod server_log;
+pub mod aabb;
+pub mod math_helper;
+pub mod server_constants;
+pub mod vec3d;
 
 use crate::random::JavaRandom;
 use crate::noise::{NoiseGeneratorOctaves, NoiseGeneratorOctaves2};
