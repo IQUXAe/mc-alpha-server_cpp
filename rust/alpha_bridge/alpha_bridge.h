@@ -1140,6 +1140,65 @@ float alpha_entity_fall_step(bool on_ground, double dy, float fall_distance, flo
 bool alpha_entity_push(double x1, double z1, double x2, double z2,
                        bool pushable1, bool pushable2, PushOut* out);
 
+// Living-entity logic (entity_living.rs). Damage math, knockback, tick
+// timers, steering, and fall damage; virtual dispatch stays in C++.
+typedef struct AttackResult {
+    int16_t health;
+    int32_t last_damage;
+    int32_t hurt_resist;
+    int32_t hurt_time;
+    int32_t attack_time;
+    bool knocked;
+    double kmx;
+    double kmy;
+    double kmz;
+    bool send_status;
+    bool died;
+} AttackResult;
+
+typedef struct LivingTick {
+    int32_t air;
+    int32_t hurt_time;
+    int32_t attack_time;
+    int32_t hurt_resist;
+    bool suffocate;
+    bool drown;
+} LivingTick;
+
+typedef struct MoveFeedback {
+    bool on_ground;
+    bool collided_vert;
+    double pos_y;
+} MoveFeedback;
+
+typedef struct HeadingWorld {
+    bool (*touching_liquid)(void);
+    bool (*on_ladder)(void);
+    bool (*do_move)(double dx, double dy, double dz, MoveFeedback* out);
+} HeadingWorld;
+
+typedef struct HeadingIo {
+    double motion_x;
+    double motion_y;
+    double motion_z;
+    float fall_distance;
+} HeadingIo;
+
+int16_t alpha_living_heal(int16_t health, int16_t max_health, int32_t amount, bool dead);
+bool alpha_living_attack(double (*next_f01)(void),
+                         int16_t health, int32_t hurt_resist, int32_t max_hurt_resist,
+                         int32_t last_damage, int32_t hurt_time_in, int32_t attack_time_in,
+                         bool dead, int32_t amount, bool has_attacker,
+                         double self_x, double self_z, double atk_x, double atk_z,
+                         double motion_x, double motion_y, double motion_z,
+                         AttackResult* out);
+LivingTick alpha_living_tick(bool alive, bool inside_opaque, bool in_water,
+                             int32_t air, int32_t hurt_time, int32_t attack_time, int32_t hurt_resist);
+int32_t alpha_living_fall_damage(float distance);
+bool alpha_living_heading(const HeadingWorld* world, float strafe, float forward,
+                          bool jumping, bool on_ground, float yaw, HeadingIo* io);
+
+
 #ifdef __cplusplus
 }
 #endif

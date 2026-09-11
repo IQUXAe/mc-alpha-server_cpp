@@ -3,11 +3,17 @@
 #include "Entity.h"
 #include "../core/Material.h"
 #include "../core/NBT.h"
+#include "../core/RustBridge.h"
 #include "../world/World.h"
 #include <cmath>
 #include <cstdlib>
 #include <numbers>
 #include <string>
+
+// Heading-driver trampolines live in Entity.cpp (single definition).
+class EntityLiving;
+void setHeadingEntity(EntityLiving* entity);
+RustBridge::HeadingWorld headingWorld();
 
 class EntityLiving : public Entity {
 public:
@@ -46,59 +52,33 @@ public:
 
     virtual void damageEntity(int amount) { attackEntityFrom(nullptr, amount); }
     virtual void heal(int amount) {
-        if (amount <= 0 || isDead || health <= 0) {
-            return;
-        }
-        health = static_cast<int16_t>(std::min<int>(maxHealth, health + amount));
+        health = RustBridge::livingHeal(health, maxHealth, amount, isDead);
     }
 
     void attackEntityFrom(Entity* attacker, int amount) override {
-        if (amount <= 0 || isDead || health <= 0) {
+        RustBridge::AttackResult r{};
+        const bool hasAttacker = attacker != nullptr;
+        const double atkX = hasAttacker ? attacker->posX : 0.0;
+        const double atkZ = hasAttacker ? attacker->posZ : 0.0;
+        if (!RustBridge::livingAttack(health, hurtResistantTime, maxHurtResistantTime, lastDamage,
+                                      hurtTime, attackTime, isDead, amount, hasAttacker,
+                                      posX, posZ, atkX, atkZ, motionX, motionY, motionZ, &r)) {
             return;
         }
-
-        bool applyKnockback = true;
-        if (hurtResistantTime > maxHurtResistantTime / 2) {
-            if (amount <= lastDamage) {
-                return;
-            }
-
-            health -= static_cast<int16_t>(amount - lastDamage);
-            lastDamage = amount;
-            applyKnockback = false;
-        } else {
-            lastDamage = amount;
-            hurtResistantTime = maxHurtResistantTime;
-            hurtTime = 10;
-            attackTime = 10;
-            health -= static_cast<int16_t>(amount);
+        health = r.health;
+        lastDamage = r.last_damage;
+        hurtResistantTime = r.hurt_resist;
+        hurtTime = r.hurt_time;
+        attackTime = r.attack_time;
+        if (r.knocked) {
+            motionX = r.kmx;
+            motionY = r.kmy;
+            motionZ = r.kmz;
         }
-
-        if (applyKnockback && attacker) {
-            double dx = attacker->posX - posX;
-            double dz = attacker->posZ - posZ;
-            while (dx * dx + dz * dz < 1.0E-4) {
-                dx = (static_cast<double>(std::rand()) / RAND_MAX - static_cast<double>(std::rand()) / RAND_MAX) * 0.01;
-                dz = (static_cast<double>(std::rand()) / RAND_MAX - static_cast<double>(std::rand()) / RAND_MAX) * 0.01;
-            }
-
-            const double dist = MathHelper::sqrt_double(dx * dx + dz * dz);
-            motionX *= 0.5;
-            motionY *= 0.5;
-            motionZ *= 0.5;
-            motionX -= dx / dist * 0.4;
-            motionY += 0.4;
-            motionZ -= dz / dist * 0.4;
-            if (motionY > 0.4) {
-                motionY = 0.4;
-            }
-        }
-
-        if (applyKnockback && worldObj) {
+        if (r.send_status && worldObj) {
             worldObj->sendEntityStatus(this, 2);
         }
-
-        if (health <= 0) {
+        if (r.died) {
             onDeath();
         }
     }
@@ -108,7 +88,7 @@ public:
     }
 
     void onFall(float distance) override {
-        const int damage = static_cast<int>(std::ceil(distance - 3.0f));
+        const int damage = RustBridge::livingFallDamage(distance);
         if (damage > 0) {
             attackEntityFrom(nullptr, damage);
         }
@@ -116,23 +96,19 @@ public:
 
     void tick() override {
         Entity::tick();
-        if (isEntityAlive() && isInsideOpaqueBlock()) {
+        const RustBridge::LivingTick t = RustBridge::livingTick(
+            isEntityAlive(), isInsideOpaqueBlock(), isInsideMaterial(&Material::water),
+            air, hurtTime, attackTime, hurtResistantTime);
+        air = t.air;
+        hurtTime = t.hurt_time;
+        attackTime = t.attack_time;
+        hurtResistantTime = t.hurt_resist;
+        if (t.suffocate) {
             attackEntityFrom(nullptr, 1);
         }
-
-        if (isEntityAlive() && isInsideMaterial(&Material::water)) {
-            --air;
-            if (air <= -20) {
-                air = 0;
-                attackEntityFrom(nullptr, 2);
-            }
-        } else {
-            air = 300;
+        if (t.drown) {
+            attackEntityFrom(nullptr, 2);
         }
-
-        if (hurtTime > 0) hurtTime--;
-        if (attackTime > 0) attackTime--;
-        if (hurtResistantTime > 0) hurtResistantTime--;
     }
 
     // Movement helpers (shared by all living entities)
@@ -146,72 +122,22 @@ public:
         return (mat1 && mat1->getIsLiquid()) || (mat2 && mat2->getIsLiquid());
     }
 
-    void moveFlying(float strafe, float forward, float acceleration) {
-        float magnitude = strafe * strafe + forward * forward;
-        if (magnitude < 1.0e-4f) return;
-        magnitude = MathHelper::sqrt_float(magnitude);
-        if (magnitude < 1.0f) magnitude = 1.0f;
-        magnitude = acceleration / magnitude;
-        strafe *= magnitude;
-        forward *= magnitude;
-        const float radians = rotationYaw * static_cast<float>(std::numbers::pi_v<double> / 180.0);
-        const float sinYaw = MathHelper::sin(radians);
-        const float cosYaw = MathHelper::cos(radians);
-        motionX += strafe * cosYaw - forward * sinYaw;
-        motionZ += forward * cosYaw + strafe * sinYaw;
-    }
-
     void moveEntityWithHeading(float strafe, float forward) {
-        const bool touchingLiquid = isTouchingLiquid();
-
-        if (isJumping_) {
-            if (touchingLiquid) {
-                motionY += 0.04;
-            } else if (onGround) {
-                motionY = 0.42;
-            }
-        }
-
-        if (touchingLiquid) {
-            const double startY = posY;
-            moveFlying(strafe, forward, 0.02f);
-            moveEntity(motionX, motionY, motionZ);
-            motionX *= 0.8;
-            motionY *= 0.8;
-            motionZ *= 0.8;
-            motionY -= 0.02;
-            if ((onGround || posY <= startY) && isJumping_) {
-                motionY = 0.3;
-            }
+        struct HeadingGuard {
+            explicit HeadingGuard(EntityLiving* self) { setHeadingEntity(self); }
+            ~HeadingGuard() { setHeadingEntity(nullptr); }
+        };
+        HeadingGuard guard(this);
+        RustBridge::HeadingIo io{motionX, motionY, motionZ, fallDistance};
+        const RustBridge::HeadingWorld world = headingWorld();
+        if (!RustBridge::livingHeading(&world, strafe, forward,
+                                       isJumping_, onGround, rotationYaw, &io)) {
             return;
         }
-
-        float friction = 0.91f;
-        if (onGround) {
-            friction = 0.546f;
-        }
-
-        const float accelerationScale = 0.16277136f / (friction * friction * friction);
-        moveFlying(strafe, forward, onGround ? 0.1f * accelerationScale : 0.02f);
-
-        // Ladder / wall-climbing (func_144_E)
-        if (isOnLadder()) {
-            fallDistance = 0.0f;
-            if (motionY < -0.15) {
-                motionY = -0.15;
-            }
-        }
-
-        moveEntity(motionX, motionY, motionZ);
-
-        if (collidedVertically && isOnLadder()) {
-            motionY = 0.2;
-        }
-
-        motionY -= 0.08;
-        motionY *= 0.98;
-        motionX *= friction;
-        motionZ *= friction;
+        motionX = io.motion_x;
+        motionY = io.motion_y;
+        motionZ = io.motion_z;
+        fallDistance = io.fall_distance;
     }
 
     // Check if on a ladder (func_144_E)

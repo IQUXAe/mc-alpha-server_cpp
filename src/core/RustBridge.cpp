@@ -4,6 +4,15 @@
 #include "Logger.h"
 #include <cstring>
 #include <new>
+#include <random>
+
+namespace {
+
+// Knockback-jitter stream for livingAttack (replaces std::rand() in the
+// degenerate same-position case; only consumed there).
+thread_local std::mt19937_64 gLivingJitter{std::random_device{}()};
+
+} // namespace
 
 namespace {
 
@@ -419,6 +428,41 @@ float entityFallStep(bool onGround, double dy, float fallDistance, float* outFal
 bool entityPush(double x1, double z1, double x2, double z2,
                 bool pushable1, bool pushable2, PushOut* out) {
     return ::alpha_entity_push(x1, z1, x2, z2, pushable1, pushable2, out);
+}
+
+int16_t livingHeal(int16_t health, int16_t maxHealth, int32_t amount, bool dead) {
+    return ::alpha_living_heal(health, maxHealth, amount, dead);
+}
+
+double livingNextF01() {
+    std::uniform_real_distribution<double> dist(0.0, 1.0);
+    return dist(gLivingJitter);
+}
+
+bool livingAttack(int16_t health, int32_t hurtResist, int32_t maxHurtResist,
+                  int32_t lastDamage, int32_t hurtTimeIn, int32_t attackTimeIn,
+                  bool dead, int32_t amount, bool hasAttacker,
+                  double selfX, double selfZ, double atkX, double atkZ,
+                  double motionX, double motionY, double motionZ,
+                  AttackResult* out) {
+    return ::alpha_living_attack(&livingNextF01,
+                                 health, hurtResist, maxHurtResist, lastDamage,
+                                 hurtTimeIn, attackTimeIn, dead, amount, hasAttacker,
+                                 selfX, selfZ, atkX, atkZ, motionX, motionY, motionZ, out);
+}
+
+LivingTick livingTick(bool alive, bool insideOpaque, bool inWater,
+                      int32_t air, int32_t hurtTime, int32_t attackTime, int32_t hurtResist) {
+    return ::alpha_living_tick(alive, insideOpaque, inWater, air, hurtTime, attackTime, hurtResist);
+}
+
+int32_t livingFallDamage(float distance) {
+    return ::alpha_living_fall_damage(distance);
+}
+
+bool livingHeading(const HeadingWorld* world, float strafe, float forward,
+                   bool jumping, bool onGround, float yaw, HeadingIo* io) {
+    return ::alpha_living_heading(world, strafe, forward, jumping, onGround, yaw, io);
 }
 
 } // namespace RustBridge

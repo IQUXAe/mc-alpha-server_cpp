@@ -1,4 +1,5 @@
 #include "Entity.h"
+#include "EntityLiving.h"
 #include "../block/Block.h"
 #include "../core/Material.h"
 #include "../core/MathHelper.h"
@@ -18,6 +19,44 @@ AxisAlignedBB fromFfiBox(const RustBridge::FfiAabb& box) {
 }
 
 } // namespace
+
+// Heading-driver trampolines for entity_living.rs (single definition).
+namespace {
+
+thread_local EntityLiving* g_headingSelf = nullptr;
+
+extern "C" bool headingTouchingLiquid() {
+    return g_headingSelf && g_headingSelf->isTouchingLiquid();
+}
+
+extern "C" bool headingOnLadder() {
+    return g_headingSelf && g_headingSelf->isOnLadder();
+}
+
+extern "C" bool headingDoMove(double dx, double dy, double dz, RustBridge::MoveFeedback* out) {
+    if (!g_headingSelf || !out) {
+        return false;
+    }
+    g_headingSelf->moveEntity(dx, dy, dz);
+    out->on_ground = g_headingSelf->onGround;
+    out->collided_vert = g_headingSelf->collidedVertically;
+    out->pos_y = g_headingSelf->posY;
+    return true;
+}
+
+} // namespace
+
+void setHeadingEntity(EntityLiving* entity) {
+    g_headingSelf = entity;
+}
+
+RustBridge::HeadingWorld headingWorld() {
+    RustBridge::HeadingWorld w{};
+    w.touching_liquid = &headingTouchingLiquid;
+    w.on_ladder = &headingOnLadder;
+    w.do_move = &headingDoMove;
+    return w;
+}
 
 std::atomic<int32_t> Entity::nextEntityId{1};
 

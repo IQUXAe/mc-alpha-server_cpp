@@ -49,10 +49,12 @@ pub fn table_size() -> usize {
 }
 
 fn lookup(idx: usize) -> f32 {
-    if let Some(t) = SIN_TABLE.get() {
-        if idx < t.len() {
-            return t[idx];
-        }
+    // Lazy init: the C++ side requires an explicit MathHelper::init() at
+    // startup, but Rust callers (e.g. entity steering) must never observe a
+    // zeroed table just because nobody called init() on this path yet.
+    let t = SIN_TABLE.get_or_init(build_sin_table);
+    if idx < t.len() {
+        return t[idx];
     }
     0.0
 }

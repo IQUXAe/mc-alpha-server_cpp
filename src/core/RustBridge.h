@@ -188,4 +188,24 @@ float entityFallStep(bool onGround, double dy, float fallDistance, float* outFal
 bool entityPush(double x1, double z1, double x2, double z2,
                 bool pushable1, bool pushable2, PushOut* out);
 
+// Living-entity logic (damage/tick/steering/fall; virtuals stay in C++)
+using AttackResult = ::AttackResult;
+using LivingTick = ::LivingTick;
+using HeadingWorld = ::HeadingWorld;
+using HeadingIo = ::HeadingIo;
+using MoveFeedback = ::MoveFeedback;
+int16_t livingHeal(int16_t health, int16_t maxHealth, int32_t amount, bool dead);
+bool livingAttack(int16_t health, int32_t hurtResist, int32_t maxHurtResist,
+                  int32_t lastDamage, int32_t hurtTimeIn, int32_t attackTimeIn,
+                  bool dead, int32_t amount, bool hasAttacker,
+                  double selfX, double selfZ, double atkX, double atkZ,
+                  double motionX, double motionY, double motionZ,
+                  AttackResult* out);
+LivingTick livingTick(bool alive, bool insideOpaque, bool inWater,
+                      int32_t air, int32_t hurtTime, int32_t attackTime, int32_t hurtResist);
+int32_t livingFallDamage(float distance);
+bool livingHeading(const HeadingWorld* world, float strafe, float forward,
+                   bool jumping, bool onGround, float yaw, HeadingIo* io);
+double livingNextF01();
+
 } // namespace RustBridge
