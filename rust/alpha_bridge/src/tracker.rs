@@ -761,6 +761,10 @@ mod tests {
             kind: MobKind::Creeper,
             target: None,
             attack_cooldown: 0,
+            target_timer: 0,
+            burn_ticks: 0,
+            path: Vec::new(),
+            path_index: 0,
         }));
         let row = table.get(id).unwrap();
         let tracked = TrackedEntity::from_entity(row, 0, 160, 3, false).unwrap();
@@ -774,6 +778,9 @@ mod tests {
             living: l2,
             kind: crate::entity_table::AnimalKind::Cow,
             sheared: false,
+            egg_timer: 6000,
+            path: Vec::new(),
+            path_index: 0,
         }));
         let row2 = table.get(id2).unwrap();
         let tracked2 = TrackedEntity::from_entity(row2, 0, 160, 3, false).unwrap();

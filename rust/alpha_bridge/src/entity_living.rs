@@ -288,38 +288,31 @@ pub struct HeadingIo {
     pub fall_distance: f32,
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn alpha_living_heading(
-    world: *const HeadingWorld,
+/// Shared heading core (mirrors `EntityLiving::moveEntityWithHeading`).
+/// World answers arrive as closures so both the FFI shell and the native
+/// world use this exact flow. Returns false when the move itself fails.
+pub fn living_heading_run(
     strafe: f32,
     forward: f32,
     jumping: bool,
     on_ground: bool,
     yaw: f32,
-    io: *mut HeadingIo,
+    io: &mut HeadingIo,
+    touching_liquid: bool,
+    ladder: &mut dyn FnMut() -> bool,
+    do_move: &mut dyn FnMut(f64, f64, f64, &mut MoveFeedback) -> bool,
 ) -> bool {
-    if world.is_null() || io.is_null() {
-        return false;
-    }
-    let w = unsafe { &*world };
-    let io = unsafe { &mut *io };
-    let liquid = w.touching_liquid.map(|f| f()).unwrap_or(false);
-    let ladder = || w.on_ladder.map(|f| f()).unwrap_or(false);
+    let mut fb = MoveFeedback { on_ground: false, collided_vert: false, pos_y: 0.0 };
 
     if jumping {
-        if liquid {
+        if touching_liquid {
             io.motion_y += 0.04;
         } else if on_ground {
             io.motion_y = 0.42;
         }
     }
 
-    let Some(do_move) = w.do_move else {
-        return false;
-    };
-    let mut fb = MoveFeedback { on_ground: false, collided_vert: false, pos_y: 0.0 };
-
-    if liquid {
+    if touching_liquid {
         let mut fly = FlyOut { dmx: 0.0, dmz: 0.0 };
         if fly_apply(strafe, forward, 0.02, yaw, &mut fly) {
             io.motion_x += fly.dmx as f64;
@@ -368,6 +361,31 @@ pub unsafe extern "C" fn alpha_living_heading(
     io.motion_x *= friction as f64;
     io.motion_z *= friction as f64;
     true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alpha_living_heading(
+    world: *const HeadingWorld,
+    strafe: f32,
+    forward: f32,
+    jumping: bool,
+    on_ground: bool,
+    yaw: f32,
+    io: *mut HeadingIo,
+) -> bool {
+    if world.is_null() || io.is_null() {
+        return false;
+    }
+    let w = unsafe { &*world };
+    let io = unsafe { &mut *io };
+    let liquid = w.touching_liquid.map(|f| f()).unwrap_or(false);
+    let mut ladder = || w.on_ladder.map(|f| f()).unwrap_or(false);
+
+    let Some(do_move) = w.do_move else {
+        return false;
+    };
+    let mut mover = |dx: f64, dy: f64, dz: f64, fb: &mut MoveFeedback| do_move(dx, dy, dz, fb);
+    living_heading_run(strafe, forward, jumping, on_ground, yaw, io, liquid, &mut ladder, &mut mover)
 }
 
 fn fly_apply(strafe: f32, forward: f32, acceleration: f32, yaw: f32, out: &mut FlyOut) -> bool {

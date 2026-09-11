@@ -132,6 +132,53 @@ pub enum AnimalKind {
     Cow,
 }
 
+/// Mob body size (width, height) mirroring the C++ constructors
+/// (zombie/skeleton 0.6x1.8, spider 1.4x0.9, creeper 0.6x1.7).
+pub fn mob_dims(kind: MobKind) -> (f32, f32) {
+    match kind {
+        MobKind::Zombie => (0.6, 1.8),
+        MobKind::Skeleton => (0.6, 1.8),
+        MobKind::Spider => (1.4, 0.9),
+        MobKind::Creeper => (0.6, 1.7),
+    }
+}
+
+/// Base move speed mirroring the C++ constructors (zombie 0.5, skeleton
+/// 0.65, spider 0.8, creeper 0.7; animals keep the 0.7 living default).
+pub fn mob_base_speed(kind: MobKind) -> f32 {
+    match kind {
+        MobKind::Zombie => 0.5,
+        MobKind::Skeleton => 0.65,
+        MobKind::Spider => 0.8,
+        MobKind::Creeper => 0.7,
+    }
+}
+
+/// Attack reach mirroring `getAttackReach` (skeleton shoots at 10, the
+/// rest melee at 2.5). Also drives the chase-speed switch in `updateAI`.
+pub fn mob_attack_reach(kind: MobKind) -> f32 {
+    match kind {
+        MobKind::Skeleton => 10.0,
+        _ => 2.5,
+    }
+}
+
+/// Daylight combustion mirroring `burnsInDaylight` (zombies and skeletons
+/// only; spiders gate aggro on brightness instead, creepers ignore it).
+pub fn mob_burns_in_daylight(kind: MobKind) -> bool {
+    matches!(kind, MobKind::Zombie | MobKind::Skeleton)
+}
+
+/// Animal body size mirroring the C++ constructors (pig 0.9x0.9, sheep and
+/// cow 0.9x1.3, chicken 0.3x0.4).
+pub fn animal_dims(kind: AnimalKind) -> (f32, f32) {
+    match kind {
+        AnimalKind::Pig => (0.9, 0.9),
+        AnimalKind::Sheep => (0.9, 1.3),
+        AnimalKind::Cow => (0.9, 1.3),
+        AnimalKind::Chicken => (0.3, 0.4),
+    }
+}
 /// Mob network type ids (mirrors `getMobTypeId`).
 pub fn mob_type_id(kind: MobKind) -> u8 {
     match kind {
@@ -232,6 +279,32 @@ pub struct MobEnt {
     pub kind: MobKind,
     pub target: Option<EntityId>,
     pub attack_cooldown: i32,
+    pub target_timer: i32,
+    pub burn_ticks: i32,
+    pub path: Vec<[i32; 3]>,
+    pub path_index: usize,
+}
+
+impl MobEnt {
+    /// Fresh mob row with C++ constructor dims/speed and zeroed AI state
+    /// (`targetRefreshTime_` starts at 0 so the first tick acquires).
+    pub fn new(id: EntityId, kind: MobKind) -> Self {
+        let (w, h) = mob_dims(kind);
+        let mut living = LivingBody::new(id, w, h, 0.0);
+        living.move_speed = mob_base_speed(kind);
+        living.body.step_height = 1.0; // EntityCreature ctor
+        living.max_hurt_resist = 12; // EntityMob ctor
+        Self {
+            living,
+            kind,
+            target: None,
+            attack_cooldown: 0,
+            target_timer: 0,
+            burn_ticks: 0,
+            path: Vec::new(),
+            path_index: 0,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -239,6 +312,29 @@ pub struct AnimalEnt {
     pub living: LivingBody,
     pub kind: AnimalKind,
     pub sheared: bool,
+    pub egg_timer: i32,
+    pub path: Vec<[i32; 3]>,
+    pub path_index: usize,
+}
+
+impl AnimalEnt {
+    /// Fresh animal row with C++ constructor dims. The chicken egg timer
+    /// defaults to the 6000 floor; the spawner (or tests) adds the
+    /// `rngNextInt(6000)` roll, mirroring the C++ constructor draw.
+    pub fn new(id: EntityId, kind: AnimalKind) -> Self {
+        let (w, h) = animal_dims(kind);
+        let mut living = LivingBody::new(id, w, h, 0.0);
+        living.body.step_height = 1.0; // EntityCreature ctor
+        living.max_hurt_resist = 12; // EntityAnimals ctor
+        Self {
+            living,
+            kind,
+            sheared: false,
+            egg_timer: 6000,
+            path: Vec::new(),
+            path_index: 0,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

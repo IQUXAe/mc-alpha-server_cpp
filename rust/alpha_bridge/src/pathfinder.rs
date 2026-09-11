@@ -67,20 +67,19 @@ impl Ord for HeapEntry {
 }
 
 fn get_vertical_offset(
-    accessor: &PathfinderWorldAccessor,
+    is_liquid: &dyn Fn(i32, i32, i32) -> bool,
+    blocks_movement: &dyn Fn(i32, i32, i32) -> bool,
     x: i32, y: i32, z: i32,
     size_x: i32, size_y: i32, size_z: i32,
 ) -> i32 {
     for ix in x..(x + size_x) {
         for iy in y..(y + size_y) {
             for iz in z..(z + size_z) {
-                unsafe {
-                    if (accessor.is_liquid)(accessor.world, ix, iy, iz) {
-                        return -1;
-                    }
-                    if (accessor.blocks_movement)(accessor.world, ix, iy, iz) {
-                        return 0;
-                    }
+                if is_liquid(ix, iy, iz) {
+                    return -1;
+                }
+                if blocks_movement(ix, iy, iz) {
+                    return 0;
                 }
             }
         }
@@ -89,7 +88,8 @@ fn get_vertical_offset(
 }
 
 fn get_safe_point(
-    accessor: &PathfinderWorldAccessor,
+    is_liquid: &dyn Fn(i32, i32, i32) -> bool,
+    blocks_movement: &dyn Fn(i32, i32, i32) -> bool,
     x: i32,
     mut y: i32,
     z: i32,
@@ -100,11 +100,11 @@ fn get_safe_point(
     nodes: &mut HashMap<(i32, i32, i32), PathPointNode>,
 ) -> Option<(i32, i32, i32)> {
     let mut safe_found = false;
-    if get_vertical_offset(accessor, x, y, z, size_x, size_y, size_z) > 0 {
+    if get_vertical_offset(is_liquid, blocks_movement, x, y, z, size_x, size_y, size_z) > 0 {
         safe_found = true;
     }
 
-    if !safe_found && vertical_step > 0 && get_vertical_offset(accessor, x, y + vertical_step, z, size_x, size_y, size_z) > 0 {
+    if !safe_found && vertical_step > 0 && get_vertical_offset(is_liquid, blocks_movement, x, y + vertical_step, z, size_x, size_y, size_z) > 0 {
         safe_found = true;
         y += vertical_step;
     }
@@ -112,7 +112,7 @@ fn get_safe_point(
     if safe_found {
         let mut fall_distance = 0;
         while y > 0 {
-            let vertical_offset = get_vertical_offset(accessor, x, y - 1, z, size_x, size_y, size_z);
+            let vertical_offset = get_vertical_offset(is_liquid, blocks_movement, x, y - 1, z, size_x, size_y, size_z);
             if vertical_offset <= 0 {
                 break;
             }
@@ -142,23 +142,20 @@ fn get_safe_point(
     None
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn rust_pathfinder_find_path(
-    accessor: PathfinderWorldAccessor,
+/// Shared A* core (mirrors the C++ `Pathfinder` search): cheapest-first
+/// expansion over safe standing points, falling back to the closest reached
+/// point when the target is unreachable. World answers arrive as closures
+/// so the FFI shell and the native world share this exact flow. Empty means
+/// "no path" (start == end included, like the C++ `nullptr`).
+pub fn find_path_native(
+    is_liquid: &dyn Fn(i32, i32, i32) -> bool,
+    blocks_movement: &dyn Fn(i32, i32, i32) -> bool,
     start_x: f64, start_y: f64, start_z: f64,
     target_x: f64, target_y: f64, target_z: f64,
     entity_width: f32,
     entity_height: f32,
     max_distance: f32,
-    out_points: *mut FfiPathPoint,
-    max_points: i32,
-) -> i32 {
-    if accessor.world.is_null() || accessor.is_liquid as usize == 0 || accessor.blocks_movement as usize == 0 {
-        return 0;
-    }
-    if max_points <= 0 {
-        return 0;
-    }
+) -> Vec<(i32, i32, i32)> {
     let start_x_floor = start_x.floor() as i32;
     let start_y_floor = start_y.floor() as i32;
     let start_z_floor = start_z.floor() as i32;
@@ -225,7 +222,7 @@ pub unsafe extern "C" fn rust_pathfinder_find_path(
         }
 
         let mut vertical_step = 0;
-        if get_vertical_offset(&accessor, current_node.x, current_node.y + 1, current_node.z, size_x, size_y, size_z) > 0 {
+        if get_vertical_offset(is_liquid, blocks_movement, current_node.x, current_node.y + 1, current_node.z, size_x, size_y, size_z) > 0 {
             vertical_step = 1;
         }
 
@@ -237,7 +234,7 @@ pub unsafe extern "C" fn rust_pathfinder_find_path(
         ];
 
         for &(nx, ny, nz) in &neighbors {
-            if let Some(safe_coord) = get_safe_point(&accessor, nx, ny, nz, size_x, size_y, size_z, vertical_step, &mut nodes) {
+            if let Some(safe_coord) = get_safe_point(is_liquid, blocks_movement, nx, ny, nz, size_x, size_y, size_z, vertical_step, &mut nodes) {
                 let cand_node = match nodes.get(&safe_coord) {
                     Some(n) => n.clone(),
                     None => continue,
@@ -269,7 +266,7 @@ pub unsafe extern "C" fn rust_pathfinder_find_path(
 
     let end_key = if target_found { target_key } else { best_key };
     if end_key == start_key {
-        return 0;
+        return Vec::new();
     }
 
     let mut path = Vec::new();
@@ -279,6 +276,36 @@ pub unsafe extern "C" fn rust_pathfinder_find_path(
         curr = nodes.get(&k).and_then(|n| n.previous);
     }
     path.reverse();
+    path
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rust_pathfinder_find_path(
+    accessor: PathfinderWorldAccessor,
+    start_x: f64, start_y: f64, start_z: f64,
+    target_x: f64, target_y: f64, target_z: f64,
+    entity_width: f32,
+    entity_height: f32,
+    max_distance: f32,
+    out_points: *mut FfiPathPoint,
+    max_points: i32,
+) -> i32 {
+    if accessor.world.is_null() || accessor.is_liquid as usize == 0 || accessor.blocks_movement as usize == 0 {
+        return 0;
+    }
+    if max_points <= 0 {
+        return 0;
+    }
+    let is_liquid = |x: i32, y: i32, z: i32| unsafe { (accessor.is_liquid)(accessor.world, x, y, z) };
+    let blocks_movement =
+        |x: i32, y: i32, z: i32| unsafe { (accessor.blocks_movement)(accessor.world, x, y, z) };
+    let path = find_path_native(
+        &is_liquid,
+        &blocks_movement,
+        start_x, start_y, start_z,
+        target_x, target_y, target_z,
+        entity_width, entity_height, max_distance,
+    );
 
     let count = path.len().min(max_points as usize);
     if out_points.is_null() || count == 0 {
