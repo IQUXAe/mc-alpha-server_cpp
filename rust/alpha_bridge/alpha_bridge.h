@@ -1198,6 +1198,22 @@ int32_t alpha_living_fall_damage(float distance);
 bool alpha_living_heading(const HeadingWorld* world, float strafe, float forward,
                           bool jumping, bool on_ground, float yaw, HeadingIo* io);
 
+// Creature steering math (entity_ai.rs). Closed-form angles only;
+// phases and path objects stay in C++.
+typedef struct SteerOut {
+    float new_yaw;
+    float strafe;
+    float forward;
+    bool jump;
+} SteerOut;
+
+float alpha_ai_clamp_angle(float current, float target, float max_delta);
+bool alpha_ai_face_angles(double dx, double dz, double dy, float cur_yaw, float cur_pitch,
+                          float max_turn, float* out_yaw, float* out_pitch);
+bool alpha_ai_steer_to_point(double dx, double dz, double dy, float cur_yaw,
+                             bool is_attacking, bool has_target,
+                             double tgt_dx, double tgt_dz, float forward_in, SteerOut* out);
+
 
 #ifdef __cplusplus
 }

@@ -465,4 +465,20 @@ bool livingHeading(const HeadingWorld* world, float strafe, float forward,
     return ::alpha_living_heading(world, strafe, forward, jumping, onGround, yaw, io);
 }
 
+float aiClampAngle(float current, float target, float maxDelta) {
+    return ::alpha_ai_clamp_angle(current, target, maxDelta);
+}
+
+bool aiFaceAngles(double dx, double dz, double dy, float curYaw, float curPitch,
+                  float maxTurn, float* outYaw, float* outPitch) {
+    return ::alpha_ai_face_angles(dx, dz, dy, curYaw, curPitch, maxTurn, outYaw, outPitch);
+}
+
+bool aiSteerToPoint(double dx, double dz, double dy, float curYaw,
+                    bool isAttacking, bool hasTarget,
+                    double tgtDx, double tgtDz, float forwardIn, SteerOut* out) {
+    return ::alpha_ai_steer_to_point(dx, dz, dy, curYaw, isAttacking, hasTarget,
+                                     tgtDx, tgtDz, forwardIn, out);
+}
+
 } // namespace RustBridge

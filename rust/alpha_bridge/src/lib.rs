@@ -392,6 +392,7 @@ pub extern "C" fn alpha_zlib_compress(
 
 pub mod block;
 pub mod block_ticks;
+pub mod entity_ai;
 pub mod entity_living;
 pub mod entity_physics;
 pub mod byte_buffer;

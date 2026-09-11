@@ -143,31 +143,18 @@ protected:
                 const double dz = nextPos->zCoord - posZ;
                 const double dy = nextPos->yCoord - static_cast<double>(floorY);
 
-                float targetYaw = static_cast<float>(
-                    std::atan2(dz, dx) * 180.0 / std::numbers::pi_v<double>) - 90.0f;
-                float yawDelta = targetYaw - rotationYaw;
-                while (yawDelta < -180.0f) yawDelta += 360.0f;
-                while (yawDelta >= 180.0f) yawDelta -= 360.0f;
-                if (yawDelta > 30.0f) yawDelta = 30.0f;
-                if (yawDelta < -30.0f) yawDelta = -30.0f;
-                rotationYaw += yawDelta;
-
-                // Strafe when attacking (circling the target)
-                if (isAttacking_ && targetEntity_ != nullptr) {
-                    const double tdx = targetEntity_->posX - posX;
-                    const double tdz = targetEntity_->posZ - posZ;
-                    const float backupYaw = rotationYaw;
-                    rotationYaw = static_cast<float>(
-                        std::atan2(tdz, tdx) * 180.0 / std::numbers::pi_v<double>) - 90.0f;
-                    const float strafeAngle = (backupYaw - rotationYaw + 90.0f)
-                        * static_cast<float>(std::numbers::pi_v<double> / 180.0f);
-                    moveStrafing_ = -MathHelper::sin(strafeAngle) * moveForward_ * 1.0f;
-                    moveForward_ = MathHelper::cos(strafeAngle) * moveForward_ * 1.0f;
-                }
-
-                // Jump if path point is above current position
-                if (dy > 0.0) {
-                    isJumping_ = true;
+                RustBridge::SteerOut steer{};
+                const double tdx = (isAttacking_ && targetEntity_) ? targetEntity_->posX - posX : 0.0;
+                const double tdz = (isAttacking_ && targetEntity_) ? targetEntity_->posZ - posZ : 0.0;
+                if (RustBridge::aiSteerToPoint(dx, dz, dy, rotationYaw, isAttacking_,
+                                               targetEntity_ != nullptr, tdx, tdz,
+                                               moveForward_, &steer)) {
+                    rotationYaw = steer.new_yaw;
+                    moveStrafing_ = steer.strafe;
+                    moveForward_ = steer.forward;
+                    if (steer.jump) {
+                        isJumping_ = true;
+                    }
                 }
             }
 
@@ -207,22 +194,11 @@ protected:
                 - (posY + static_cast<double>(getEyeHeight()));
         }
 
-        const double dist = MathHelper::sqrt_double(dx * dx + dz * dz);
-        const float yaw = static_cast<float>(
-            std::atan2(dz, dx) * 180.0 / std::numbers::pi_v<double>) - 90.0f;
-        const float pitch = static_cast<float>(
-            std::atan2(dy, dist) * 180.0 / std::numbers::pi_v<double>);
-
-        rotationPitch = -clampAngle(rotationPitch, pitch, maxTurn);
-        rotationYaw = clampAngle(rotationYaw, yaw, maxTurn);
-    }
-
-    static float clampAngle(float current, float target, float maxDelta) {
-        float delta = target - current;
-        while (delta < -180.0f) delta += 360.0f;
-        while (delta >= 180.0f) delta -= 360.0f;
-        if (delta > maxDelta) delta = maxDelta;
-        if (delta < -maxDelta) delta = -maxDelta;
-        return current + delta;
+        float outYaw = rotationYaw;
+        float outPitch = rotationPitch;
+        if (RustBridge::aiFaceAngles(dx, dz, dy, rotationYaw, rotationPitch, maxTurn, &outYaw, &outPitch)) {
+            rotationYaw = outYaw;
+            rotationPitch = outPitch;
+        }
     }
 };

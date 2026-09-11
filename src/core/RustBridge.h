@@ -208,4 +208,13 @@ bool livingHeading(const HeadingWorld* world, float strafe, float forward,
                    bool jumping, bool onGround, float yaw, HeadingIo* io);
 double livingNextF01();
 
+// Creature steering math (phases stay in C++)
+using SteerOut = ::SteerOut;
+float aiClampAngle(float current, float target, float maxDelta);
+bool aiFaceAngles(double dx, double dz, double dy, float curYaw, float curPitch,
+                  float maxTurn, float* outYaw, float* outPitch);
+bool aiSteerToPoint(double dx, double dz, double dy, float curYaw,
+                    bool isAttacking, bool hasTarget,
+                    double tgtDx, double tgtDz, float forwardIn, SteerOut* out);
+
 } // namespace RustBridge
