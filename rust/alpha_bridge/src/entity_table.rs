@@ -361,6 +361,10 @@ pub struct PlayerEnt {
     pub respawn_ticks: i32,
     /// Fractional armor carry (mirrors `armorDamageCarry`).
     pub armor_carry: i32,
+    /// Selected held-item id (mirrors `savedHeldItemId`): written by the
+    /// server on logout/save from the session, read back on login to
+    /// restore the selection. Never touched by simulation ticks.
+    pub held_item_id: i32,
 }
 
 /// Native player inventory (mirrors `InventoryPlayer`: 36 main, 4 armor,
@@ -407,6 +411,7 @@ impl PlayerEnt {
             inventory: PlayerInventory::default(),
             respawn_ticks: 60,
             armor_carry: 0,
+            held_item_id: 0,
         }
     }
 }

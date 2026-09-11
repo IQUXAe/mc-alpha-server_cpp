@@ -675,6 +675,7 @@ pub struct DecodedPlayer {
     pub attack_time: i16,
     pub dimension: i32,
     pub score: i32,
+    pub held_item_id: i32,
     pub main: [Option<FfiItemStack>; 36],
     pub armor: [Option<FfiItemStack>; 4],
     pub crafting: [Option<FfiItemStack>; 4],
@@ -707,7 +708,7 @@ pub fn encode_player(world: &World, id: crate::entity_table::EntityId) -> Option
     root.insert("AttackTime".to_string(), NbtTag::Short(p.living.attack_time as i16));
     root.insert("Dimension".to_string(), NbtTag::Int(b.dimension));
     root.insert("Score".to_string(), NbtTag::Int(p.score));
-    root.insert("HeldItemId".to_string(), NbtTag::Int(-1));
+    root.insert("HeldItemId".to_string(), NbtTag::Int(p.held_item_id));
     let mut inv = Vec::new();
     let mut push_bank = |bank: &[Option<FfiItemStack>], base: i32| {
         for (i, slot) in bank.iter().enumerate() {
@@ -786,6 +787,7 @@ pub fn decode_player(bytes: &[u8], username: &str) -> Option<DecodedPlayer> {
         attack_time: get_short(&root.map, "AttackTime"),
         dimension: get_int(&root.map, "Dimension"),
         score: get_int(&root.map, "Score"),
+        held_item_id: get_int(&root.map, "HeldItemId"),
         main,
         armor,
         crafting,
@@ -924,6 +926,7 @@ impl World {
         p.living.death_time = d.death_time as i32;
         p.living.attack_time = d.attack_time as i32;
         p.score = d.score;
+        p.held_item_id = d.held_item_id;
         p.inventory.main = d.main;
         p.inventory.armor = d.armor;
         p.inventory.crafting = d.crafting;
@@ -1019,6 +1022,7 @@ mod tests {
         p.inventory.main[0] = Some(stk(3, 10, 0));
         p.inventory.armor[0] = Some(stk(306, 1, 5));
         p.inventory.crafting[1] = Some(stk(280, 4, 0));
+        p.held_item_id = 280;
         p.respawn_ticks = 0;
         w.entities.insert(Entity::Player(p));
         (w, pid)
@@ -1113,6 +1117,14 @@ mod tests {
         assert_eq!(dirt.map(|s| (s.item_id, s.stack_size)), Some((3, 10)));
         assert_eq!(helm.map(|s| (s.item_id, s.item_damage)), Some((306, 5)));
         assert_eq!(sticks.map(|s| (s.item_id, s.stack_size)), Some((280, 4)));
+        // Held selection rides the file like C++ savedHeldItemId.
+        assert_eq!(
+            match w2.entities.get(nid).unwrap() {
+                Entity::Player(p) => p.held_item_id,
+                _ => unreachable!(),
+            },
+            280
+        );
         // Username lookup is case-insensitive on disk like C++.
         assert!(w2.load_player_from(dir.to_str().unwrap(), "STEVE").is_some());
         assert!(w2.load_player_from(dir.to_str().unwrap(), "Nobody").is_none());

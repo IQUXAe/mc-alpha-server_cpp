@@ -737,6 +737,20 @@ impl PlaySession {
         }
     }
 
+    /// Login-path held restore (mirrors `restoreHeldItem`, called only
+    /// with the saved id when positive): point `current` at the slot
+    /// holding that item, else stage the fallback copy in the last slot.
+    pub fn restore_held(&mut self, world: &mut World, item_id: i32) {
+        if item_id <= 0 {
+            if let Some(Entity::Player(p)) = world.entities.get_mut(self.player) {
+                p.inventory.current = 0;
+            }
+            return;
+        }
+        self.held_id = item_id;
+        self.sync_held(world);
+    }
+
     /// Selected stack (mirrors `getSelectedItemStack`): real slot first,
     /// then the fallback copy.
     fn selected_stack(&self, world: &World) -> Option<FfiItemStack> {
@@ -2914,6 +2928,43 @@ mod play_tests {
             w.tiles.get(&(3, 64, 4)),
             Some(TileData::Sign(s)) if &s.lines[1][..1] == b"\x00"
         ));
+    }
+
+    #[test]
+    fn test_restore_held_selects_slot_or_fallback() {
+        use crate::inventory::FfiItemStack;
+        let mut w = floor_world();
+        let player = spawn_player(&mut w, "Steve", 3.5, 64.0, 4.5);
+        if let Some(Entity::Player(p)) = w.entities.get_mut(player) {
+            p.inventory.main[2] = Some(FfiItemStack {
+                stack_size: 5,
+                animations_to_go: 0,
+                item_id: 3,
+                item_damage: 0,
+            });
+        }
+        let mut sess = PlaySession::new(player);
+        // Saved id present: point at its slot.
+        sess.restore_held(&mut w, 3);
+        assert_eq!(sess.held_id, 3);
+        assert!(sess.held_fallback.is_none());
+        match w.entities.get(player).unwrap() {
+            Entity::Player(p) => assert_eq!(p.inventory.current, 2),
+            _ => unreachable!(),
+        }
+        // Saved id gone: fallback copy in the last slot.
+        sess.restore_held(&mut w, 9999);
+        match w.entities.get(player).unwrap() {
+            Entity::Player(p) => assert_eq!(p.inventory.current, 35),
+            _ => unreachable!(),
+        }
+        assert_eq!(sess.held_fallback.map(|s| s.item_id), Some(9999));
+        // Non-positive id resets to the first slot.
+        sess.restore_held(&mut w, 0);
+        match w.entities.get(player).unwrap() {
+            Entity::Player(p) => assert_eq!(p.inventory.current, 0),
+            _ => unreachable!(),
+        }
     }
 
     #[test]
