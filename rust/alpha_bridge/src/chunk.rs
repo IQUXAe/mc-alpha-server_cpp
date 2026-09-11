@@ -21,7 +21,6 @@
 //! Deferred (require `World`, entities, or I/O — intentionally not ported):
 //! - `World* worldObj` / cross-chunk lookup (`getChunkFromBlockCoords`)
 //! - `TileEntity` map (`addTileEntity` / `removeTileEntity` / `getTileEntity`)
-//! - `getChunkData` (Packet51MapChunk + zlib; needs compression I/O)
 //! - Auto `generateSkylightMap()` call inside `setBlockIDWithMetadata`
 //!   (C++ only runs it when `worldObj` is present; with a null world — as in
 //!   `TestChunk.cpp` — it is skipped, same as here where the caller decides)
@@ -358,6 +357,40 @@ impl Chunk {
                 height[(x * 16 + z) as usize] = self.height_map[(x * 16 + z) as usize];
             }
         }
+    }
+
+    /// Raw Packet51 payload length: 32768 block ids + 16384 packed
+    /// metadata + 16384 blocklight + 16384 skylight nibbles (mirrors the
+    /// C++ `CHUNK_VOLUME * 5 / 2` buffer).
+    pub const MAP_RAW_LEN: usize = CHUNK_VOLUME + 3 * CHUNK_NIBBLE_BYTES;
+
+    /// Mirrors `Chunk::getChunkData` before compression: block ids, then
+    /// the packed metadata, blocklight, and skylight stores in that order
+    /// (1:1 with the four C++ `std::copy` ranges).
+    pub fn map_raw(&self) -> Vec<u8> {
+        let mut raw = vec![0u8; Self::MAP_RAW_LEN];
+        raw[..CHUNK_VOLUME].copy_from_slice(&self.blocks);
+        let (meta, rest) = raw[CHUNK_VOLUME..].split_at_mut(CHUNK_NIBBLE_BYTES);
+        meta.copy_from_slice(self.data.view());
+        let (block, sky) = rest.split_at_mut(CHUNK_NIBBLE_BYTES);
+        block.copy_from_slice(self.blocklight.view());
+        sky.copy_from_slice(self.skylight.view());
+        raw
+    }
+
+    /// zlib-compressed map payload at level 1 (mirrors the
+    /// `RustBridge::zlibCompress(rawData, 1)` tail of `getChunkData`;
+    /// empty on I/O failure like the other codecs here).
+    pub fn map_compressed(&self) -> Vec<u8> {
+        use std::io::Read;
+        let raw = self.map_raw();
+        let mut encoder =
+            flate2::read::ZlibEncoder::new(raw.as_slice(), flate2::Compression::new(1));
+        let mut out = Vec::new();
+        if encoder.read_to_end(&mut out).is_err() {
+            return Vec::new();
+        }
+        out
     }
 
     /// Mirrors `getSavedLightValue`: `0` = sky, anything else = block.
@@ -866,5 +899,57 @@ mod tests {
         assert!(!chunk.is_modified);
         chunk.set_block_metadata(1, 2, 3, 5);
         assert!(chunk.is_modified);
+    }
+
+    // ---- Packet51 map payload (mirrors Chunk::getChunkData) ----
+
+    #[test]
+    fn map_raw_layout_matches_cpp_copy_order() {
+        let mut chunk = Chunk::new(0, 0);
+        // (0,0,0) -> flat index 0, meta low nibble of byte 0.
+        chunk.set_block_id_with_metadata(0, 0, 0, 7, 0xA);
+        // (0,1,0) -> flat index 1, meta high nibble of byte 0.
+        chunk.set_block_metadata(0, 1, 0, 0xB);
+        chunk.set_light_value(BLOCK_LIGHT, 0, 0, 0, 5);
+        chunk.set_light_value(SKY_LIGHT, 0, 1, 0, 12);
+        let raw = chunk.map_raw();
+        assert_eq!(raw.len(), Chunk::MAP_RAW_LEN);
+        assert_eq!(Chunk::MAP_RAW_LEN, 32768 + 3 * 16384);
+        // Blocks first.
+        assert_eq!(raw[Chunk::index(0, 0, 0)], 7);
+        assert_eq!(raw[Chunk::index(5, 5, 5)], 0);
+        // Packed metadata second: byte 0 = high 0xB, low 0xA.
+        assert_eq!(raw[CHUNK_VOLUME], 0xBA);
+        // Blocklight third, skylight fourth (same nibble packing).
+        assert_eq!(raw[CHUNK_VOLUME + CHUNK_NIBBLE_BYTES] & 0xF, 5);
+        assert_eq!((raw[CHUNK_VOLUME + 2 * CHUNK_NIBBLE_BYTES] >> 4) & 0xF, 12);
+    }
+
+    #[test]
+    fn map_compressed_roundtrips_through_zlib() {
+        use std::io::Read;
+        let mut chunk = Chunk::new(3, -2);
+        chunk.set_block_id_with_metadata(4, 60, 4, 1, 3);
+        chunk.set_light_value(BLOCK_LIGHT, 4, 60, 4, 9);
+        chunk.set_light_value(SKY_LIGHT, 4, 61, 4, 15);
+        let raw = chunk.map_raw();
+        let compressed = chunk.map_compressed();
+        assert!(!compressed.is_empty());
+        assert!(compressed.len() < raw.len());
+        let mut decoder = flate2::read::ZlibDecoder::new(compressed.as_slice());
+        let mut back = Vec::new();
+        decoder.read_to_end(&mut back).unwrap();
+        assert_eq!(back, raw);
+    }
+
+    #[test]
+    fn map_compressed_empty_chunk_roundtrips() {
+        use std::io::Read;
+        let chunk = Chunk::new(0, 0);
+        let compressed = chunk.map_compressed();
+        let mut decoder = flate2::read::ZlibDecoder::new(compressed.as_slice());
+        let mut back = Vec::new();
+        decoder.read_to_end(&mut back).unwrap();
+        assert_eq!(back, chunk.map_raw());
     }
 }

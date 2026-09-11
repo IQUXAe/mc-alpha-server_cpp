@@ -1224,6 +1224,42 @@ pub fn pkt_arm(entity_id: i32, animate: i8) -> Vec<u8> {
     b
 }
 
+/// Pre-chunk (id 50): int x, int z, byte mode — mirrors
+/// `RustPackets::preChunk` (same field order as the network encoder).
+pub fn pkt_pre_chunk(x: i32, z: i32, mode: bool) -> Vec<u8> {
+    let mut b = Vec::with_capacity(10);
+    put_u8(&mut b, 50);
+    crate::network::put_i32(&mut b, x);
+    crate::network::put_i32(&mut b, z);
+    put_u8(&mut b, if mode { 1 } else { 0 });
+    b
+}
+
+/// Map chunk (id 51): int x, short y, int z, size bytes minus one, int
+/// payload length, bytes — mirrors `NetServerHandler::sendMapChunk`.
+/// Full chunks send `(px * 16, 0, pz * 16, 16, 128, 16, payload)`.
+pub fn pkt_map_chunk(
+    x: i32,
+    y: i32,
+    z: i32,
+    size_x: i32,
+    size_y: i32,
+    size_z: i32,
+    data: &[u8],
+) -> Vec<u8> {
+    let mut b = Vec::with_capacity(18 + data.len());
+    put_u8(&mut b, 51);
+    crate::network::put_i32(&mut b, x);
+    put_i16(&mut b, y as i16);
+    crate::network::put_i32(&mut b, z);
+    put_u8(&mut b, (size_x - 1) as u8);
+    put_u8(&mut b, (size_y - 1) as u8);
+    put_u8(&mut b, (size_z - 1) as u8);
+    crate::network::put_i32(&mut b, data.len() as i32);
+    b.extend_from_slice(data);
+    b
+}
+
 // ---- session context (server-owned services) ----
 
 /// Cross-session events for the server tick (fan-out, saves).
@@ -2893,5 +2929,38 @@ mod play_tests {
         );
         assert!(matches!(out, Some(SessionOutcome::Gone)));
         assert!(sess.pump(&mut ctx(&mut w, &ops, &mut bc), PacketData::Respawn).is_none());
+    }
+
+    #[test]
+    fn test_pre_chunk_bytes_match_encoder() {
+        assert_eq!(pkt_pre_chunk(3, -2, true), vec![50, 0, 0, 0, 3, 255, 255, 255, 254, 1]);
+        assert_eq!(pkt_pre_chunk(0, 0, false).last(), Some(&0));
+    }
+
+    #[test]
+    fn test_map_chunk_bytes_match_send_map_chunk() {
+        let data = vec![0x78, 0x9C, 0x01];
+        let pkt = pkt_map_chunk(16, 0, -16, 16, 128, 16, &data);
+        // id 51, x=16, y=0 (short), z=-16, sizes-1 (15,127,15), len=3.
+        let head = vec![
+            51, 0, 0, 0, 16, 0, 0, 255, 255, 255, 240, 15, 127, 15, 0, 0, 0, 3,
+        ];
+        assert_eq!(&pkt[..18], &head[..]);
+        assert_eq!(&pkt[18..], &data[..]);
+    }
+
+    #[test]
+    fn test_map_chunk_carries_compressed_chunk() {
+        use std::io::Read;
+        let mut c = crate::chunk::Chunk::new(0, 0);
+        c.set_block_id(1, 64, 1, 1);
+        let payload = c.map_compressed();
+        let pkt = pkt_map_chunk(0, 0, 0, 16, 128, 16, &payload);
+        let len = i32::from_be_bytes(pkt[14..18].try_into().unwrap());
+        assert_eq!(len as usize, payload.len());
+        let mut decoder = flate2::read::ZlibDecoder::new(&pkt[18..]);
+        let mut back = Vec::new();
+        decoder.read_to_end(&mut back).unwrap();
+        assert_eq!(back, c.map_raw());
     }
 }

@@ -120,8 +120,13 @@ pub struct World {
     /// arrives with the persistence slice).
     unloaded: HashMap<(i32, i32), Chunk>,
     /// Block-entity storage by cell (mirrors the chunk `TileEntity` map;
-    /// ticking arrives with the furnace slice, NBT here).
+    /// furnaces tick in [`World::tick_furnaces`], NBT here).
     pub tiles: HashMap<(i32, i32, i32), TileData>,
+    /// Cells whose furnace block flipped 61 <-> 62 on a recent tick
+    /// (mirrors the C++ `markBlockNeedsUpdate` after
+    /// `updateFurnaceBlockState`); the server tick drains these and fans
+    /// out block changes to chunk-loaded players.
+    pub furnace_updates: Vec<[i32; 3]>,
     /// Terrain generator, built lazily (eleven octave tables; tests that
     /// never generate pay nothing; skipped in `Debug` dumps).
     generator: Option<crate::generator::RustChunkProviderGenerate>,
@@ -165,6 +170,7 @@ impl World {
             unload_radius: 10,
             unloaded: HashMap::new(),
             tiles: HashMap::new(),
+            furnace_updates: Vec::new(),
             generator: None,
             chunks: HashMap::new(),
             entities: EntityTable::new(),
@@ -1464,6 +1470,82 @@ mod tests {
         // ...and the corpse row was purged.
         assert!(w.entities.get(zombie).is_none());
         assert!(w.entities.get(item).is_none());
+    }
+
+    fn furnace_tile_with(input: (i32, i32), fuel: (i32, i32)) -> TileData {
+        use crate::inventory::FfiItemStack;
+        let mut s = crate::tile_entity_furnace::furnace_create();
+        s.slots[0] = FfiItemStack {
+            stack_size: input.1,
+            animations_to_go: 0,
+            item_id: input.0,
+            item_damage: 0,
+        };
+        s.slots[1] = FfiItemStack {
+            stack_size: fuel.1,
+            animations_to_go: 0,
+            item_id: fuel.0,
+            item_damage: 0,
+        };
+        TileData::Furnace(s)
+    }
+
+    #[test]
+    fn test_tick_furnaces_swaps_idle_to_lit() {
+        let mut w = world_with_floor();
+        w.set_block_id(2, 64, 2, 61);
+        w.set_block_meta(2, 64, 2, 3);
+        w.tiles.insert((2, 64, 2), furnace_tile_with((4, 1), (5, 1)));
+        w.tick_furnaces();
+        // Lit, facing (meta 3) preserved, update queued for broadcast.
+        assert_eq!(w.get_block_id(2, 64, 2), 62);
+        assert_eq!(w.get_block_meta(2, 64, 2), 3);
+        assert_eq!(w.furnace_updates, vec![[2, 64, 2]]);
+        // Tile row survives the swap (the C++ no-notify set).
+        assert!(matches!(w.tiles.get(&(2, 64, 2)), Some(TileData::Furnace(_))));
+        // Steady burn: no further swap, no new update.
+        w.tick_furnaces();
+        assert_eq!(w.get_block_id(2, 64, 2), 62);
+        assert_eq!(w.furnace_updates.len(), 1);
+    }
+
+    #[test]
+    fn test_tick_furnaces_swaps_lit_to_idle_when_fuel_runs_out() {
+        let mut w = world_with_floor();
+        w.set_block_id(2, 64, 2, 62);
+        w.tiles.insert((2, 64, 2), furnace_tile_with((4, 1), (280, 1)));
+        // Light it (stick: 100 ticks of burn).
+        w.tick_furnaces();
+        assert_eq!(w.furnace_updates.len(), 0); // already lit: no flip
+        for _ in 0..200 {
+            w.tick_furnaces();
+        }
+        // Burnt out mid-run: back to idle, one update queued.
+        assert_eq!(w.get_block_id(2, 64, 2), 61);
+        assert_eq!(w.furnace_updates, vec![[2, 64, 2]]);
+    }
+
+    #[test]
+    fn test_tick_furnaces_skips_chest_and_sign_tiles() {
+        let mut w = world_with_floor();
+        w.set_block_id(2, 64, 2, 54);
+        w.tiles.insert(
+            (2, 64, 2),
+            TileData::Chest(crate::tile_entity_chest::chest_create()),
+        );
+        w.tick_furnaces();
+        assert_eq!(w.get_block_id(2, 64, 2), 54);
+        assert!(w.furnace_updates.is_empty());
+    }
+
+    #[test]
+    fn test_tick_world_runs_furnaces() {
+        let mut w = world_with_floor();
+        w.set_block_id(2, 64, 2, 61);
+        w.tiles.insert((2, 64, 2), furnace_tile_with((12, 1), (263, 1)));
+        w.tick_world();
+        assert_eq!(w.get_block_id(2, 64, 2), 62);
+        assert_eq!(w.furnace_updates, vec![[2, 64, 2]]);
     }
 
     #[test]
@@ -4545,10 +4627,11 @@ impl World {
         }
     }
 
-    /// Server tick (mirrors `World::tick` minus chunk I/O, lighting, tile
-    /// entities, and packets): clock, spawners, scheduled and random block
-    /// ticks, entity dispatch on a snapshot (mid-tick spawns wait a tick
-    /// like C++), item pickup, dead-row purge, and periodic unload.
+    /// Server tick (mirrors `World::tick` minus chunk I/O, lighting,
+    /// chest/sign-tile behavior, and packets): clock, spawners, furnace
+    /// tiles, scheduled and random block ticks, entity dispatch on a
+    /// snapshot (mid-tick spawns wait a tick like C++), item pickup,
+    /// dead-row purge, and periodic unload.
     pub fn tick_world(&mut self) {
         self.time += 1;
         if self.spawn_monsters {
@@ -4557,6 +4640,7 @@ impl World {
         if self.spawn_animals {
             self.spawn_passive_mobs();
         }
+        self.tick_furnaces();
         self.process_scheduled_ticks();
         self.random_block_ticks();
         let mut ids = self.entities.alive_ids();
@@ -4579,6 +4663,39 @@ impl World {
         self.pickup_items();
         self.entities.purge_dead();
         self.unload_chunks();
+    }
+
+    /// Native furnace ticking (mirrors the `World::tick` tile-entity pass
+    /// over `TileEntityFurnace::updateEntity`): every furnace tile looks
+    /// up fuel from its own slot and runs the shared core, then a burn
+    /// flip swaps the block 61 <-> 62 preserving metadata (mirrors
+    /// `updateFurnaceBlockState`, whose no-notify set keeps the tile
+    /// alive — here tiles live outside chunks, so any plain set is safe).
+    /// Swapped cells accumulate in `furnace_updates` for the server tick
+    /// to broadcast (the C++ `markBlockNeedsUpdate`).
+    pub fn tick_furnaces(&mut self) {
+        let cells: Vec<(i32, i32, i32)> = self.tiles.keys().copied().collect();
+        for (x, y, z) in cells {
+            let ticked = match self.tiles.get_mut(&(x, y, z)) {
+                Some(TileData::Furnace(state)) => {
+                    crate::tile_entity_furnace::furnace_tick_native(state)
+                }
+                _ => continue,
+            };
+            if !ticked.needs_block_update {
+                continue;
+            }
+            let burning = matches!(
+                self.tiles.get(&(x, y, z)),
+                Some(TileData::Furnace(state)) if state.burn_time > 0
+            );
+            let meta = self.get_block_meta(x, y, z);
+            let new_id = if burning { 62 } else { 61 };
+            if self.set_block_id(x, y, z, new_id) {
+                self.set_block_meta(x, y, z, meta);
+                self.furnace_updates.push([x, y, z]);
+            }
+        }
     }
 }
 
