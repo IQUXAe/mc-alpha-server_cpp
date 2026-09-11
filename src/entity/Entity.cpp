@@ -2,9 +2,22 @@
 #include "../block/Block.h"
 #include "../core/Material.h"
 #include "../core/MathHelper.h"
+#include "../core/RustBridge.h"
 #include "../world/World.h"
 #include <vector>
 #include <algorithm>
+
+namespace {
+
+RustBridge::FfiAabb toFfiBox(const AxisAlignedBB& box) {
+    return RustBridge::FfiAabb{box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ};
+}
+
+AxisAlignedBB fromFfiBox(const RustBridge::FfiAabb& box) {
+    return AxisAlignedBB(box.min_x, box.min_y, box.min_z, box.max_x, box.max_y, box.max_z);
+}
+
+} // namespace
 
 std::atomic<int32_t> Entity::nextEntityId{1};
 
@@ -28,26 +41,24 @@ void Entity::moveEntity(double dx, double dy, double dz) {
     const AxisAlignedBB originalBoundingBox = boundingBox;
 
     if (worldObj) {
+        // Collision resolution owned by Rust (entity_physics.rs): Y, then X,
+        // then Z passes over the boxes gathered here for the expanded box.
         auto resolveMovement = [&](AxisAlignedBB box, double moveX, double moveY, double moveZ) {
             std::vector<AxisAlignedBB> boxes;
             worldObj->getCollidingBoundingBoxes(this, box.addCoord(moveX, moveY, moveZ), boxes);
 
+            std::vector<RustBridge::FfiAabb> ffiBoxes;
+            ffiBoxes.reserve(boxes.size());
             for (const auto& collisionBox : boxes) {
-                moveY = collisionBox.calculateYOffset(box, moveY);
+                ffiBoxes.push_back(toFfiBox(collisionBox));
             }
-            box.offset(0.0, moveY, 0.0);
+            RustBridge::ResolvedMove resolved{};
+            RustBridge::FfiAabb ffiBox = toFfiBox(box);
+            RustBridge::entityResolveMove(ffiBox, moveX, moveY, moveZ,
+                                          ffiBoxes.data(), ffiBoxes.size(), &resolved);
+            box = fromFfiBox(resolved.box_);
 
-            for (const auto& collisionBox : boxes) {
-                moveX = collisionBox.calculateXOffset(box, moveX);
-            }
-            box.offset(moveX, 0.0, 0.0);
-
-            for (const auto& collisionBox : boxes) {
-                moveZ = collisionBox.calculateZOffset(box, moveZ);
-            }
-            box.offset(0.0, 0.0, moveZ);
-
-            return std::tuple{box, moveX, moveY, moveZ};
+            return std::tuple{box, resolved.dx, resolved.dy, resolved.dz};
         };
 
         auto [resolvedBox, resolvedX, resolvedY, resolvedZ] = resolveMovement(boundingBox, dx, dy, dz);
@@ -111,31 +122,16 @@ void Entity::moveEntity(double dx, double dy, double dz) {
 }
 
 void Entity::applyEntityCollision(Entity* other) {
-    if (!other || other == this || !canBePushed() || !other->canBePushed()) {
+    if (!other || other == this) {
         return;
     }
-
-    double dx = other->posX - posX;
-    double dz = other->posZ - posZ;
-    double maxAbs = MathHelper::abs_max(dx, dz);
-    if (maxAbs < 0.01) {
+    RustBridge::PushOut push{};
+    if (!RustBridge::entityPush(posX, posZ, other->posX, other->posZ,
+                                canBePushed(), other->canBePushed(), &push)) {
         return;
     }
-
-    maxAbs = MathHelper::sqrt_double(maxAbs);
-    dx /= maxAbs;
-    dz /= maxAbs;
-
-    double impulseScale = 1.0 / maxAbs;
-    if (impulseScale > 1.0) {
-        impulseScale = 1.0;
-    }
-
-    dx *= impulseScale * 0.05;
-    dz *= impulseScale * 0.05;
-
-    addVelocity(-dx, 0.0, -dz);
-    other->addVelocity(dx, 0.0, dz);
+    addVelocity(push.dvx1, 0.0, push.dvz1);
+    other->addVelocity(push.dvx2, 0.0, push.dvz2);
 }
 
 void Entity::updateRiderPosition() {
@@ -237,13 +233,10 @@ bool Entity::isInLava() const {
 }
 
 void Entity::updateFallState(double dy) {
-    if (onGround) {
-        if (fallDistance > 0.0f) {
-            onFall(fallDistance);
-            fallDistance = 0.0f;
-        }
-    } else if (dy < 0.0) {
-        fallDistance = static_cast<float>(fallDistance - dy);
+    float fallEvent = -1.0f;
+    fallDistance = RustBridge::entityFallStep(onGround, dy, fallDistance, &fallEvent);
+    if (fallEvent >= 0.0f) {
+        onFall(fallEvent);
     }
 }
 

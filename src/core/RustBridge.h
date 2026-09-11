@@ -178,4 +178,14 @@ void blockSoilWalking(const BlockTickWorld* w, int32_t x, int32_t y, int32_t z);
 void blockSoilNeighbor(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
 bool blockBaseDrop(const BlockTickWorld* w, int32_t itemId, int32_t count, int32_t damage, int32_t x, int32_t y, int32_t z, float chance);
 
+// Entity physics kernel (world gathers boxes; Rust resolves)
+using FfiAabb = ::FfiAabb;
+using ResolvedMove = ::ResolvedMove;
+using PushOut = ::PushOut;
+bool entityResolveMove(const FfiAabb& box, double dx, double dy, double dz,
+                       const FfiAabb* boxes, size_t numBoxes, ResolvedMove* out);
+float entityFallStep(bool onGround, double dy, float fallDistance, float* outFallEvent);
+bool entityPush(double x1, double z1, double x2, double z2,
+                bool pushable1, bool pushable2, PushOut* out);
+
 } // namespace RustBridge

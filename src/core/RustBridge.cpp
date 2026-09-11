@@ -407,4 +407,18 @@ bool blockBaseDrop(const BlockTickWorld* w, int32_t itemId, int32_t count, int32
     return ::block_base_drop(w, itemId, count, damage, x, y, z, chance);
 }
 
+bool entityResolveMove(const FfiAabb& box, double dx, double dy, double dz,
+                       const FfiAabb* boxes, size_t numBoxes, ResolvedMove* out) {
+    return ::alpha_entity_resolve_move(&box, dx, dy, dz, boxes, numBoxes, out);
+}
+
+float entityFallStep(bool onGround, double dy, float fallDistance, float* outFallEvent) {
+    return ::alpha_entity_fall_step(onGround, dy, fallDistance, outFallEvent);
+}
+
+bool entityPush(double x1, double z1, double x2, double z2,
+                bool pushable1, bool pushable2, PushOut* out) {
+    return ::alpha_entity_push(x1, z1, x2, z2, pushable1, pushable2, out);
+}
+
 } // namespace RustBridge

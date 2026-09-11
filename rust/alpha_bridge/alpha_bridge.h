@@ -1109,6 +1109,37 @@ void block_soil_walking(const BlockTickWorld* world, int32_t x, int32_t y, int32
 void block_soil_neighbor(const BlockTickWorld* world, uint8_t block_id, int32_t x, int32_t y, int32_t z);
 bool block_base_drop(const BlockTickWorld* world, int32_t item_id, int32_t count, int32_t damage, int32_t x, int32_t y, int32_t z, float chance);
 
+// Entity physics kernel (entity_physics.rs). Pure collision/fall/push math;
+// the world-dependent half (box gathering, onFall, velocity) stays in C++.
+typedef struct FfiAabb {
+    double min_x;
+    double min_y;
+    double min_z;
+    double max_x;
+    double max_y;
+    double max_z;
+} FfiAabb;
+
+typedef struct ResolvedMove {
+    FfiAabb box_;
+    double dx;
+    double dy;
+    double dz;
+} ResolvedMove;
+
+typedef struct PushOut {
+    double dvx1;
+    double dvz1;
+    double dvx2;
+    double dvz2;
+} PushOut;
+
+bool alpha_entity_resolve_move(const FfiAabb* box_, double dx, double dy, double dz,
+                               const FfiAabb* boxes, size_t num_boxes, ResolvedMove* out);
+float alpha_entity_fall_step(bool on_ground, double dy, float fall_distance, float* out_fall_event);
+bool alpha_entity_push(double x1, double z1, double x2, double z2,
+                       bool pushable1, bool pushable2, PushOut* out);
+
 #ifdef __cplusplus
 }
 #endif
