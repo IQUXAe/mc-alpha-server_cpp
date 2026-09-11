@@ -281,6 +281,34 @@ impl Chunk {
         self.is_modified = true;
     }
 
+    /// Bulk export into flat byte arrays (generator canvas layout
+    /// `x << 11 | z << 7 | y`, metadata unpacked from nibbles).
+    pub fn fill_arrays(&self, blocks: &mut [u8; CHUNK_VOLUME], meta: &mut [u8; CHUNK_VOLUME]) {
+        blocks.copy_from_slice(&self.blocks);
+        for x in 0..CHUNK_SIZE_X {
+            for z in 0..CHUNK_SIZE_Z {
+                for y in 0..CHUNK_SIZE_Y {
+                    meta[Self::index(x, y, z)] = self.data.get_nibble(x, y, z);
+                }
+            }
+        }
+    }
+
+    /// Bulk import from flat byte arrays (metadata packed into nibbles)
+    /// plus a height-map rebuild, for generated or restored chunks.
+    pub fn load_arrays(&mut self, blocks: &[u8; CHUNK_VOLUME], meta: &[u8; CHUNK_VOLUME]) {
+        self.blocks.copy_from_slice(blocks);
+        for x in 0..CHUNK_SIZE_X {
+            for z in 0..CHUNK_SIZE_Z {
+                for y in 0..CHUNK_SIZE_Y {
+                    self.data.set_nibble(x, y, z, meta[Self::index(x, y, z)] & 0xF);
+                }
+            }
+        }
+        self.generate_height_map();
+        self.is_modified = true;
+    }
+
     /// Mirrors `getSavedLightValue`: `0` = sky, anything else = block.
     pub fn get_saved_light_value(&self, light_type: i32, x: i32, y: i32, z: i32) -> u8 {
         if light_type == SKY_LIGHT {

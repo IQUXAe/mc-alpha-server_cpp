@@ -94,7 +94,6 @@ pub fn material_of(material_id: u8) -> Material {
         _ => Material::AIR,
     }
 }
-#[derive(Debug)]
 pub struct World {
     pub seed: i64,
     pub time: i64,
@@ -117,10 +116,27 @@ pub struct World {
     /// round-trip: evicted here, thawed back on recall; disk eviction
     /// arrives with the persistence slice).
     unloaded: HashMap<(i32, i32), Chunk>,
+    /// Terrain generator, built lazily (eleven octave tables; tests that
+    /// never generate pay nothing; skipped in `Debug` dumps).
+    generator: Option<crate::generator::RustChunkProviderGenerate>,
     chunks: HashMap<(i32, i32), Chunk>,
     pub entities: EntityTable,
     pub tracker: Tracker,
     rng: JavaRandom,
+}
+
+impl std::fmt::Debug for World {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("World")
+            .field("seed", &self.seed)
+            .field("time", &self.time)
+            .field("spawn", &self.spawn)
+            .field("difficulty", &self.difficulty)
+            .field("chunks", &self.chunks.len())
+            .field("entities", &self.entities.len())
+            .field("scheduled", &self.scheduled.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl Default for World {
@@ -142,6 +158,7 @@ impl World {
             leaves_guard: 0,
             unload_radius: 10,
             unloaded: HashMap::new(),
+            generator: None,
             chunks: HashMap::new(),
             entities: EntityTable::new(),
             tracker: Tracker::new(),
@@ -1671,6 +1688,60 @@ mod tests {
             })
             .count();
         assert_eq!((items, mobs), (1, 1));
+    }
+
+    #[test]
+    fn test_ensure_chunk_builds_terrain() {
+        let mut w = World::new(1234);
+        assert!(!w.has_chunk(0, 0));
+        w.ensure_chunk(0, 0);
+        assert!(w.has_chunk(0, 0));
+        let h = w.get_height_value(8, 8);
+        assert!((1..127).contains(&h), "generated column should have terrain, h={h}");
+        // Stone body under the surface.
+        let mut stone = false;
+        for y in 0..h {
+            if w.get_block_id(8, y, 8) == 1 {
+                stone = true;
+                break;
+            }
+        }
+        assert!(stone);
+        assert!(w.chunks.get(&(0, 0)).unwrap().is_terrain_populated);
+    }
+
+    #[test]
+    fn test_ensure_chunk_deterministic_and_idempotent() {
+        let sample = |w: &mut World| -> Vec<u8> {
+            w.ensure_chunk(3, -2);
+            let mut v = Vec::new();
+            for x in (0..16).step_by(3) {
+                for z in (0..16).step_by(5) {
+                    for y in (0..128).step_by(7) {
+                        v.push(w.get_block_id(3 * 16 + x, y, -2 * 16 + z));
+                    }
+                }
+            }
+            v
+        };
+        let mut a = World::new(777);
+        let va = sample(&mut a);
+        let mut b = World::new(777);
+        assert_eq!(sample(&mut b), va);
+        // Second ensure leaves blocks untouched (no double decoration).
+        assert_eq!(sample(&mut a), va);
+    }
+
+    #[test]
+    fn test_ensure_area_populates_square() {
+        let mut w = World::new(4242);
+        w.ensure_area(0, 0, 1);
+        for dx in -1..=1 {
+            for dz in -1..=1 {
+                assert!(w.has_chunk(dx, dz));
+                assert!(w.chunks.get(&(dx, dz)).unwrap().is_terrain_populated);
+            }
+        }
     }
 
     fn player_health(w: &World, id: EntityId) -> i16 {
@@ -5172,5 +5243,153 @@ fn pending_creature(
         saddled,
         sheared,
         egg_timer,
+    }
+}
+
+impl World {
+    /// Generate and populate one chunk on demand (mirrors the C++ provider
+    /// path): raw terrain for the 2x2 canvas, decoration of the requested
+    /// chunk with the world as fallback accessor, then insert/write-back
+    /// with fresh height and sky maps. Populated chunks are left alone;
+    /// each chunk is decorated once (present-but-raw chunks decorate on
+    /// request).
+    /// The `unsafe` blocks call the crate's own generator with
+    /// stack-allocated, exactly-sized buffers, so no new unsafety is
+    /// introduced. Decorate-time meta notify/mark is skipped (the C++
+    /// fallback does mark+notify; nothing reacts pre-tick here).
+    pub fn ensure_chunk(&mut self, cx: i32, cz: i32) {
+        if self.chunks.get(&(cx, cz)).map(|c| c.is_terrain_populated).unwrap_or(false) {
+            return;
+        }
+        use crate::biome::MobSpawnerBase;
+        use crate::generator::{
+            RustChunkData, RustChunkDataBatch, rust_chunk_provider_generate_chunk,
+            rust_chunk_provider_populate_batch,
+        };
+        // 1. Stage the 2x2 canvas (existing chunks copied, missing generated).
+        let mut stage_blocks = [[[0u8; 32768]; 2]; 2];
+        let mut stage_meta = [[[0u8; 32768]; 2]; 2];
+        let mut center_biome = MobSpawnerBase::DEFAULT;
+        let mut center_temps = [0.0f64; 256];
+        for dx in 0..2usize {
+            for dz in 0..2usize {
+                let (nx, nz) = (cx + dx as i32, cz + dz as i32);
+                if let Some(c) = self.chunks.get(&(nx, nz)) {
+                    c.fill_arrays(&mut stage_blocks[dx][dz], &mut stage_meta[dx][dz]);
+                } else {
+                    let gen = self.generator();
+                    let mut blocks = [0u8; 32768];
+                    let mut biomes = [MobSpawnerBase::DEFAULT; 256];
+                    let mut temps = [0.0f64; 256];
+                    let mut humids = [0.0f64; 256];
+                    unsafe {
+                        rust_chunk_provider_generate_chunk(
+                            gen as *mut _,
+                            nx,
+                            nz,
+                            blocks.as_mut_ptr(),
+                            biomes.as_mut_ptr(),
+                            temps.as_mut_ptr(),
+                            humids.as_mut_ptr(),
+                        );
+                    }
+                    stage_blocks[dx][dz] = blocks;
+                    if dx == 0 && dz == 0 {
+                        center_biome = biomes[8 * 16 + 8];
+                        center_temps = temps;
+                    }
+                }
+            }
+        }
+        // 2. Decorate the requested chunk over the canvas.
+        let batch = RustChunkDataBatch {
+            chunks: [
+                RustChunkData {
+                    blocks: stage_blocks[0][0].as_mut_ptr(),
+                    metadata: stage_meta[0][0].as_mut_ptr(),
+                    x: cx,
+                    z: cz,
+                },
+                RustChunkData {
+                    blocks: stage_blocks[0][1].as_mut_ptr(),
+                    metadata: stage_meta[0][1].as_mut_ptr(),
+                    x: cx,
+                    z: cz + 1,
+                },
+                RustChunkData {
+                    blocks: stage_blocks[1][0].as_mut_ptr(),
+                    metadata: stage_meta[1][0].as_mut_ptr(),
+                    x: cx + 1,
+                    z: cz,
+                },
+                RustChunkData {
+                    blocks: stage_blocks[1][1].as_mut_ptr(),
+                    metadata: stage_meta[1][1].as_mut_ptr(),
+                    x: cx + 1,
+                    z: cz + 1,
+                },
+            ],
+        };
+        {
+            let _guard = TickGuard::enter(self as *mut World);
+            let gen = self.generator();
+            unsafe {
+                rust_chunk_provider_populate_batch(
+                    gen as *mut _,
+                    &batch,
+                    tree_accessor(),
+                    cx,
+                    cz,
+                    center_biome.biome_type as i32,
+                    center_temps.as_ptr(),
+                );
+            }
+        }
+        // 3. Write back: insert missing, refresh present (tree spillover);
+        // only the requested chunk is flagged (canvas neighbors decorate
+        // on their own request, exactly once each).
+        for dx in 0..2usize {
+            for dz in 0..2usize {
+                let (nx, nz) = (cx + dx as i32, cz + dz as i32);
+                let requested = dx == 0 && dz == 0;
+                match self.chunks.get_mut(&(nx, nz)) {
+                    Some(c) => {
+                        c.load_arrays(&stage_blocks[dx][dz], &stage_meta[dx][dz]);
+                        c.generate_skylight_map();
+                        if requested {
+                            c.is_terrain_populated = true;
+                        }
+                    }
+                    None => {
+                        let mut c = Chunk::new(nx, nz);
+                        c.load_arrays(&stage_blocks[dx][dz], &stage_meta[dx][dz]);
+                        c.generate_skylight_map();
+                        c.is_terrain_populated = requested;
+                        self.chunks.insert((nx, nz), c);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Lazily built terrain generator (eleven octave tables; tests that
+    /// never generate pay nothing).
+    fn generator(&mut self) -> &mut crate::generator::RustChunkProviderGenerate {
+        if self.generator.is_none() {
+            let seed = self.seed;
+            self.generator =
+                Some(crate::generator::RustChunkProviderGenerate::new(seed));
+        }
+        self.generator.as_mut().unwrap()
+    }
+
+    /// Generate a square of chunks around a center (join/respawn path for
+    /// the network slice).
+    pub fn ensure_area(&mut self, cx: i32, cz: i32, radius: i32) {
+        for dx in -radius..=radius {
+            for dz in -radius..=radius {
+                self.ensure_chunk(cx + dx, cz + dz);
+            }
+        }
     }
 }
