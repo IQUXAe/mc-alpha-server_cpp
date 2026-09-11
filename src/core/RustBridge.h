@@ -118,4 +118,17 @@ int32_t spawnPackOffset(int32_t first, int32_t second);
 bool spawnTooCloseToSpawn(float fx, float fy, float fz,
                           int32_t spawnX, int32_t spawnY, int32_t spawnZ);
 
+// Mob spawning batch drivers (Rust owns control flow; C++ owns RNG/world)
+using SpawnerWorld = ::SpawnerWorld;
+int32_t spawnHostile(const SpawnerWorld* world,
+                     const double* playerX, const double* playerY, const double* playerZ,
+                     size_t numPlayers, int32_t currentCount,
+                     int32_t spawnX, int32_t spawnY, int32_t spawnZ,
+                     int32_t worldHeight);
+int32_t spawnPassive(const SpawnerWorld* world,
+                     const double* playerX, const double* playerY, const double* playerZ,
+                     size_t numPlayers, int32_t currentCount,
+                     int32_t spawnX, int32_t spawnY, int32_t spawnZ,
+                     int32_t worldHeight);
+
 } // namespace RustBridge

@@ -1002,6 +1002,30 @@ int32_t alpha_spawn_pack_offset(int32_t first, int32_t second);
 bool alpha_spawn_too_close_to_spawn(float fx, float fy, float fz,
                                     int32_t spawn_x, int32_t spawn_y, int32_t spawn_z);
 
+// Mob spawning batch drivers (mob_spawning.rs). SpawnerWorld carries
+// C++ callbacks for RNG (World::rand stream), block queries, and spawning.
+typedef struct SpawnerWorld {
+    int32_t (*next_int)(int32_t bound);
+    float (*next_uniform_float)(float lo, float hi);
+    bool (*chunk_exists)(int32_t x, int32_t z);
+    bool (*is_solid)(int32_t x, int32_t y, int32_t z);
+    bool (*is_air)(int32_t x, int32_t y, int32_t z);
+    bool (*is_liquid)(int32_t x, int32_t y, int32_t z);
+    int32_t (*try_spawn)(uint8_t kind, float fx, float fy, float fz, float yaw, int32_t* out_max_in_chunk);
+    bool (*spawn_jockey)(float fx, float fy, float fz, float yaw, int32_t host_id);
+} SpawnerWorld;
+
+int32_t rust_world_spawn_hostile(const SpawnerWorld* world,
+                                 const double* player_x, const double* player_y, const double* player_z,
+                                 size_t num_players, int32_t current_count,
+                                 int32_t spawn_x, int32_t spawn_y, int32_t spawn_z,
+                                 int32_t world_height);
+int32_t rust_world_spawn_passive(const SpawnerWorld* world,
+                                 const double* player_x, const double* player_y, const double* player_z,
+                                 size_t num_players, int32_t current_count,
+                                 int32_t spawn_x, int32_t spawn_y, int32_t spawn_z,
+                                 int32_t world_height);
+
 #ifdef __cplusplus
 }
 #endif

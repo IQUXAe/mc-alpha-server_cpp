@@ -1666,267 +1666,146 @@ int World::countPassiveAnimals() const {
     return count;
 }
 
-void World::spawnHostileMobs() {
-    if (!mcServer || !mcServer->configManager || mcServer->configManager->playerEntities.empty()) {
-        return;
-    }
+// Mob-spawner FFI trampolines: Rust owns the spawn control flow
+// (mob_spawning.rs); these feed it C++ RNG draws, block queries, and
+// entity construction. Draw distributions match the old inline loop
+// exactly so World::rand keeps its historical sequence.
+namespace {
+thread_local World* g_spawnerWorld = nullptr;
+thread_local bool g_spawnerHostile = true;
 
-    std::vector<uint64_t> eligibleChunks;
-    constexpr int chunkRadius = 8;
-    for (auto* player : mcServer->configManager->playerEntities) {
+extern "C" int32_t spawnerNextInt(int32_t bound) {
+    std::uniform_int_distribution<int> dist(0, bound - 1);
+    return dist(g_spawnerWorld->rand);
+}
+
+extern "C" float spawnerNextUniformFloat(float lo, float hi) {
+    std::uniform_real_distribution<float> dist(lo, hi);
+    return dist(g_spawnerWorld->rand);
+}
+
+extern "C" bool spawnerChunkExists(int32_t x, int32_t z) {
+    return g_spawnerWorld->chunkExists(x, z);
+}
+
+extern "C" bool spawnerIsSolid(int32_t x, int32_t y, int32_t z) {
+    return g_spawnerWorld->isBlockSolidNoChunkLoad(x, y, z);
+}
+
+extern "C" bool spawnerIsAir(int32_t x, int32_t y, int32_t z) {
+    return g_spawnerWorld->getBlockMaterialNoChunkLoad(x, y, z) == &Material::air;
+}
+
+extern "C" bool spawnerIsLiquid(int32_t x, int32_t y, int32_t z) {
+    return g_spawnerWorld->getBlockMaterialNoChunkLoad(x, y, z)->getIsLiquid();
+}
+
+extern "C" int32_t spawnerTrySpawn(uint8_t kind, float fx, float fy, float fz, float yaw, int32_t* outMaxInChunk) {
+    World* world = g_spawnerWorld;
+    if (!world || !outMaxInChunk) return -1;
+    int entityId = -1;
+    if (g_spawnerHostile) {
+        std::unique_ptr<EntityMob> mob;
+        switch (kind) {
+            case 0: mob = std::make_unique<EntitySpider>(world); break;
+            case 1: mob = std::make_unique<EntityZombie>(world); break;
+            case 2: mob = std::make_unique<EntitySkeleton>(world); break;
+            default: mob = std::make_unique<EntityCreeper>(world); break;
+        }
+        mob->setPositionAndRotation(fx, fy, fz, yaw, 0.0f);
+        if (!mob->getCanSpawnHere()) return -1;
+        *outMaxInChunk = mob->getMaxSpawnedInChunk();
+        entityId = mob->entityId;
+        world->spawnEntityInWorld(std::move(mob));
+    } else {
+        std::unique_ptr<EntityAnimals> animal;
+        switch (kind) {
+            case 0: animal = std::make_unique<EntitySheep>(world); break;
+            case 1: animal = std::make_unique<EntityPig>(world); break;
+            case 2: animal = std::make_unique<EntityChicken>(world); break;
+            default: animal = std::make_unique<EntityCow>(world); break;
+        }
+        animal->setPositionAndRotation(fx, fy, fz, yaw, 0.0f);
+        if (!animal->getCanSpawnHere()) return -1;
+        *outMaxInChunk = animal->getMaxSpawnedInChunk();
+        entityId = animal->entityId;
+        world->spawnEntityInWorld(std::move(animal));
+    }
+    return entityId;
+}
+
+extern "C" bool spawnerSpawnJockey(float fx, float fy, float fz, float yaw, int32_t hostId) {
+    World* world = g_spawnerWorld;
+    if (!world) return false;
+    Entity* host = world->getEntityById(hostId);
+    if (!host) return false;
+    auto skeleton = std::make_unique<EntitySkeleton>(world);
+    skeleton->setPositionAndRotation(fx, fy, fz, yaw, 0.0f);
+    EntitySkeleton* skeletonPtr = skeleton.get();
+    world->spawnEntityInWorld(std::move(skeleton));
+    skeletonPtr->mountEntity(host);
+    return true;
+}
+
+struct SpawnerWorldGuard {
+    explicit SpawnerWorldGuard(World* world, bool hostile) {
+        g_spawnerWorld = world;
+        g_spawnerHostile = hostile;
+    }
+    ~SpawnerWorldGuard() { g_spawnerWorld = nullptr; }
+};
+
+void gatherPlayerPositions(const std::vector<EntityPlayerMP*>& players,
+                           std::vector<double>& outX, std::vector<double>& outY, std::vector<double>& outZ) {
+    outX.reserve(players.size());
+    outY.reserve(players.size());
+    outZ.reserve(players.size());
+    for (auto* player : players) {
         if (!player) continue;
-        const int chunkX = MathHelper::floor_double(player->posX / 16.0);
-        const int chunkZ = MathHelper::floor_double(player->posZ / 16.0);
-        for (int dx = -chunkRadius; dx <= chunkRadius; ++dx) {
-            for (int dz = -chunkRadius; dz <= chunkRadius; ++dz) {
-                eligibleChunks.push_back(getChunkKey(chunkX + dx, chunkZ + dz));
-            }
-        }
-    }
-
-    if (eligibleChunks.empty()) {
-        return;
-    }
-
-    std::sort(eligibleChunks.begin(), eligibleChunks.end());
-    eligibleChunks.erase(std::unique(eligibleChunks.begin(), eligibleChunks.end()), eligibleChunks.end());
-
-    const int maxCreatures = RustBridge::spawnMaxCount(static_cast<int>(eligibleChunks.size()), 100);
-    if (countHostileMobs() > maxCreatures) {
-        return;
-    }
-
-    for (const uint64_t key : eligibleChunks) {
-        // Use the world-seeded mt19937 (World::rand) instead of std::rand so
-        // mob spawn positions are deterministic per world seed and reproduce
-        // across server restarts. Mixing std::rand (auto-seeded) here caused
-        // positions to differ each run, contradicting the "identical world
-        // generation" promise.
-        std::uniform_int_distribution<int> roll50(0, 49);
-        if (roll50(rand) != 0) {
-            continue;
-        }
-
-        const int chunkX = static_cast<int32_t>(key >> 32);
-        const int chunkZ = static_cast<int32_t>(key & 0xFFFFFFFFu);
-        if (!chunkExists(chunkX, chunkZ)) {
-            continue;
-        }
-
-        const int baseX = chunkX * 16;
-        const int baseZ = chunkZ * 16;
-        std::uniform_int_distribution<int> pickMob(0, 3);
-        std::uniform_int_distribution<int> pickXZ(0, 15);
-        std::uniform_int_distribution<int> pickY(0, CHUNK_SIZE_Y - 1);
-        const int selectedMob = pickMob(rand); // Java picks mob class once per chunk attempt.
-        const int originX = baseX + pickXZ(rand);
-        const int originY = pickY(rand);
-        const int originZ = baseZ + pickXZ(rand);
-
-        if (isBlockSolidNoChunkLoad(originX, originY, originZ)
-            || getBlockMaterialNoChunkLoad(originX, originY, originZ) != &Material::air) {
-            continue;
-        }
-
-        bool moveToNextChunk = false;
-        std::uniform_int_distribution<int> spread6(0, 5);
-        for (int groupAttempt = 0; groupAttempt < 3 && !moveToNextChunk; ++groupAttempt) {
-            int groupCount = 0;
-            int x = originX;
-            int y = originY;
-            int z = originZ;
-
-            for (int packAttempt = 0; packAttempt < 4; ++packAttempt) {
-                // Pack-spread step owned by Rust (mob_spawning.rs): triangular [-5, 5].
-                // Draws stay here so World::rand keeps its exact sequence.
-                const int spreadAx = spread6(rand);
-                const int spreadBx = spread6(rand);
-                const int spreadAz = spread6(rand);
-                const int spreadBz = spread6(rand);
-                x += RustBridge::spawnPackOffset(spreadAx, spreadBx);
-                z += RustBridge::spawnPackOffset(spreadAz, spreadBz);
-
-                if (!isBlockSolidNoChunkLoad(x, y - 1, z)
-                    || isBlockSolidNoChunkLoad(x, y, z)
-                    || getBlockMaterialNoChunkLoad(x, y, z)->getIsLiquid()
-                    || isBlockSolidNoChunkLoad(x, y + 1, z)) {
-                    continue;
-                }
-
-                const float fx = static_cast<float>(x) + 0.5f;
-                const float fy = static_cast<float>(y);
-                const float fz = static_cast<float>(z) + 0.5f;
-                if (getClosestPlayer(fx, fy, fz, 24.0) != nullptr) {
-                    continue;
-                }
-
-                // World-spawn exclusion owned by Rust (mob_spawning.rs, 576.0 = 24^2).
-                if (RustBridge::spawnTooCloseToSpawn(fx, fy, fz, spawnX, spawnY, spawnZ)) {
-                    continue;
-                }
-
-                std::unique_ptr<EntityMob> mob;
-                switch (selectedMob) {
-                    case 0: mob = std::make_unique<EntitySpider>(this); break;
-                    case 1: mob = std::make_unique<EntityZombie>(this); break;
-                    case 2: mob = std::make_unique<EntitySkeleton>(this); break;
-                    default: mob = std::make_unique<EntityCreeper>(this); break;
-                }
-                if (!mob) {
-                    continue;
-                }
-
-                std::uniform_real_distribution<float> pickYaw(0.0f, 360.0f);
-                mob->setPositionAndRotation(fx, fy, fz, pickYaw(rand), 0.0f);
-                if (!mob->getCanSpawnHere()) {
-                    continue;
-                }
-
-                const int maxInChunk = mob->getMaxSpawnedInChunk();
-                EntityMob* spawnedMob = mob.get();
-                spawnEntityInWorld(std::move(mob));
-                ++groupCount;
-
-                // Alpha spider jockey chance.
-                std::uniform_int_distribution<int> jockRoll(0, 99);
-                if (dynamic_cast<EntitySpider*>(spawnedMob) != nullptr && jockRoll(rand) == 0) {
-                    auto skeleton = std::make_unique<EntitySkeleton>(this);
-                    skeleton->setPositionAndRotation(fx, fy, fz, spawnedMob->rotationYaw, 0.0f);
-                    EntitySkeleton* skelPtr = skeleton.get();
-                    spawnEntityInWorld(std::move(skeleton));
-                    skelPtr->mountEntity(spawnedMob);
-                }
-
-                if (groupCount >= maxInChunk) {
-                    moveToNextChunk = true; // Java: continue label110
-                    break;
-                }
-            }
-        }
+        outX.push_back(player->posX);
+        outY.push_back(player->posY);
+        outZ.push_back(player->posZ);
     }
 }
 
+RustBridge::SpawnerWorld makeSpawnerWorld() {
+    RustBridge::SpawnerWorld spawner{};
+    spawner.next_int = &spawnerNextInt;
+    spawner.next_uniform_float = &spawnerNextUniformFloat;
+    spawner.chunk_exists = &spawnerChunkExists;
+    spawner.is_solid = &spawnerIsSolid;
+    spawner.is_air = &spawnerIsAir;
+    spawner.is_liquid = &spawnerIsLiquid;
+    spawner.try_spawn = &spawnerTrySpawn;
+    spawner.spawn_jockey = &spawnerSpawnJockey;
+    return spawner;
+}
+} // namespace
+
+void World::spawnHostileMobs() {
+    if (!mcServer || !mcServer->configManager) {
+        return;
+    }
+    std::vector<double> playerX, playerY, playerZ;
+    gatherPlayerPositions(mcServer->configManager->playerEntities, playerX, playerY, playerZ);
+
+    SpawnerWorldGuard guard(this, true);
+    RustBridge::SpawnerWorld spawner = makeSpawnerWorld();
+    RustBridge::spawnHostile(&spawner, playerX.data(), playerY.data(), playerZ.data(), playerX.size(),
+                             countHostileMobs(), spawnX, spawnY, spawnZ, CHUNK_SIZE_Y);
+}
+
 void World::spawnPassiveMobs() {
-    if (!mcServer || !mcServer->configManager || mcServer->configManager->playerEntities.empty()) {
+    if (!mcServer || !mcServer->configManager) {
         return;
     }
+    std::vector<double> playerX, playerY, playerZ;
+    gatherPlayerPositions(mcServer->configManager->playerEntities, playerX, playerY, playerZ);
 
-    std::vector<uint64_t> eligibleChunks;
-    constexpr int chunkRadius = 8;
-    for (auto* player : mcServer->configManager->playerEntities) {
-        if (!player) continue;
-        const int chunkX = MathHelper::floor_double(player->posX / 16.0);
-        const int chunkZ = MathHelper::floor_double(player->posZ / 16.0);
-        for (int dx = -chunkRadius; dx <= chunkRadius; ++dx) {
-            for (int dz = -chunkRadius; dz <= chunkRadius; ++dz) {
-                eligibleChunks.push_back(getChunkKey(chunkX + dx, chunkZ + dz));
-            }
-        }
-    }
-
-    if (eligibleChunks.empty()) {
-        return;
-    }
-
-    std::sort(eligibleChunks.begin(), eligibleChunks.end());
-    eligibleChunks.erase(std::unique(eligibleChunks.begin(), eligibleChunks.end()), eligibleChunks.end());
-
-    const int maxCreatures = RustBridge::spawnMaxCount(static_cast<int>(eligibleChunks.size()), 20);
-    if (countPassiveAnimals() > maxCreatures) {
-        return;
-    }
-
-    for (const uint64_t key : eligibleChunks) {
-        std::uniform_int_distribution<int> roll50(0, 49);
-        if (roll50(rand) != 0) {
-            continue;
-        }
-
-        const int chunkX = static_cast<int32_t>(key >> 32);
-        const int chunkZ = static_cast<int32_t>(key & 0xFFFFFFFFu);
-        if (!chunkExists(chunkX, chunkZ)) {
-            continue;
-        }
-
-        const int baseX = chunkX * 16;
-        const int baseZ = chunkZ * 16;
-        std::uniform_int_distribution<int> pickAn(0, 3);
-        std::uniform_int_distribution<int> pickXZ(0, 15);
-        std::uniform_int_distribution<int> pickY(0, CHUNK_SIZE_Y - 1);
-        const int selectedAnimal = pickAn(rand); // Java picks class once per chunk attempt.
-        const int originX = baseX + pickXZ(rand);
-        const int originY = pickY(rand);
-        const int originZ = baseZ + pickXZ(rand);
-
-        if (isBlockSolidNoChunkLoad(originX, originY, originZ)
-            || getBlockMaterialNoChunkLoad(originX, originY, originZ) != &Material::air) {
-            continue;
-        }
-
-        bool moveToNextChunk = false;
-        std::uniform_int_distribution<int> spread6(0, 5);
-        for (int groupAttempt = 0; groupAttempt < 3 && !moveToNextChunk; ++groupAttempt) {
-            int groupCount = 0;
-            int x = originX;
-            int y = originY;
-            int z = originZ;
-
-            for (int packAttempt = 0; packAttempt < 4; ++packAttempt) {
-                // Pack-spread step owned by Rust (mob_spawning.rs): triangular [-5, 5].
-                // Draws stay here so World::rand keeps its exact sequence.
-                const int spreadAx = spread6(rand);
-                const int spreadBx = spread6(rand);
-                const int spreadAz = spread6(rand);
-                const int spreadBz = spread6(rand);
-                x += RustBridge::spawnPackOffset(spreadAx, spreadBx);
-                z += RustBridge::spawnPackOffset(spreadAz, spreadBz);
-
-                if (!isBlockSolidNoChunkLoad(x, y - 1, z)
-                    || isBlockSolidNoChunkLoad(x, y, z)
-                    || getBlockMaterialNoChunkLoad(x, y, z)->getIsLiquid()
-                    || isBlockSolidNoChunkLoad(x, y + 1, z)) {
-                    continue;
-                }
-
-                const float fx = static_cast<float>(x) + 0.5f;
-                const float fy = static_cast<float>(y);
-                const float fz = static_cast<float>(z) + 0.5f;
-                if (getClosestPlayer(fx, fy, fz, 24.0) != nullptr) {
-                    continue;
-                }
-
-                // World-spawn exclusion owned by Rust (mob_spawning.rs, 576.0 = 24^2).
-                if (RustBridge::spawnTooCloseToSpawn(fx, fy, fz, spawnX, spawnY, spawnZ)) {
-                    continue;
-                }
-
-                std::unique_ptr<EntityAnimals> animal;
-                switch (selectedAnimal) {
-                    case 0: animal = std::make_unique<EntitySheep>(this); break;
-                    case 1: animal = std::make_unique<EntityPig>(this); break;
-                    case 2: animal = std::make_unique<EntityChicken>(this); break;
-                    default: animal = std::make_unique<EntityCow>(this); break;
-                }
-                if (!animal) {
-                    continue;
-                }
-
-                std::uniform_real_distribution<float> pickYaw(0.0f, 360.0f);
-                animal->setPositionAndRotation(fx, fy, fz, pickYaw(rand), 0.0f);
-                if (!animal->getCanSpawnHere()) {
-                    continue;
-                }
-
-                const int maxInChunk = animal->getMaxSpawnedInChunk();
-                spawnEntityInWorld(std::move(animal));
-                ++groupCount;
-                if (groupCount >= maxInChunk) {
-                    moveToNextChunk = true; // Java: continue label110
-                    break;
-                }
-            }
-        }
-    }
+    SpawnerWorldGuard guard(this, false);
+    RustBridge::SpawnerWorld spawner = makeSpawnerWorld();
+    RustBridge::spawnPassive(&spawner, playerX.data(), playerY.data(), playerZ.data(), playerX.size(),
+                             countPassiveAnimals(), spawnX, spawnY, spawnZ, CHUNK_SIZE_Y);
 }
 
 // Returns the material of the block at the given position

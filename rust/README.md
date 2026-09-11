@@ -27,9 +27,9 @@ full FFI surface. Current Rust-owned areas include:
 - player logic: `player_inventory`, `player_combat`, `player_movement`,
   `player_mining`, `player_digging` (digging state machine)
 - entities/network: `network` (packet encode + `RustNetworkManager`),
-  `pathfinder`, `tracker_math` (tracking math), `mob_spawning` (spawn caps,
-  pack-spread, world-spawn exclusion), `commands`, `block`,
-  `tile_entity_*`, `random`
+  `pathfinder`, `tracker_math` (tracking math), `mob_spawning` (full
+  hostile/passive spawn passes via batch drivers + callback table),
+  `commands`, `block`, `tile_entity_*`, `random`
 
 ## Build locally once Rust is installed
 

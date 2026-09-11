@@ -258,4 +258,22 @@ bool spawnTooCloseToSpawn(float fx, float fy, float fz,
     return ::alpha_spawn_too_close_to_spawn(fx, fy, fz, spawnX, spawnY, spawnZ);
 }
 
+int32_t spawnHostile(const SpawnerWorld* world,
+                     const double* playerX, const double* playerY, const double* playerZ,
+                     size_t numPlayers, int32_t currentCount,
+                     int32_t spawnX, int32_t spawnY, int32_t spawnZ,
+                     int32_t worldHeight) {
+    return ::rust_world_spawn_hostile(world, playerX, playerY, playerZ, numPlayers,
+                                      currentCount, spawnX, spawnY, spawnZ, worldHeight);
+}
+
+int32_t spawnPassive(const SpawnerWorld* world,
+                     const double* playerX, const double* playerY, const double* playerZ,
+                     size_t numPlayers, int32_t currentCount,
+                     int32_t spawnX, int32_t spawnY, int32_t spawnZ,
+                     int32_t worldHeight) {
+    return ::rust_world_spawn_passive(world, playerX, playerY, playerZ, numPlayers,
+                                      currentCount, spawnX, spawnY, spawnZ, worldHeight);
+}
+
 } // namespace RustBridge
