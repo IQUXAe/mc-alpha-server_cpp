@@ -1,6 +1,6 @@
 //! Small-entity kernels ported from C++ `EntityItem`, `EntityFallingSand`,
-//! and `EntityBoat` (mirrors Java `EntityItem`, `EntityFallingSand`,
-//! `EntityBoat`).
+//! `EntityBoat`, and `EntityArrow` (mirrors Java `EntityItem`,
+//! `EntityFallingSand`, `EntityBoat`, `EntityArrow`).
 //!
 //! Only closed-form pieces move: push-out side selection, friction damping,
 //! falling-sand landing decisions, water-fraction scan math, and yaw/rider
@@ -205,6 +205,31 @@ pub unsafe extern "C" fn alpha_boat_rider_offset(yaw: f32, out_x: *mut f64, out_
     true
 }
 
+/// Arrow launch (mirrors `EntityArrow::shoot`): normalize the aim, add
+/// per-axis jitter (`(d1 - d2) * 0.0075 * inaccuracy`, x/y/z draw order),
+/// then scale by velocity. Returns the launch motion, or `None` for a
+/// degenerate aim like C++ (which leaves motion untouched).
+pub fn arrow_shoot_run(
+    vx: f64,
+    vy: f64,
+    vz: f64,
+    velocity: f32,
+    inaccuracy: f32,
+    next_f01: &mut dyn FnMut() -> f64,
+) -> Option<[f64; 3]> {
+    let length = (vx * vx + vy * vy + vz * vz).sqrt();
+    if length < 1.0e-7 {
+        return None;
+    }
+    let (mut nx, mut ny, mut nz) = (vx / length, vy / length, vz / length);
+    let jitter = 0.0075 * inaccuracy as f64;
+    nx += (next_f01() - next_f01()) * jitter;
+    ny += (next_f01() - next_f01()) * jitter;
+    nz += (next_f01() - next_f01()) * jitter;
+    let v = velocity as f64;
+    Some([nx * v, ny * v, nz * v])
+}
+
 /// Yaw/pitch from velocity (mirrors the arrow orientation init:
 /// `atan2(vx, vz)` yaw, `atan2(vy, horizontal)` pitch with `sqrt_float`).
 #[no_mangle]
@@ -309,5 +334,22 @@ mod tests {
         assert!(yaw.abs() < 1e-6);
         assert!(pitch.abs() < 1e-6);
         assert!(!unsafe { alpha_arrow_face_velocity(0.0, 0.0, 2.0, std::ptr::null_mut(), &mut pitch) });
+    }
+
+    #[test]
+    fn test_arrow_shoot_scales_and_jitters_in_order() {
+        // Fixed draws: x gets (0.6-0.5), y (0.7-0.4), z (0.8-0.3).
+        // Velocity/inaccuracy are exactly representable (0.5/8.0) so the
+        // expectation is not polluted by f32->f64 widening.
+        let mut seq = [0.6, 0.5, 0.7, 0.4, 0.8, 0.3].into_iter();
+        let mut next = || seq.next().unwrap();
+        let m = arrow_shoot_run(3.0, 0.0, 4.0, 0.5, 8.0, &mut next).unwrap();
+        // Aim (0.6, 0, 0.8) plus jitter 0.0075*8=0.06 per axis diff.
+        assert!((m[0] - (0.6 + 0.1 * 0.06) * 0.5).abs() < 1e-9);
+        assert!((m[1] - (0.0 + 0.3 * 0.06) * 0.5).abs() < 1e-9);
+        assert!((m[2] - (0.8 + 0.5 * 0.06) * 0.5).abs() < 1e-9);
+        // Degenerate aim leaves motion alone (None).
+        let mut never = || panic!("no draws on degenerate aim");
+        assert!(arrow_shoot_run(0.0, 0.0, 0.0, 0.6, 12.0, &mut never).is_none());
     }
 }

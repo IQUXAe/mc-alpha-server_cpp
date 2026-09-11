@@ -256,6 +256,10 @@ pub struct ArrowEnt {
     pub ticks_in_ground: i32,
     pub ticks_in_air: i32,
     pub shooter_id: EntityId,
+    /// Stuck-block cell (`tileX/Y/Z`) and the block id it lodged in
+    /// (`inTile`); the arrow pops out when the cell changes.
+    pub tile: [i32; 3],
+    pub in_tile: i32,
 }
 
 #[derive(Clone, Debug)]
@@ -283,6 +287,10 @@ pub struct MobEnt {
     pub burn_ticks: i32,
     pub path: Vec<[i32; 3]>,
     pub path_index: usize,
+    /// Creeper fuse state (`swellTime_` / `swellDirection_`): counts up
+    /// while the target stays close, explodes at 30.
+    pub swell_time: i32,
+    pub swell_dir: i32,
 }
 
 impl MobEnt {
@@ -303,6 +311,8 @@ impl MobEnt {
             burn_ticks: 0,
             path: Vec::new(),
             path_index: 0,
+            swell_time: 0,
+            swell_dir: -1,
         }
     }
 }

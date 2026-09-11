@@ -944,6 +944,8 @@ mod tests {
             burn_ticks: 0,
             path: Vec::new(),
             path_index: 0,
+            swell_time: 0,
+            swell_dir: -1,
         }));
         id
     }
@@ -1327,6 +1329,197 @@ mod tests {
         // Path to our own block is empty (start == end, like nullptr).
         assert!(w.path_block_points(zombie, [3, 64, 4], 16.0).is_empty());
     }
+
+    fn player_health(w: &World, id: EntityId) -> i16 {
+        match w.entities.get(id).unwrap() {
+            crate::entity_table::Entity::Player(p) => p.living.health,
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn test_ray_trace_clear() {
+        let mut w = world_with_floor();
+        // Open air reads visible.
+        assert!(w.ray_trace_clear([3.5, 66.0, 4.5], [10.5, 66.0, 4.5]));
+        // Stone wall blocks.
+        for y in 64..68 {
+            w.set_block_id(7, y, 4, 1);
+        }
+        assert!(!w.ray_trace_clear([3.5, 66.0, 4.5], [10.5, 66.0, 4.5]));
+        // Fluids let sight through; flowers block (canCollideCheck is only
+        // false for BlockFluid).
+        w.set_block_id(7, 66, 4, 8);
+        assert!(w.ray_trace_clear([3.5, 66.0, 4.5], [10.5, 66.0, 4.5]));
+        w.set_block_id(7, 66, 4, 37);
+        assert!(!w.ray_trace_clear([3.5, 66.0, 4.5], [10.5, 66.0, 4.5]));
+        // NaN reads visible like the C++ early-out.
+        assert!(w.ray_trace_clear([f64::NAN, 66.0, 4.5], [10.5, 66.0, 4.5]));
+    }
+
+    #[test]
+    fn test_zombie_punches_player() {
+        let mut w = world_with_floor();
+        let player = add_player(&mut w, "steve", 4.5, 64.0, 4.5);
+        let zombie = add_mob(&mut w, MobKind::Zombie, 3.5, 64.0, 4.5);
+        w.tick_mob(zombie);
+        assert_eq!(player_health(&w, player), 15);
+        assert_eq!(
+            match w.entities.get(zombie).unwrap() {
+                crate::entity_table::Entity::Mob(m) => m.attack_cooldown,
+                _ => unreachable!(),
+            },
+            20
+        );
+        // Cooldown gates the next punch.
+        w.tick_mob(zombie);
+        assert_eq!(player_health(&w, player), 15);
+    }
+
+    #[test]
+    fn test_skeleton_looses_arrow() {
+        let mut w = world_with_floor();
+        let _player = add_player(&mut w, "steve", 10.5, 64.0, 4.5);
+        let skel = add_mob(&mut w, MobKind::Skeleton, 3.5, 64.0, 4.5);
+        w.tick_mob(skel);
+        let arrows: Vec<EntityId> = w
+            .entities
+            .alive_ids()
+            .into_iter()
+            .filter(|oid| matches!(w.entities.get(*oid).unwrap(), crate::entity_table::Entity::Arrow(_)))
+            .collect();
+        assert_eq!(arrows.len(), 1);
+        let (shooter, start) = match w.entities.get(arrows[0]).unwrap() {
+            crate::entity_table::Entity::Arrow(a) => (a.shooter_id, a.body.pos),
+            _ => unreachable!(),
+        };
+        assert_eq!(shooter, skel);
+        for _ in 0..5 {
+            w.tick_arrow(arrows[0]);
+        }
+        let end = w.entities.get(arrows[0]).unwrap().body().pos;
+        assert!(end[0] > start[0], "arrow should fly east, {start:?} -> {end:?}");
+    }
+
+    #[test]
+    fn test_spider_pounces_in_range() {
+        let mut w = world_with_floor();
+        let player = add_player(&mut w, "steve", 7.5, 64.0, 4.5);
+        let spider = add_mob(&mut w, MobKind::Spider, 3.5, 64.0, 4.5);
+        if let Some(crate::entity_table::Entity::Mob(m)) = w.entities.get_mut(spider) {
+            m.living.body.on_ground = true;
+        }
+        let mut snap = w.creature_snapshot(spider).unwrap();
+        for _ in 0..200 {
+            w.mob_attack(spider, MobKind::Spider, player, 4.0, &mut snap);
+            let my = w.entities.get(spider).unwrap().body().motion[1];
+            if my == 0.4 {
+                return; // pounce fired (rng(10) gate passed)
+            }
+        }
+        panic!("spider should pounce from 4 blocks within 200 tries");
+    }
+
+    #[test]
+    fn test_creeper_explodes_next_to_player() {
+        let mut w = world_with_floor();
+        let player = add_player(&mut w, "steve", 4.5, 64.0, 4.5);
+        let creeper = add_mob(&mut w, MobKind::Creeper, 3.5, 64.0, 4.5);
+        for _ in 0..40 {
+            w.tick_mob(creeper);
+            if w.entities.get(creeper).unwrap().body().dead {
+                break;
+            }
+        }
+        assert!(w.entities.get(creeper).unwrap().body().dead);
+        // Point-blank (d=1): 12 * (1 - 1/3) = 8 damage, no RNG involved.
+        assert_eq!(player_health(&w, player), 12);
+    }
+
+    #[test]
+    fn test_arrow_sticks_in_wall_and_pops_out() {
+        use crate::entity_table::{ArrowEnt, Body};
+        let mut w = world_with_floor();
+        for y in 64..67 {
+            w.set_block_id(10, y, 8, 1);
+        }
+        let id = w.entities.alloc_id();
+        let mut b = Body::new(id, 0.5, 0.5, 0.0);
+        b.set_position(8.5, 65.0, 8.5);
+        b.motion = [1.0, 0.0, 0.0];
+        w.entities.insert(crate::entity_table::Entity::Arrow(ArrowEnt {
+            body: b,
+            in_ground: false,
+            shake: 0,
+            ticks_in_ground: 0,
+            ticks_in_air: 0,
+            shooter_id: -1,
+            tile: [-1, -1, -1],
+            in_tile: 0,
+        }));
+        w.tick_arrow(id);
+        w.tick_arrow(id);
+        let (stuck, tile, shake) = match w.entities.get(id).unwrap() {
+            crate::entity_table::Entity::Arrow(a) => (a.in_ground, a.tile, a.shake),
+            _ => unreachable!(),
+        };
+        assert!(stuck);
+        // Boundary graze: the shared face clips y=64 first and strict `<`
+        // keeps it, exactly like the C++ sweep order.
+        assert_eq!((tile, shake), ([10, 64, 8], 7));
+        // Removing the block pops the arrow back out.
+        w.set_block_id(10, 64, 8, 0);
+        w.tick_arrow(id);
+        assert!(!matches!(
+            w.entities.get(id).unwrap(),
+            crate::entity_table::Entity::Arrow(a) if a.in_ground
+        ));
+    }
+
+    #[test]
+    fn test_sheep_shear_on_living_hit() {
+        let mut w = world_with_floor();
+        let sheep = add_animal(&mut w, AnimalKind::Sheep, 3.5, 64.0, 4.5);
+        let zombie = add_mob(&mut w, MobKind::Zombie, 5.5, 64.0, 4.5);
+        w.attack_living(sheep, 3, Some(zombie));
+        assert!(matches!(
+            w.entities.get(sheep).unwrap(),
+            crate::entity_table::Entity::Animal(a) if a.sheared
+        ));
+        let wool = w
+            .entities
+            .alive_ids()
+            .into_iter()
+            .filter(|oid| {
+                matches!(
+                    w.entities.get(*oid).unwrap(),
+                    crate::entity_table::Entity::Item(e) if e.item_id == 35
+                )
+            })
+            .count();
+        assert!((1..=3).contains(&wool), "shear drops 1..3 wool, got {wool}");
+        // No living attacker, no shear.
+        let sheep2 = add_animal(&mut w, AnimalKind::Sheep, 8.5, 64.0, 8.5);
+        w.attack_living(sheep2, 3, None);
+        assert!(matches!(
+            w.entities.get(sheep2).unwrap(),
+            crate::entity_table::Entity::Animal(a) if !a.sheared
+        ));
+    }
+
+    #[test]
+    fn test_player_damage_and_death_without_drops() {
+        let mut w = world_with_floor();
+        let player = add_player(&mut w, "steve", 3.5, 64.0, 4.5);
+        let zombie = add_mob(&mut w, MobKind::Zombie, 8.5, 64.0, 4.5);
+        w.attack_living(player, 5, Some(zombie));
+        assert_eq!(player_health(&w, player), 15);
+        let before = w.entities.len();
+        w.attack_living(player, 100, Some(zombie));
+        assert!(w.entities.get(player).unwrap().body().dead);
+        // Death marks dead only: inventory drops are the player slice.
+        assert_eq!(w.entities.len(), before);
+    }
 }
 
 impl World {
@@ -1339,14 +1532,18 @@ impl World {
 
     /// Damage pipeline on a native living row (mirrors
     /// `EntityLiving::attackEntityFrom` + `onDeath` with mob/animal drops).
-    /// `attacker` supplies knockback direction; `None` skips it.
+    /// `attacker` supplies knockback direction; `None` skips it. Players
+    /// take damage and knockback like mobs; their inventory drops arrive
+    /// with the player slice (death only marks dead for now).
     pub fn attack_living(&mut self, id: EntityId, amount: i32, attacker: Option<EntityId>) {
         use crate::entity_living::{AttackInput, living_attack_run};
+        self.sheep_shear(id, attacker);
         let input = match self.entities.get(id) {
-            Some(Entity::Mob(_)) | Some(Entity::Animal(_)) => {
+            Some(Entity::Mob(_)) | Some(Entity::Animal(_)) | Some(Entity::Player(_)) => {
                 let (l, px, pz) = match self.entities.get(id) {
                     Some(Entity::Mob(m)) => (&m.living, m.living.body.pos[0], m.living.body.pos[2]),
                     Some(Entity::Animal(a)) => (&a.living, a.living.body.pos[0], a.living.body.pos[2]),
+                    Some(Entity::Player(p)) => (&p.living, p.living.body.pos[0], p.living.body.pos[2]),
                     _ => unreachable!(),
                 };
                 let (ax, az, has) = match attacker.and_then(|a| self.entities.get(a)) {
@@ -1404,6 +1601,16 @@ impl World {
                     a.living.body.motion = [r.kmx, r.kmy, r.kmz];
                 }
             }
+            Some(Entity::Player(p)) => {
+                p.living.health = r.health;
+                p.living.last_damage = r.last_damage;
+                p.living.hurt_resist = r.hurt_resist;
+                p.living.hurt_time = r.hurt_time;
+                p.living.attack_time = r.attack_time;
+                if r.knocked {
+                    p.living.body.motion = [r.kmx, r.kmy, r.kmz];
+                }
+            }
             _ => return,
         }
         if died {
@@ -1411,12 +1618,55 @@ impl World {
         }
     }
 
+    /// Sheep shear (mirrors `EntitySheep::attackEntityFrom`): a living
+    /// attacker scares 1..3 wool off first, independent of the damage
+    /// pipeline that follows. Wool drops match the C++ shape exactly
+    /// (spawn height, per-axis jitter, default pickup delay).
+    fn sheep_shear(&mut self, id: EntityId, attacker: Option<EntityId>) {
+        let (px, py, pz, h) = match self.entities.get(id) {
+            Some(Entity::Animal(a))
+                if a.kind == AnimalKind::Sheep && !a.sheared =>
+            {
+                (a.living.body.pos[0], a.living.body.pos[1], a.living.body.pos[2], a.living.body.height)
+            }
+            _ => return,
+        };
+        let living_attacker = attacker
+            .and_then(|x| self.entities.get(x))
+            .map(|e| matches!(e, Entity::Mob(_) | Entity::Animal(_) | Entity::Player(_)))
+            .unwrap_or(false);
+        if !living_attacker {
+            return;
+        }
+        if let Some(Entity::Animal(a)) = self.entities.get_mut(id) {
+            a.sheared = true;
+        }
+        let count = 1 + self.rng.next_int_bound(3);
+        for _ in 0..count {
+            let draws = [
+                self.rng.next_double(),
+                self.rng.next_double(),
+                self.rng.next_double(),
+                self.rng.next_double(),
+                self.rng.next_double(),
+            ];
+            let wid = self.spawn_item_entity(35, 1, 0, px, py + h as f64 * 0.75, pz);
+            if let Some(Entity::Item(e)) = self.entities.get_mut(wid) {
+                e.body.motion[0] += (draws[1] - draws[2]) * 0.1;
+                e.body.motion[1] += draws[0] * 0.05;
+                e.body.motion[2] += (draws[3] - draws[4]) * 0.1;
+            }
+        }
+    }
+
     /// Death: dismount both sides, spawn kind drops, mark dead (mirrors
-    /// `EntityLiving::onDeath` + mob/animal `onDeath`).
+    /// `EntityLiving::onDeath` + mob/animal `onDeath`). Players dismount
+    /// and die with no drops yet (inventory scatter is the player slice).
     pub fn kill_living(&mut self, id: EntityId) {
         let (px, py, pz) = match self.entities.get(id) {
             Some(Entity::Mob(m)) => (m.living.body.pos[0], m.living.body.pos[1], m.living.body.pos[2]),
             Some(Entity::Animal(a)) => (a.living.body.pos[0], a.living.body.pos[1], a.living.body.pos[2]),
+            Some(Entity::Player(p)) => (p.living.body.pos[0], p.living.body.pos[1], p.living.body.pos[2]),
             _ => return,
         };
         // Dismount rider and vehicle.
@@ -1430,10 +1680,13 @@ impl World {
         if ridden_by >= 0 {
             self.entities.mount(ridden_by, None);
         }
-        // Kind drops (counts mirror the C++ getDropCount formulas).
-        let (drop_id, drop_count) = self.living_drops(id);
-        for _ in 0..drop_count {
-            self.spawn_item_entity(drop_id, 1, 0, px, py, pz);
+        // Kind drops for mobs/animals (counts mirror the C++ getDropCount
+        // formulas); players drop nothing yet (player slice).
+        if matches!(self.entities.get(id), Some(Entity::Mob(_)) | Some(Entity::Animal(_))) {
+            let (drop_id, drop_count) = self.living_drops(id);
+            for _ in 0..drop_count {
+                self.spawn_item_entity(drop_id, 1, 0, px, py, pz);
+            }
         }
         if let Some(e) = self.entities.get_mut(id) {
             e.body_mut().dead = true;
@@ -1833,17 +2086,33 @@ impl World {
         id: EntityId,
         mut target: Option<EntityId>,
         rule: WeightRule,
+        mob_kind: Option<MobKind>,
         snap: &mut CreatureSnap,
         in_liquid: bool,
         strafe: &mut f32,
         forward: &mut f32,
         jumping: &mut bool,
     ) -> Option<EntityId> {
-        // Phase 1: drop dead/missing targets like the base clear branch.
+        // Phase 1: drop dead/missing targets like the base clear branch,
+        // then let visible targets take the per-kind attack.
         if let Some(t) = target {
             if !self.target_alive(t) {
                 target = None;
                 self.store_mob_target(id, None);
+            }
+        }
+        if let (Some(kind), Some(t)) = (mob_kind, target) {
+            let (sp, tp, teye) = match (self.entities.get(id), self.entities.get(t)) {
+                (Some(s), Some(te)) => (s.body().pos, te.body().pos, Self::living_eye_height(te)),
+                _ => return target,
+            };
+            let (dx, dy, dz) = (tp[0] - sp[0], tp[1] - sp[1], tp[2] - sp[2]);
+            let dist = sqrt_float((dx * dx + dy * dy + dz * dz) as f32);
+            let self_eye = snap.height as f64 * 0.85;
+            let from = [sp[0], sp[1] + self_eye, sp[2]];
+            let to = [tp[0], tp[1] + teye, tp[2]];
+            if self.ray_trace_clear(from, to) {
+                target = self.mob_attack(id, kind, t, dist, snap);
             }
         }
         // Phase 2: wander when targetless (or when the re-path gate skips),
@@ -2106,7 +2375,7 @@ impl World {
             None => return (0.0, 0.0),
         };
         let target =
-            self.creature_phases(id, target, WeightRule::Mob, &mut snap, in_liquid, &mut strafe, &mut forward, &mut jumping);
+            self.creature_phases(id, target, WeightRule::Mob, Some(kind), &mut snap, in_liquid, &mut strafe, &mut forward, &mut jumping);
         // Chase bonus: full speed plus 20% past attack reach + 1.
         if let Some(t) = target {
             if let (Some(s), Some(te)) = (self.entities.get(id), self.entities.get(t)) {
@@ -2133,7 +2402,7 @@ impl World {
             Some(s) => s,
             None => return (0.0, 0.0),
         };
-        self.creature_phases(id, None, WeightRule::Animal, &mut snap, in_liquid, &mut strafe, &mut forward, &mut jumping);
+        self.creature_phases(id, None, WeightRule::Animal, None, &mut snap, in_liquid, &mut strafe, &mut forward, &mut jumping);
         self.store_creature_nav(id, &snap, jumping);
         (strafe, forward)
     }
@@ -2226,6 +2495,684 @@ impl World {
         let roll = self.rng.next_int_bound(6000);
         if let Some(Entity::Animal(a)) = self.entities.get_mut(id) {
             a.egg_timer = 6000 + roll;
+        }
+    }
+}
+
+/// Creeper blast radius (mirrors the Alpha inline `explode`).
+const CREEPER_BLAST_RADIUS: f32 = 3.0;
+/// Fire block id placed by explosions.
+const FIRE_BLOCK_ID: u8 = 51;
+
+impl World {
+    /// Line of sight (mirrors `canEntitySee` → `rayTraceBlocks` with
+    /// `includeLiquids = false`): the same DDA walk, blocked by any
+    /// collidable block. Only fluids let sight through (`canCollideCheck`
+    /// is false solely for `BlockFluid`; flowers, torches and crops block
+    /// like stone). Missing chunks read air like every other native query
+    /// (C++ loads/generates there).
+    pub fn ray_trace_clear(&self, from: [f64; 3], to: [f64; 3]) -> bool {
+        if ![from[0], from[1], from[2], to[0], to[1], to[2]].iter().all(|v| v.is_finite()) {
+            return true;
+        }
+        let (mut cx, mut cy, mut cz) = (from[0], from[1], from[2]);
+        let (mut ccx, mut ccy, mut ccz) = (cx.floor() as i32, cy.floor() as i32, cz.floor() as i32);
+        let (tx, ty, tz) = (to[0].floor() as i32, to[1].floor() as i32, to[2].floor() as i32);
+        for _ in 0..=200 {
+            if !cx.is_finite() || !cy.is_finite() || !cz.is_finite() {
+                return true;
+            }
+            if ccx == tx && ccy == ty && ccz == tz {
+                return true;
+            }
+            let (mut nbx, mut nby, mut nbz) = (999.0f64, 999.0f64, 999.0f64);
+            if tx > ccx {
+                nbx = ccx as f64 + 1.0;
+            }
+            if tx < ccx {
+                nbx = ccx as f64;
+            }
+            if ty > ccy {
+                nby = ccy as f64 + 1.0;
+            }
+            if ty < ccy {
+                nby = ccy as f64;
+            }
+            if tz > ccz {
+                nbz = ccz as f64 + 1.0;
+            }
+            if tz < ccz {
+                nbz = ccz as f64;
+            }
+            let (dx, dy, dz) = (to[0] - cx, to[1] - cy, to[2] - cz);
+            let (mut sx, mut sy, mut sz) = (999.0f64, 999.0f64, 999.0f64);
+            if nbx != 999.0 && dx.abs() > 1.0e-7 {
+                sx = (nbx - cx) / dx;
+            }
+            if nby != 999.0 && dy.abs() > 1.0e-7 {
+                sy = (nby - cy) / dy;
+            }
+            if nbz != 999.0 && dz.abs() > 1.0e-7 {
+                sz = (nbz - cz) / dz;
+            }
+            let side: i8;
+            if sx < sy && sx < sz {
+                side = if tx > ccx { 4 } else { 5 };
+                cx = nbx;
+                cy += dy * sx;
+                cz += dz * sx;
+            } else if sy < sz {
+                side = if ty > ccy { 0 } else { 1 };
+                cx += dx * sy;
+                cy = nby;
+                cz += dz * sy;
+            } else {
+                side = if tz > ccz { 2 } else { 3 };
+                cx += dx * sz;
+                cy += dy * sz;
+                cz = nbz;
+            }
+            ccx = cx.floor() as i32;
+            if side == 5 {
+                ccx -= 1;
+            }
+            ccy = cy.floor() as i32;
+            if side == 1 {
+                ccy -= 1;
+            }
+            ccz = cz.floor() as i32;
+            if side == 3 {
+                ccz -= 1;
+            }
+            let bid = self.get_block_id(ccx, ccy, ccz);
+            if bid == 0 {
+                continue;
+            }
+            if alpha_block_properties_get(bid as u32).block_type == BlockType::Fluid as u8 {
+                continue;
+            }
+            return false;
+        }
+        true
+    }
+
+    /// Phase-1 attack dispatch (mirrors `attackEntityAt` → per-kind
+    /// `attackTarget`). `dist` is the C++ phase-1 distance
+    /// (`sqrt_float(float(full 3D pos distSq))`). Returns the effective
+    /// target (spiders drop it in daylight).
+    fn mob_attack(
+        &mut self,
+        id: EntityId,
+        kind: MobKind,
+        target: EntityId,
+        dist: f32,
+        snap: &mut CreatureSnap,
+    ) -> Option<EntityId> {
+        match kind {
+            MobKind::Zombie => self.zombie_punch(id, target, dist),
+            MobKind::Skeleton => self.skeleton_volley(id, target, dist),
+            MobKind::Spider => self.spider_attack(id, target, dist, snap),
+            MobKind::Creeper => self.creeper_swell(id, target, dist),
+        }
+    }
+
+    /// Base melee (mirrors `EntityMob::attackTarget`): in-reach, vertical
+    /// overlap, cooldown-gated strength-5 poke.
+    fn zombie_punch(&mut self, id: EntityId, target: EntityId, dist: f32) -> Option<EntityId> {
+        let (overlap, ready) = match (self.entities.get(id), self.entities.get(target)) {
+            (Some(s), Some(t)) => (
+                t.body().bounding_box.max_y > s.body().bounding_box.min_y
+                    && t.body().bounding_box.min_y < s.body().bounding_box.max_y,
+                matches!(s, Entity::Mob(m) if m.attack_cooldown == 0),
+            ),
+            _ => return Some(target),
+        };
+        if dist < 2.5 && overlap && ready {
+            if let Some(Entity::Mob(m)) = self.entities.get_mut(id) {
+                m.attack_cooldown = 20;
+            }
+            self.attack_living(target, 5, Some(id));
+        }
+        Some(target)
+    }
+
+    /// Skeleton volley (mirrors the override): loose an arrow inside
+    /// reach 10 on cooldown 30. NOTE: C++ also writes `moveForward_` here,
+    /// but the mob chase tail unconditionally overwrites it right after,
+    /// so that store is dead and skipped deliberately.
+    fn skeleton_volley(&mut self, id: EntityId, target: EntityId, dist: f32) -> Option<EntityId> {
+        let ready = matches!(self.entities.get(id), Some(Entity::Mob(m)) if m.attack_cooldown == 0);
+        if dist < 10.0 && ready {
+            if let Some(Entity::Mob(m)) = self.entities.get_mut(id) {
+                m.attack_cooldown = 30;
+            }
+            self.spawn_skeleton_arrow(id, target);
+        }
+        Some(target)
+    }
+
+    /// Skeleton arrow (mirrors the ctor + volley sequence): eye-height
+    /// start with the 0.16 yaw backoff (quantized tables), the Java-parity
+    /// +1.4 lift, aim at the victim's eye minus 0.2 with the f32 range
+    /// lift, and 0.6/12.0 launch. The ctor-equivalent spread run is kept
+    /// (draws consumed like C++) with its result discarded unless the
+    /// volley aim degenerates.
+    fn spawn_skeleton_arrow(&mut self, id: EntityId, target: EntityId) {
+        use crate::entity_misc::arrow_shoot_run;
+        use crate::math_helper::{cos, sin};
+        let (sp, yaw, pitch, eye) = match self.entities.get(id) {
+            Some(e) => (e.body().pos, e.body().yaw, e.body().pitch, e.body().height as f64 * 0.85),
+            None => return,
+        };
+        let tp = match self.entities.get(target) {
+            Some(t) => {
+                let te = Self::living_eye_height(t);
+                [t.body().pos[0], t.body().pos[1] + te, t.body().pos[2]]
+            }
+            None => return,
+        };
+        let rad = yaw / 180.0 * std::f32::consts::PI;
+        let (ax, ay, az) =
+            (sp[0] - cos(rad) as f64 * 0.16, sp[1] + eye - 0.1 + 1.4, sp[2] - sin(rad) as f64 * 0.16);
+        let (dx, dz) = (tp[0] - sp[0], tp[2] - sp[2]);
+        let dy = tp[1] - 0.2 - ay;
+        let lift = sqrt_float((dx * dx + dz * dz) as f32) * 0.2;
+        // Ctor-equivalent spread (result discarded; draws consumed).
+        let prad = pitch / 180.0 * std::f32::consts::PI;
+        let (myaw, mpitch) = (rad, prad);
+        let dir = [
+            -sin(myaw) as f64 * cos(mpitch) as f64,
+            -sin(mpitch) as f64,
+            cos(myaw) as f64 * cos(mpitch) as f64,
+        ];
+        let ctor_motion = {
+            let rng = &mut self.rng;
+            arrow_shoot_run(dir[0], dir[1], dir[2], 1.5, 1.0, &mut || rng.next_double())
+        };
+        let motion = {
+            let rng = &mut self.rng;
+            arrow_shoot_run(dx, dy + lift as f64, dz, 0.6, 12.0, &mut || rng.next_double())
+        };
+        let motion = motion.or(ctor_motion).unwrap_or([0.0, 0.0, 0.0]);
+        let (mut fy, mut fp) = (yaw, pitch);
+        unsafe {
+            crate::entity_misc::alpha_arrow_face_velocity(motion[0], motion[1], motion[2], &mut fy, &mut fp);
+        }
+        let nid = self.entities.alloc_id();
+        let mut b = Body::new(nid, 0.5, 0.5, 0.0);
+        b.set_position(ax, ay, az);
+        b.yaw = fy;
+        b.pitch = fp;
+        b.prev_yaw = fy;
+        b.prev_pitch = fp;
+        b.motion = motion;
+        self.entities.insert(Entity::Arrow(crate::entity_table::ArrowEnt {
+            body: b,
+            in_ground: false,
+            shake: 0,
+            ticks_in_ground: 0,
+            ticks_in_air: 0,
+            shooter_id: id,
+            tile: [-1, -1, -1],
+            in_tile: 0,
+        }));
+    }
+
+    /// Spider attack (mirrors the override): drop the target in bright
+    /// light sometimes, pounce from 2..6 blocks on the ground, else the
+    /// reach-2.5 strength-1 bite with no vertical-overlap check (unlike
+    /// the base punch).
+    fn spider_attack(
+        &mut self,
+        id: EntityId,
+        target: EntityId,
+        dist: f32,
+        snap: &mut CreatureSnap,
+    ) -> Option<EntityId> {
+        let (px, min_y, pz, on_ground, motion) = match self.entities.get(id) {
+            Some(e) => (
+                e.body().pos[0],
+                e.body().bounding_box.min_y,
+                e.body().pos[2],
+                e.body().on_ground,
+                e.body().motion,
+            ),
+            None => return Some(target),
+        };
+        if self.brightness(floor_double(px), floor_double(min_y), floor_double(pz)) > 0.5
+            && self.rng.next_int_bound(100) == 0
+        {
+            self.store_mob_target(id, None);
+            snap.path.clear();
+            snap.path_index = 0;
+            return None;
+        }
+        if dist > 2.0 && dist < 6.0 && self.rng.next_int_bound(10) == 0 && on_ground {
+            if let (Some(s), Some(t)) = (self.entities.get(id), self.entities.get(target)) {
+                let (dx, dz) = (t.body().pos[0] - s.body().pos[0], t.body().pos[2] - s.body().pos[2]);
+                let len = (dx * dx + dz * dz).sqrt().max(0.001);
+                if let Some(e) = self.entities.get_mut(id) {
+                    let b = e.body_mut();
+                    b.motion[0] = dx / len * 0.4 + motion[0] * 0.2;
+                    b.motion[2] = dz / len * 0.4 + motion[2] * 0.2;
+                    b.motion[1] = 0.4;
+                }
+            }
+            return Some(target);
+        }
+        let ready = matches!(self.entities.get(id), Some(Entity::Mob(m)) if m.attack_cooldown == 0);
+        if dist < 2.5 && ready {
+            if let Some(Entity::Mob(m)) = self.entities.get_mut(id) {
+                m.attack_cooldown = 20;
+            }
+            self.attack_living(target, 1, Some(id));
+        }
+        Some(target)
+    }
+
+    /// Creeper fuse (mirrors the override): swell while close (3 blocks
+    /// cold, 7 once lit), decay otherwise, explode at 30. The
+    /// `moveForward_` stores are dead like the skeleton's (chase tail
+    /// overwrites) and skipped. The fuse hiss has no native audio yet.
+    fn creeper_swell(&mut self, id: EntityId, target: EntityId, dist: f32) -> Option<EntityId> {
+        let (time, dir) = match self.entities.get(id) {
+            Some(Entity::Mob(m)) => (m.swell_time, m.swell_dir),
+            _ => return Some(target),
+        };
+        let (time, dir) = if (dir <= 0 && dist < 3.0) || (dir > 0 && dist < 7.0) {
+            let time = time + 1;
+            if time >= 30 {
+                if let Some(Entity::Mob(m)) = self.entities.get_mut(id) {
+                    m.swell_time = time;
+                    m.swell_dir = 1;
+                }
+                self.creeper_explode(id);
+                return Some(target);
+            }
+            (time, 1)
+        } else {
+            (if time > 0 { time - 1 } else { time }, -1)
+        };
+        if let Some(Entity::Mob(m)) = self.entities.get_mut(id) {
+            m.swell_time = time;
+            m.swell_dir = dir;
+        }
+        Some(target)
+    }
+
+    /// Creeper blast (mirrors the Alpha inline `explode`): players in
+    /// radius 3 take `12 * (1 - d/3)` (min 1; mobs are immune by the
+    /// `dynamic_cast`), blocks in the rough sphere drop and vanish unless
+    /// unbreakable, and fires start in empty cells. The blast kills
+    /// without drops (C++ sets `isDead` directly, no `onDeath`).
+    fn creeper_explode(&mut self, id: EntityId) {
+        let (px, py, pz) = match self.entities.get(id) {
+            Some(e) => (e.body().pos[0], e.body().pos[1], e.body().pos[2]),
+            None => return,
+        };
+        // Phase 1: players in the blast.
+        let mut victims: Vec<EntityId> = Vec::new();
+        for oid in self.entities.alive_ids() {
+            let hit = match self.entities.get(oid) {
+                Some(Entity::Player(p)) if !p.living.body.dead => {
+                    let (dx, dy, dz) = (
+                        p.living.body.pos[0] - px,
+                        p.living.body.pos[1] - py,
+                        p.living.body.pos[2] - pz,
+                    );
+                    let d = ((dx * dx + dy * dy + dz * dz) as f32).sqrt();
+                    d <= CREEPER_BLAST_RADIUS
+                }
+                _ => false,
+            };
+            if hit {
+                victims.push(oid);
+            }
+        }
+        victims.sort_unstable();
+        for v in victims {
+            let (dx, dy, dz) = match self.entities.get(v) {
+                Some(e) => (e.body().pos[0] - px, e.body().pos[1] - py, e.body().pos[2] - pz),
+                None => continue,
+            };
+            let d = ((dx * dx + dy * dy + dz * dz) as f32).sqrt();
+            let mut damage = (12.0 * (1.0 - d / CREEPER_BLAST_RADIUS)) as i32;
+            if damage < 1 {
+                damage = 1;
+            }
+            self.attack_living(v, damage, Some(id));
+        }
+        // Phase 2: blocks in the rough sphere.
+        let (cx, cy, cz) = (px.floor() as i32, py.floor() as i32, pz.floor() as i32);
+        let r = CREEPER_BLAST_RADIUS as i32;
+        for dx in -r..=r {
+            for dy in -r..=r {
+                for dz in -r..=r {
+                    let d = ((dx * dx + dy * dy + dz * dz) as f32).sqrt();
+                    if d > CREEPER_BLAST_RADIUS {
+                        continue;
+                    }
+                    let (bx, by, bz) = (cx + dx, cy + dy, cz + dz);
+                    let bid = self.get_block_id(bx, by, bz);
+                    if bid == 0 {
+                        continue;
+                    }
+                    if alpha_block_properties_get(bid as u32).hardness < 0.0 {
+                        continue;
+                    }
+                    if self.rng.next_float() <= 1.0 - d / CREEPER_BLAST_RADIUS {
+                        self.spawn_item_entity(
+                            bid as i32, 1, 0, bx as f64 + 0.5, by as f64 + 0.5, bz as f64 + 0.5,
+                        );
+                        self.set_block_id(bx, by, bz, 0);
+                    }
+                }
+            }
+        }
+        // Phase 3: fires in empty cells near burnables or soil.
+        for fx in cx - r..=cx + r {
+            for fz in cz - r..=cz + r {
+                for fy in cy - r..=cy + r {
+                    let d = (((fx - cx) * (fx - cx) + (fy - cy) * (fy - cy) + (fz - cz) * (fz - cz))
+                        as f32)
+                        .sqrt();
+                    if d > CREEPER_BLAST_RADIUS {
+                        continue;
+                    }
+                    if self.get_block_id(fx, fy, fz) != 0 {
+                        continue;
+                    }
+                    if self.rng.next_int_bound(5) != 0 {
+                        continue;
+                    }
+                    if self.block_allows_attachment(fx, fy - 1, fz) {
+                        self.set_block_id(fx, fy, fz, FIRE_BLOCK_ID);
+                    } else {
+                        const OFF: [[i32; 3]; 6] =
+                            [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+                        for o in OFF {
+                            let nid = self.get_block_id(fx + o[0], fy + o[1], fz + o[2]);
+                            if nid == 0 {
+                                continue;
+                            }
+                            let mat = material_of(alpha_block_properties_get(nid as u32).material);
+                            if mat.get_burning() {
+                                self.set_block_id(fx, fy, fz, FIRE_BLOCK_ID);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(e) = self.entities.get_mut(id) {
+            e.body_mut().dead = true;
+        }
+    }
+
+    /// Soil check for fire (mirrors `doesBlockAllowAttachment`: solid and
+    /// movement-blocking material).
+    fn block_allows_attachment(&self, x: i32, y: i32, z: i32) -> bool {
+        let bid = self.get_block_id(x, y, z);
+        if bid == 0 {
+            return false;
+        }
+        let mat = material_of(alpha_block_properties_get(bid as u32).material);
+        mat.is_solid() && mat.blocks_movement()
+    }
+
+    /// Arrow tick (mirrors `EntityArrow::tick`): face init, shake decay,
+    /// stuck-block tracking (1200-tick despawn, pop-out jitter), block
+    /// sweep with AABB clips, entity sweep for 4 damage, then ballistic
+    /// flight with yaw smoothing and water drag. Fire/cactus contacts
+    /// arrive with the env-state slice.
+    pub fn tick_arrow(&mut self, id: EntityId) {
+        use crate::vec3d::Vec3D;
+        self.entities.tick_base(id);
+        let alive = match self.entities.get(id) {
+            Some(Entity::Arrow(a)) if !a.body.dead => true,
+            _ => return,
+        };
+        let _ = alive;
+        // Face from motion while both prev angles are still zero.
+        let (mx, my, mz, yaw, pitch, pyaw, ppitch) = match self.entities.get(id) {
+            Some(Entity::Arrow(a)) => (
+                a.body.motion[0], a.body.motion[1], a.body.motion[2], a.body.yaw, a.body.pitch,
+                a.body.prev_yaw, a.body.prev_pitch,
+            ),
+            _ => return,
+        };
+        if ppitch == 0.0 && pyaw == 0.0 {
+            let (mut fy, mut fp) = (yaw, pitch);
+            let faced = unsafe {
+                crate::entity_misc::alpha_arrow_face_velocity(mx, my, mz, &mut fy, &mut fp)
+            };
+            if faced {
+                if let Some(Entity::Arrow(a)) = self.entities.get_mut(id) {
+                    a.body.prev_yaw = fy;
+                    a.body.yaw = fy;
+                    a.body.prev_pitch = fp;
+                    a.body.pitch = fp;
+                }
+            }
+        }
+        if let Some(Entity::Arrow(a)) = self.entities.get_mut(id) {
+            if a.shake > 0 {
+                a.shake -= 1;
+            }
+        }
+        // Stuck handling.
+        let stuck_outcome = match self.entities.get(id) {
+            Some(Entity::Arrow(a)) if a.in_ground => {
+                if self.get_block_id(a.tile[0], a.tile[1], a.tile[2]) as i32 == a.in_tile {
+                    let old = a.ticks_in_ground;
+                    if let Some(Entity::Arrow(x)) = self.entities.get_mut(id) {
+                        x.ticks_in_ground = old + 1;
+                    }
+                    if old + 1 >= 1200 {
+                        if let Some(Entity::Arrow(x)) = self.entities.get_mut(id) {
+                            x.body.dead = true;
+                        }
+                    }
+                    true // stay (dead or still stuck)
+                } else {
+                    false // popped out below
+                }
+            }
+            _ => false,
+        };
+        if stuck_outcome {
+            return;
+        }
+        let popped = matches!(self.entities.get(id), Some(Entity::Arrow(a)) if a.in_ground);
+        if popped {
+            let (jx, jy, jz) =
+                (self.rng.next_double(), self.rng.next_double(), self.rng.next_double());
+            if let Some(Entity::Arrow(a)) = self.entities.get_mut(id) {
+                a.body.motion[0] *= jx * 0.2;
+                a.body.motion[1] *= jy * 0.2;
+                a.body.motion[2] *= jz * 0.2;
+                a.in_ground = false;
+                a.ticks_in_ground = 0;
+                a.ticks_in_air = 0;
+            }
+        } else if let Some(Entity::Arrow(a)) = self.entities.get_mut(id) {
+            a.ticks_in_air += 1;
+        }
+        let (pos, motion, bbox) = match self.entities.get(id) {
+            Some(Entity::Arrow(a)) => (a.body.pos, a.body.motion, a.body.bounding_box.clone()),
+            _ => return,
+        };
+        let start = Vec3D::new(pos[0], pos[1], pos[2]);
+        let end = Vec3D::new(pos[0] + motion[0], pos[1] + motion[1], pos[2] + motion[2]);
+        // Block sweep over the padded flight box (nearest clip wins).
+        let sweep = bbox.add_coord(motion[0], motion[1], motion[2]).expand(1.0, 1.0, 1.0);
+        let (min_x, min_y, min_z) = (
+            floor_double(sweep.min_x), floor_double(sweep.min_y), floor_double(sweep.min_z),
+        );
+        let (max_x, max_y, max_z) = (
+            floor_double(sweep.max_x), floor_double(sweep.max_y), floor_double(sweep.max_z),
+        );
+        let mut block_hit: Option<(i32, i32, i32, i32, Vec3D, f64)> = None;
+        for x in min_x..=max_x {
+            for y in min_y..=max_y {
+                for z in min_z..=max_z {
+                    let bid = self.get_block_id(x, y, z);
+                    if bid == 0 {
+                        continue;
+                    }
+                    let props = alpha_block_properties_get(bid as u32);
+                    if !has_collision_box(props.block_type) {
+                        continue;
+                    }
+                    let bb = AxisAlignedBB::get_bounding_box(
+                        x as f64 + props.min_x as f64,
+                        y as f64 + props.min_y as f64,
+                        z as f64 + props.min_z as f64,
+                        x as f64 + props.max_x as f64,
+                        y as f64 + props.max_y as f64,
+                        z as f64 + props.max_z as f64,
+                    );
+                    if let Some(hit) = bb.clip(&start, &end) {
+                        let d = start.square_distance_to(&hit.hit_vec);
+                        if block_hit.map(|(_, _, _, _, _, bd)| d < bd).unwrap_or(true) {
+                            block_hit = Some((x, y, z, bid as i32, hit.hit_vec, d));
+                        }
+                    }
+                }
+            }
+        }
+        // Entity sweep (anything collidable: mobs, animals, players, boats,
+        // items — arrows themselves are not; the shooter is immune while
+        // the arrow is young).
+        let (shooter, ticks_in_air) = match self.entities.get(id) {
+            Some(Entity::Arrow(a)) => (a.shooter_id, a.ticks_in_air),
+            _ => return,
+        };
+        let mut best = block_hit.map(|(_, _, _, _, _, d)| d).unwrap_or(f64::MAX);
+        let mut entity_hit: Option<EntityId> = None;
+        let mut cands: Vec<EntityId> = Vec::new();
+        for oid in self.entities.alive_ids() {
+            if oid == id {
+                continue;
+            }
+            if matches!(self.entities.get(oid), Some(Entity::Arrow(_))) {
+                continue;
+            }
+            if oid == shooter && ticks_in_air < 5 {
+                continue;
+            }
+            if let Some(o) = self.entities.get(oid) {
+                if sweep.intersects_with(&o.body().bounding_box) {
+                    cands.push(oid);
+                }
+            }
+        }
+        cands.sort_unstable();
+        for oid in cands {
+            let expanded = match self.entities.get(oid) {
+                Some(o) => o.body().bounding_box.expand(0.3, 0.3, 0.3),
+                None => continue,
+            };
+            if let Some(hit) = expanded.clip(&start, &end) {
+                let d = start.square_distance_to(&hit.hit_vec);
+                if d < best {
+                    best = d;
+                    entity_hit = Some(oid);
+                }
+            }
+        }
+        if let Some(v) = entity_hit {
+            let shooter_living = match self.entities.get(shooter) {
+                Some(Entity::Mob(_)) | Some(Entity::Animal(_)) | Some(Entity::Player(_)) => {
+                    Some(shooter)
+                }
+                _ => None,
+            };
+            match self.entities.get(v) {
+                Some(Entity::Boat(_)) => {
+                    self.damage_boat(v, 4);
+                }
+                Some(Entity::Mob(_)) | Some(Entity::Animal(_)) | Some(Entity::Player(_)) => {
+                    self.attack_living(v, 4, shooter_living);
+                }
+                _ => {}
+            }
+            if let Some(Entity::Arrow(a)) = self.entities.get_mut(id) {
+                a.body.dead = true;
+            }
+            return;
+        }
+        if let Some((hx, hy, hz, bid, hit_vec, _)) = block_hit {
+            if let Some(Entity::Arrow(a)) = self.entities.get_mut(id) {
+                a.tile = [hx, hy, hz];
+                a.in_tile = bid;
+                a.body.set_position(hit_vec.x_coord, hit_vec.y_coord, hit_vec.z_coord);
+                a.in_ground = true;
+                a.shake = 7;
+            }
+            return;
+        }
+        // Free flight with yaw smoothing and drag.
+        let (mx, my, mz) = match self.entities.get(id) {
+            Some(Entity::Arrow(a)) => (a.body.motion[0], a.body.motion[1], a.body.motion[2]),
+            _ => return,
+        };
+        let horizontal = sqrt_float((mx * mx + mz * mz) as f32);
+        let mut yaw = (mx.atan2(mz) * 180.0 / std::f64::consts::PI) as f32;
+        let mut pitch = (my.atan2(horizontal as f64) * 180.0 / std::f64::consts::PI) as f32;
+        let (mut prev_yaw, mut prev_pitch) = match self.entities.get(id) {
+            Some(Entity::Arrow(a)) => (a.body.prev_yaw, a.body.prev_pitch),
+            _ => return,
+        };
+        while pitch - prev_pitch < -180.0 {
+            prev_pitch -= 360.0;
+        }
+        while pitch - prev_pitch >= 180.0 {
+            prev_pitch -= 360.0;
+        }
+        while yaw - prev_yaw < -180.0 {
+            prev_yaw -= 360.0;
+        }
+        while yaw - prev_yaw >= 180.0 {
+            prev_yaw -= 360.0;
+        }
+        pitch = prev_pitch + (pitch - prev_pitch) * 0.2;
+        yaw = prev_yaw + (yaw - prev_yaw) * 0.2;
+        // Water drag (local probe; the env slice will own `in_water`).
+        let probe = match self.entities.get(id) {
+            Some(Entity::Arrow(a)) => a.body.bounding_box.expand(0.0, -0.4, 0.0),
+            _ => return,
+        };
+        let mut in_water = false;
+        for x in floor_double(probe.min_x)..=floor_double(probe.max_x) {
+            for y in floor_double(probe.min_y)..=floor_double(probe.max_y) {
+                for z in floor_double(probe.min_z)..=floor_double(probe.max_z) {
+                    if self.material_at(x, y, z) == Material::WATER {
+                        in_water = true;
+                        break;
+                    }
+                }
+                if in_water {
+                    break;
+                }
+            }
+            if in_water {
+                break;
+            }
+        }
+        let drag = if in_water { 0.8f32 } else { 0.99f32 };
+        if let Some(Entity::Arrow(a)) = self.entities.get_mut(id) {
+            a.body.prev_yaw = prev_yaw;
+            a.body.prev_pitch = prev_pitch;
+            a.body.yaw = yaw;
+            a.body.pitch = pitch;
+            a.body.motion[0] = mx * drag as f64;
+            a.body.motion[1] = my * drag as f64 - 0.03;
+            a.body.motion[2] = mz * drag as f64;
+            let (px, py, pz) = (a.body.pos[0] + mx, a.body.pos[1] + my, a.body.pos[2] + mz);
+            // NOTE: C++ integrates the pre-drag motion, then damps.
+            a.body.set_position(px, py, pz);
         }
     }
 }

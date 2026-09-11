@@ -765,6 +765,8 @@ mod tests {
             burn_ticks: 0,
             path: Vec::new(),
             path_index: 0,
+            swell_time: 0,
+            swell_dir: -1,
         }));
         let row = table.get(id).unwrap();
         let tracked = TrackedEntity::from_entity(row, 0, 160, 3, false).unwrap();
