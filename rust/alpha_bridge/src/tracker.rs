@@ -639,7 +639,6 @@ impl Tracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entity_table::AnimalKind;
 
     fn observer(id: EntityId, x: f64, z: f64) -> Observer {
         Observer { id, pos: [x, 64.0, z], alive: true }
@@ -774,6 +773,7 @@ mod tests {
         table.insert(crate::entity_table::Entity::Animal(crate::entity_table::AnimalEnt {
             living: l2,
             kind: crate::entity_table::AnimalKind::Cow,
+            sheared: false,
         }));
         let row2 = table.get(id2).unwrap();
         let tracked2 = TrackedEntity::from_entity(row2, 0, 160, 3, false).unwrap();
