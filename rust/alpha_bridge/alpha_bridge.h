@@ -996,6 +996,12 @@ bool alpha_tracker_in_range(double player_x, double player_z,
                             int32_t last_fixed_x, int32_t last_fixed_z,
                             int32_t tracking_range);
 
+// Mob spawning math (mob_spawning.rs). Pure functions, no allocation.
+int32_t alpha_spawn_max_count(int32_t num_eligible_chunks, int32_t budget_per_256);
+int32_t alpha_spawn_pack_offset(int32_t first, int32_t second);
+bool alpha_spawn_too_close_to_spawn(float fx, float fy, float fz,
+                                    int32_t spawn_x, int32_t spawn_y, int32_t spawn_z);
+
 #ifdef __cplusplus
 }
 #endif

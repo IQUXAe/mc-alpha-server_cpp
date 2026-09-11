@@ -112,4 +112,10 @@ bool trackerInRange(double playerX, double playerZ,
                     int32_t lastFixedX, int32_t lastFixedZ,
                     int32_t trackingRange);
 
+// Mob spawning math (pure functions, no allocation)
+int32_t spawnMaxCount(int32_t numEligibleChunks, int32_t budgetPer256);
+int32_t spawnPackOffset(int32_t first, int32_t second);
+bool spawnTooCloseToSpawn(float fx, float fy, float fz,
+                          int32_t spawnX, int32_t spawnY, int32_t spawnZ);
+
 } // namespace RustBridge

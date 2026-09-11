@@ -245,4 +245,17 @@ bool trackerInRange(double playerX, double playerZ,
     return ::alpha_tracker_in_range(playerX, playerZ, lastFixedX, lastFixedZ, trackingRange);
 }
 
+int32_t spawnMaxCount(int32_t numEligibleChunks, int32_t budgetPer256) {
+    return ::alpha_spawn_max_count(numEligibleChunks, budgetPer256);
+}
+
+int32_t spawnPackOffset(int32_t first, int32_t second) {
+    return ::alpha_spawn_pack_offset(first, second);
+}
+
+bool spawnTooCloseToSpawn(float fx, float fy, float fz,
+                          int32_t spawnX, int32_t spawnY, int32_t spawnZ) {
+    return ::alpha_spawn_too_close_to_spawn(fx, fy, fz, spawnX, spawnY, spawnZ);
+}
+
 } // namespace RustBridge

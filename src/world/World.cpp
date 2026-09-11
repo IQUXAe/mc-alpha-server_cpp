@@ -1691,7 +1691,7 @@ void World::spawnHostileMobs() {
     std::sort(eligibleChunks.begin(), eligibleChunks.end());
     eligibleChunks.erase(std::unique(eligibleChunks.begin(), eligibleChunks.end()), eligibleChunks.end());
 
-    const int maxCreatures = 100 * static_cast<int>(eligibleChunks.size()) / 256;
+    const int maxCreatures = RustBridge::spawnMaxCount(static_cast<int>(eligibleChunks.size()), 100);
     if (countHostileMobs() > maxCreatures) {
         return;
     }
@@ -1737,8 +1737,14 @@ void World::spawnHostileMobs() {
             int z = originZ;
 
             for (int packAttempt = 0; packAttempt < 4; ++packAttempt) {
-                x += spread6(rand) - spread6(rand);
-                z += spread6(rand) - spread6(rand);
+                // Pack-spread step owned by Rust (mob_spawning.rs): triangular [-5, 5].
+                // Draws stay here so World::rand keeps its exact sequence.
+                const int spreadAx = spread6(rand);
+                const int spreadBx = spread6(rand);
+                const int spreadAz = spread6(rand);
+                const int spreadBz = spread6(rand);
+                x += RustBridge::spawnPackOffset(spreadAx, spreadBx);
+                z += RustBridge::spawnPackOffset(spreadAz, spreadBz);
 
                 if (!isBlockSolidNoChunkLoad(x, y - 1, z)
                     || isBlockSolidNoChunkLoad(x, y, z)
@@ -1754,10 +1760,8 @@ void World::spawnHostileMobs() {
                     continue;
                 }
 
-                const float dsx = fx - static_cast<float>(spawnX);
-                const float dsy = fy - static_cast<float>(spawnY);
-                const float dsz = fz - static_cast<float>(spawnZ);
-                if (dsx * dsx + dsy * dsy + dsz * dsz < 576.0f) {
+                // World-spawn exclusion owned by Rust (mob_spawning.rs, 576.0 = 24^2).
+                if (RustBridge::spawnTooCloseToSpawn(fx, fy, fz, spawnX, spawnY, spawnZ)) {
                     continue;
                 }
 
@@ -1827,7 +1831,7 @@ void World::spawnPassiveMobs() {
     std::sort(eligibleChunks.begin(), eligibleChunks.end());
     eligibleChunks.erase(std::unique(eligibleChunks.begin(), eligibleChunks.end()), eligibleChunks.end());
 
-    const int maxCreatures = 20 * static_cast<int>(eligibleChunks.size()) / 256;
+    const int maxCreatures = RustBridge::spawnMaxCount(static_cast<int>(eligibleChunks.size()), 20);
     if (countPassiveAnimals() > maxCreatures) {
         return;
     }
@@ -1868,8 +1872,14 @@ void World::spawnPassiveMobs() {
             int z = originZ;
 
             for (int packAttempt = 0; packAttempt < 4; ++packAttempt) {
-                x += spread6(rand) - spread6(rand);
-                z += spread6(rand) - spread6(rand);
+                // Pack-spread step owned by Rust (mob_spawning.rs): triangular [-5, 5].
+                // Draws stay here so World::rand keeps its exact sequence.
+                const int spreadAx = spread6(rand);
+                const int spreadBx = spread6(rand);
+                const int spreadAz = spread6(rand);
+                const int spreadBz = spread6(rand);
+                x += RustBridge::spawnPackOffset(spreadAx, spreadBx);
+                z += RustBridge::spawnPackOffset(spreadAz, spreadBz);
 
                 if (!isBlockSolidNoChunkLoad(x, y - 1, z)
                     || isBlockSolidNoChunkLoad(x, y, z)
@@ -1885,10 +1895,8 @@ void World::spawnPassiveMobs() {
                     continue;
                 }
 
-                const float dsx = fx - static_cast<float>(spawnX);
-                const float dsy = fy - static_cast<float>(spawnY);
-                const float dsz = fz - static_cast<float>(spawnZ);
-                if (dsx * dsx + dsy * dsy + dsz * dsz < 576.0f) {
+                // World-spawn exclusion owned by Rust (mob_spawning.rs, 576.0 = 24^2).
+                if (RustBridge::spawnTooCloseToSpawn(fx, fy, fz, spawnX, spawnY, spawnZ)) {
                     continue;
                 }
 
