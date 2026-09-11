@@ -882,6 +882,7 @@ impl World {
         self.seed = seed;
         self.spawn = spawn;
         self.time = time;
+        self.reseed();
         true
     }
 

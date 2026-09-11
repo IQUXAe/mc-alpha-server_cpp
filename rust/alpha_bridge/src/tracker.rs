@@ -81,6 +81,10 @@ impl TrackedEntity {
         Some(match e {
             Entity::Player(p) => TrackedEntity {
                 kind: TrackKind::Player { username: p.username.clone(), held },
+                // Players are living rows too: hurt flashes and sneak
+                // ride the tracker like the C++ TrackerEntry does.
+                health: Some(p.living.health),
+                sneaking: p.living.sneaking,
                 is_player: true,
                 ..base
             },
@@ -329,6 +333,13 @@ impl Tracker {
 
     pub fn is_tracking(&self, id: EntityId, player: EntityId) -> bool {
         self.entries.get(&id).map(|e| e.tracking.contains(&player)).unwrap_or(false)
+    }
+
+    /// Silently drop entries the predicate rejects (mirrors the C++
+    /// `tick` erase of dead/missing rows; the logout destroy packet
+    /// stays in [`Tracker::remove`]).
+    pub fn prune(&mut self, keep: &dyn Fn(EntityId) -> bool) {
+        self.entries.retain(|id, _| keep(*id));
     }
 
     /// Current watchers of an entity (mirrors `TrackerEntry.trackingPlayers`;

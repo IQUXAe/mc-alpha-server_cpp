@@ -93,19 +93,24 @@ pub enum ConnEvent {
 pub struct Conn {
     inbound: Receiver<ConnEvent>,
     outbound: Sender<Vec<u8>>,
-    shutdown: Option<TcpStream>,
+    closer: Sender<()>,
+    release: Option<TcpStream>,
     pub remote: String,
 }
 
 impl Conn {
     pub fn new(stream: TcpStream) -> std::io::Result<Self> {
         let remote = stream.peer_addr().map(|a| a.to_string()).unwrap_or_default();
-        stream.set_read_timeout(Some(Duration::from_secs(30)))?;
-        let shutdown = stream.try_clone().ok();
+        // Blocking reads like the C++ network manager: idle policy lives
+        // one level up (login 600 / play 1200 ticks with dead bypass), so
+        // the socket layer must not pre-empt it (death screens go quiet).
+        stream.set_read_timeout(None)?;
+        let release = stream.try_clone().ok();
         let mut reader = stream.try_clone()?;
         let mut writer = stream;
         let (tx_in, inbound) = mpsc::channel();
         let (outbound, rx_out): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::channel();
+        let (closer, close_rx): (Sender<()>, Receiver<()>) = mpsc::channel();
 
         thread::Builder::new()
             .name(format!("conn-read-{remote}"))
@@ -131,16 +136,38 @@ impl Conn {
 
         thread::Builder::new()
             .name(format!("conn-write-{remote}"))
-            .spawn(move || {
-                while let Ok(msg) = rx_out.recv() {
-                    if writer.write_all(&msg).is_err() || writer.flush().is_err() {
-                        break;
+            .spawn({
+                let remote = remote.clone();
+                move || {
+                // Drain-then-FIN: queued kick bytes must reach the client,
+                // so close only stops the writer after the queue empties
+                // (a Both-shutdown here would RST pending data away).
+                loop {
+                    while let Ok(msg) = rx_out.try_recv() {
+                        if writer.write_all(&msg).is_err() || writer.flush().is_err() {
+                            return;
+                        }
                     }
+                    if close_rx.try_recv().is_ok() {
+                        let _ = writer.flush();
+                        let _ = writer.shutdown(std::net::Shutdown::Write);
+                        return;
+                    }
+                    match rx_out.recv_timeout(Duration::from_millis(20)) {
+                        Ok(msg) => {
+                            if writer.write_all(&msg).is_err() || writer.flush().is_err() {
+                                return;
+                            }
+                        }
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                    }
+                }
                 }
             })
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-        Ok(Self { inbound, outbound, shutdown, remote })
+        Ok(Self { inbound, outbound, closer, release, remote })
     }
 
     /// Non-blocking drain of queued events.
@@ -157,12 +184,13 @@ impl Conn {
         let _ = self.outbound.send(bytes);
     }
 
-    /// Force the socket shut (unblocks the read thread; the server
-    /// calls this on kick/timeout/shutdown so ghost threads cannot
-    /// linger behind dropped entries).
+    /// Graceful close: the writer drains queued bytes and FINs (the
+    /// server calls this on kick/timeout/shutdown); the blocked reader
+    /// is released separately so ghost threads cannot linger.
     pub fn close(&self) {
-        if let Some(s) = &self.shutdown {
-            let _ = s.shutdown(std::net::Shutdown::Both);
+        let _ = self.closer.send(());
+        if let Some(s) = &self.release {
+            let _ = s.shutdown(std::net::Shutdown::Read);
         }
     }
 }
@@ -678,7 +706,9 @@ impl PlaySession {
     }
 
     fn is_op(&self, ctx: &SessionCtx) -> bool {
-        ctx.ops.contains(self.username(ctx.world))
+        // Ops store lowercased like C++; the query lowercases too
+        // (mirrors `isOp`, so mixed-case names keep their rights).
+        ctx.ops.contains(&self.username(ctx.world).to_ascii_lowercase())
     }
 
     /// Teleport (mirrors `NetServerHandler::teleport`, stance y+1.62).
@@ -1619,7 +1649,8 @@ static USE_TABLE: ItemUseWorld = ItemUseWorld {
 extern "C" fn chat_is_op() -> bool {
     with_use_ctx(
         |w, pid, _, ops| match w.entities.get(pid) {
-            Some(Entity::Player(p)) => ops.contains(&p.username),
+            // Ops store lowercased; the query lowercases like C++ isOp.
+            Some(Entity::Player(p)) => ops.contains(&p.username.to_ascii_lowercase()),
             _ => false,
         },
         false,
@@ -2676,7 +2707,7 @@ mod play_tests {
         assert_eq!(w.get_block_id(3, 64, 4), 1);
         // Ops dig through.
         let mut ops_set = HashSet::new();
-        ops_set.insert("Steve".to_string());
+        ops_set.insert("steve".to_string());
         w.set_block_id(3, 64, 4, 50);
         {
             let mut c = SessionCtx {
@@ -2842,7 +2873,7 @@ mod play_tests {
         )));
         // Op /give drops dirt at the player.
         let mut ops_set = HashSet::new();
-        ops_set.insert("Steve".to_string());
+        ops_set.insert("steve".to_string());
         {
             let mut c = SessionCtx {
                 world: &mut w, ops: &ops_set, spawn_protection: 0, pvp: true, broadcast: &mut bc,

@@ -192,6 +192,25 @@ impl World {
         self.chunks.get(&(cx, cz))
     }
 
+    /// Crate-visible mutable chunk lookup (the server clears the
+    /// save-dirty flag after flushing a chunk to the store).
+    pub(crate) fn chunk_ref_mut(&mut self, cx: i32, cz: i32) -> Option<&mut Chunk> {
+        self.chunks.get_mut(&(cx, cz))
+    }
+
+    /// Loaded chunk coordinates (mirrors the `chunks_` snapshot at the
+    /// head of the C++ `saveWorld`).
+    pub(crate) fn loaded_chunk_coords(&self) -> Vec<(i32, i32)> {
+        self.chunks.keys().copied().collect()
+    }
+
+    /// Reseed the world RNG stream from the current seed (mirrors the C++
+    /// world loading its seed before use; `load_level_from` calls this so
+    /// a loaded world does not keep the constructor stream).
+    pub(crate) fn reseed(&mut self) {
+        self.rng = JavaRandom::new(self.seed);
+    }
+
     /// Crate-visible RNG draws (driver shims share the world stream).
     pub(crate) fn rng_next_int(&mut self, bound: i32) -> i32 {
         if bound <= 0 {
@@ -5510,6 +5529,17 @@ impl World {
             if let Some(chunk) = self.chunks.remove(&(cx, cz)) {
                 self.unloaded.insert((cx, cz), chunk);
             }
+        }
+    }
+
+    /// Recall every staged chunk (the server calls this before a world
+    /// save: native unloads stage to memory without hitting the disk,
+    /// while C++ unloads save through, so staged edits must be pulled
+    /// back before the flush or they die in memory).
+    pub(crate) fn recall_all_staged(&mut self) {
+        let keys: Vec<(i32, i32)> = self.unloaded.keys().copied().collect();
+        for (cx, cz) in keys {
+            self.recall_chunk(cx, cz);
         }
     }
 
