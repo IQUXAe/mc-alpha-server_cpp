@@ -134,7 +134,12 @@ int32_t spawnPassive(const SpawnerWorld* world,
 
 // Block behaviors (Rust owns decisions; C++ owns registry/objects)
 using BlockTickWorld = ::BlockTickWorld;
+using FireWorld = ::FireWorld;
 using TickAction = ::TickAction;
+void blockFireTick(const FireWorld* w, uint8_t fireId, int32_t tickRate, int32_t x, int32_t y, int32_t z);
+bool blockFireCanPlace(const FireWorld* w, int32_t x, int32_t y, int32_t z);
+void blockFireNeighbor(const FireWorld* w, int32_t x, int32_t y, int32_t z);
+void blockFireAdded(const FireWorld* w, uint8_t fireId, int32_t tickRate, int32_t x, int32_t y, int32_t z);
 void blockSandAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
 void blockSandNeighbor(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
 void blockSandTick(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);

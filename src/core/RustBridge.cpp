@@ -416,6 +416,22 @@ bool blockBaseDrop(const BlockTickWorld* w, int32_t itemId, int32_t count, int32
     return ::block_base_drop(w, itemId, count, damage, x, y, z, chance);
 }
 
+void blockFireTick(const FireWorld* w, uint8_t fireId, int32_t tickRate, int32_t x, int32_t y, int32_t z) {
+    ::block_fire_tick(w, fireId, tickRate, x, y, z);
+}
+
+bool blockFireCanPlace(const FireWorld* w, int32_t x, int32_t y, int32_t z) {
+    return ::block_fire_can_place(w, x, y, z);
+}
+
+void blockFireNeighbor(const FireWorld* w, int32_t x, int32_t y, int32_t z) {
+    ::block_fire_neighbor(w, x, y, z);
+}
+
+void blockFireAdded(const FireWorld* w, uint8_t fireId, int32_t tickRate, int32_t x, int32_t y, int32_t z) {
+    ::block_fire_added(w, fireId, tickRate, x, y, z);
+}
+
 bool entityResolveMove(const FfiAabb& box, double dx, double dy, double dz,
                        const FfiAabb* boxes, size_t numBoxes, ResolvedMove* out) {
     return ::alpha_entity_resolve_move(&box, dx, dy, dz, boxes, numBoxes, out);

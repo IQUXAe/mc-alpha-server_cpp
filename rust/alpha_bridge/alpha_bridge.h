@@ -1109,6 +1109,20 @@ void block_soil_walking(const BlockTickWorld* world, int32_t x, int32_t y, int32
 void block_soil_neighbor(const BlockTickWorld* world, uint8_t block_id, int32_t x, int32_t y, int32_t z);
 bool block_base_drop(const BlockTickWorld* world, int32_t item_id, int32_t count, int32_t damage, int32_t x, int32_t y, int32_t z, float chance);
 
+// Fire behavior (block_fire.rs). FireWorld pairs the shared tick table
+// with the TNT-detonation hook (virtual dispatch, stays in C++).
+typedef struct FireWorld {
+    const BlockTickWorld* base;
+    void (*detonate_tnt)(int32_t x, int32_t y, int32_t z);
+} FireWorld;
+
+void block_fire_tick(const FireWorld* world, uint8_t fire_id, int32_t tick_rate,
+                     int32_t x, int32_t y, int32_t z);
+bool block_fire_can_place(const FireWorld* world, int32_t x, int32_t y, int32_t z);
+void block_fire_neighbor(const FireWorld* world, int32_t x, int32_t y, int32_t z);
+void block_fire_added(const FireWorld* world, uint8_t fire_id, int32_t tick_rate,
+                      int32_t x, int32_t y, int32_t z);
+
 // Entity physics kernel (entity_physics.rs). Pure collision/fall/push math;
 // the world-dependent half (box gathering, onFall, velocity) stays in C++.
 typedef struct FfiAabb {

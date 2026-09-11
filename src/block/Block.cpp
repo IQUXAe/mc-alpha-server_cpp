@@ -13,7 +13,8 @@
 #include "../world/TileEntityFurnace.h"
 #include "../world/TileEntitySign.h"
 #include "../../rust/alpha_bridge/alpha_bridge.h"
-static thread_local World* current_world = nullptr;
+#include "BlockTickWorld.h"
+thread_local World* gBlockTickWorld = nullptr;
 #include "../entity/EntityItem.h"
 #include "../entity/EntityFallingSand.h"
 #include "../core/Item.h"
@@ -42,99 +43,92 @@ void markBlocksForUpdate(World* world, int minX, int minY, int minZ, int maxX, i
 
 } // namespace
 
-// Block-behavior FFI trampolines: Rust owns the decisions (block_ticks.rs);
-// these feed it RNG draws, block storage/light, scheduling, and spawning.
-// current_world is set by BlockTickGuard for the duration of each call.
-namespace {
-
-struct BlockTickGuard {
-    explicit BlockTickGuard(World* world) { current_world = world; }
-    ~BlockTickGuard() { current_world = nullptr; }
-};
+// Block-behavior FFI trampolines (declared in BlockTickWorld.h).
+// Guard and table builders live in the header; this file owns the definitions.
 
 extern "C" int32_t blockTickNextInt(int32_t bound) {
     std::uniform_int_distribution<int> dist(0, bound - 1);
-    return dist(current_world->rand);
+    return dist(gBlockTickWorld->rand);
 }
 
 extern "C" float blockTickNextFloat01() {
     std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-    return dist(current_world->rand);
+    return dist(gBlockTickWorld->rand);
 }
 
 extern "C" uint64_t blockTickNextU64() {
-    return current_world->rand();
+    return gBlockTickWorld->rand();
 }
 
 extern "C" uint8_t blockTickGetId(int32_t x, int32_t y, int32_t z) {
-    return current_world->getBlockId(x, y, z);
+    return gBlockTickWorld->getBlockId(x, y, z);
 }
 
 extern "C" uint8_t blockTickGetIdNc(int32_t x, int32_t y, int32_t z) {
-    return current_world->getBlockIdNoChunkLoad(x, y, z);
+    return gBlockTickWorld->getBlockIdNoChunkLoad(x, y, z);
 }
 
 extern "C" uint8_t blockTickGetMeta(int32_t x, int32_t y, int32_t z) {
-    return current_world->getBlockMetadata(x, y, z);
+    return gBlockTickWorld->getBlockMetadata(x, y, z);
 }
 
 extern "C" void blockTickSet(int32_t x, int32_t y, int32_t z, uint8_t id) {
-    current_world->setBlock(x, y, z, id);
+    gBlockTickWorld->setBlock(x, y, z, id);
 }
 
 extern "C" void blockTickSetMeta(int32_t x, int32_t y, int32_t z, uint8_t meta) {
-    current_world->setBlockMetadata(x, y, z, meta);
+    gBlockTickWorld->setBlockMetadata(x, y, z, meta);
 }
 
 extern "C" void blockTickSetNotify(int32_t x, int32_t y, int32_t z, uint8_t id) {
-    current_world->setBlockWithNotify(x, y, z, id);
+    gBlockTickWorld->setBlockWithNotify(x, y, z, id);
 }
 
 extern "C" void blockTickSetUpdate(int32_t x, int32_t y, int32_t z, uint8_t id) {
-    current_world->setBlockAndUpdate(x, y, z, id);
+    gBlockTickWorld->setBlockAndUpdate(x, y, z, id);
 }
 
 extern "C" void blockTickSetMetaNotify(int32_t x, int32_t y, int32_t z, uint8_t id, uint8_t meta) {
-    current_world->setBlockAndMetadataWithNotify(x, y, z, id, meta);
+    gBlockTickWorld->setBlockAndMetadataWithNotify(x, y, z, id, meta);
 }
 
 extern "C" void blockTickSetAndMeta(int32_t x, int32_t y, int32_t z, uint8_t id, uint8_t meta) {
-    current_world->setBlockAndMetadata(x, y, z, id, meta);
+    gBlockTickWorld->setBlockAndMetadata(x, y, z, id, meta);
 }
 
 extern "C" int32_t blockTickLight(int32_t x, int32_t y, int32_t z) {
-    return current_world->getBlockLightValue(x, y, z);
+    return gBlockTickWorld->getBlockLightValue(x, y, z);
 }
 
 extern "C" bool blockTickSeeSky(int32_t x, int32_t y, int32_t z) {
-    return current_world->canBlockSeeSky(x, y, z);
+    return gBlockTickWorld->canBlockSeeSky(x, y, z);
 }
 
 extern "C" bool blockTickAttachWorld(int32_t x, int32_t y, int32_t z) {
-    return current_world->doesBlockAllowAttachment(x, y, z);
+    return gBlockTickWorld->doesBlockAllowAttachment(x, y, z);
 }
 
 extern "C" bool blockTickAttachTorch(int32_t x, int32_t y, int32_t z) {
-    int id = current_world->getBlockId(x, y, z);
+    int id = gBlockTickWorld->getBlockId(x, y, z);
     if (id == 0) return false;
     Block* b = Block::blocksList[id];
     return b && b->blockMaterial->isSolid() && b->isCollidable();
 }
 
 extern "C" bool blockTickIsSolid(int32_t x, int32_t y, int32_t z) {
-    int id = current_world->getBlockId(x, y, z);
+    int id = gBlockTickWorld->getBlockId(x, y, z);
     if (id == 0) return false;
     Block* b = Block::blocksList[id];
     return b && b->blockMaterial->isSolid();
 }
 
 extern "C" bool blockTickIsSolidNc(int32_t x, int32_t y, int32_t z) {
-    Material* material = current_world->getBlockMaterialNoChunkLoad(x, y, z);
+    Material* material = gBlockTickWorld->getBlockMaterialNoChunkLoad(x, y, z);
     return material && material->isSolid();
 }
 
 extern "C" bool blockTickWaterLava(int32_t x, int32_t y, int32_t z) {
-    int id = current_world->getBlockId(x, y, z);
+    int id = gBlockTickWorld->getBlockId(x, y, z);
     if (id == 0 || id == 51) return true;
     Block* b = Block::blocksList[id];
     if (!b) return true;
@@ -142,7 +136,7 @@ extern "C" bool blockTickWaterLava(int32_t x, int32_t y, int32_t z) {
 }
 
 extern "C" bool blockTickIsWater(int32_t x, int32_t y, int32_t z) {
-    return current_world->getBlockMaterial(x, y, z) == &Material::water;
+    return gBlockTickWorld->getBlockMaterial(x, y, z) == &Material::water;
 }
 
 extern "C" bool blockTickRegistered(uint8_t id) {
@@ -150,87 +144,53 @@ extern "C" bool blockTickRegistered(uint8_t id) {
 }
 
 extern "C" bool blockTickCollidableBox(int32_t x, int32_t y, int32_t z) {
-    const int aboveId = current_world->getBlockId(x, y, z);
+    const int aboveId = gBlockTickWorld->getBlockId(x, y, z);
     Block* aboveBlock = (aboveId > 0 && aboveId < 256) ? Block::blocksList[aboveId] : nullptr;
     return aboveBlock && aboveBlock->isCollidable()
-        && aboveBlock->getCollisionBoundingBoxFromPool(current_world, x, y, z).has_value();
+        && aboveBlock->getCollisionBoundingBoxFromPool(gBlockTickWorld, x, y, z).has_value();
 }
 
 extern "C" void blockTickSchedule(int32_t x, int32_t y, int32_t z, uint8_t id, int32_t delay) {
-    current_world->scheduleBlockUpdate(x, y, z, id, delay);
+    gBlockTickWorld->scheduleBlockUpdate(x, y, z, id, delay);
 }
 
 extern "C" void blockTickMark(int32_t x, int32_t y, int32_t z) {
-    current_world->markBlockNeedsUpdate(x, y, z);
+    gBlockTickWorld->markBlockNeedsUpdate(x, y, z);
 }
 
 extern "C" void blockTickNotifyNeighbors(int32_t x, int32_t y, int32_t z, uint8_t id) {
-    current_world->notifyBlocksOfNeighborChange(x, y, z, id);
+    gBlockTickWorld->notifyBlocksOfNeighborChange(x, y, z, id);
 }
 
 extern "C" void blockTickSpawnDrop(int32_t itemId, int32_t count, int32_t damage,
                                    double fx, double fy, double fz, double spread, double up) {
     auto entity = std::make_unique<EntityItem>(itemId, count, damage);
     entity->setPosition(fx, fy, fz);
-    entity->worldObj = current_world;
+    entity->worldObj = gBlockTickWorld;
     std::uniform_real_distribution<double> dist(-spread, spread);
-    entity->motionX = dist(current_world->rand);
+    entity->motionX = dist(gBlockTickWorld->rand);
     entity->motionY = up;
-    entity->motionZ = dist(current_world->rand);
-    current_world->spawnEntityInWorld(std::move(entity));
+    entity->motionZ = dist(gBlockTickWorld->rand);
+    gBlockTickWorld->spawnEntityInWorld(std::move(entity));
 }
 
 extern "C" void blockTickSpawnFalling(uint8_t blockId, double fx, double fy, double fz) {
     auto entity = std::make_unique<EntityFallingSand>(blockId, fx, fy, fz);
-    current_world->spawnEntityInWorld(std::move(entity));
+    gBlockTickWorld->spawnEntityInWorld(std::move(entity));
 }
 
 extern "C" void blockTickDropOccupant(int32_t x, int32_t y, int32_t z) {
-    int id = current_world->getBlockId(x, y, z);
+    int id = gBlockTickWorld->getBlockId(x, y, z);
     if (id > 0 && Block::blocksList[id]) {
-        Block::blocksList[id]->dropBlockAsItem(current_world, x, y, z, current_world->getBlockMetadata(x, y, z));
+        Block::blocksList[id]->dropBlockAsItem(gBlockTickWorld, x, y, z, gBlockTickWorld->getBlockMetadata(x, y, z));
     }
 }
 
-RustBridge::BlockTickWorld makeBlockTickWorld() {
-    RustBridge::BlockTickWorld w{};
-    w.next_int = &blockTickNextInt;
-    w.next_float01 = &blockTickNextFloat01;
-    w.next_u64 = &blockTickNextU64;
-    w.get_block_id = &blockTickGetId;
-    w.get_block_id_nc = &blockTickGetIdNc;
-    w.get_block_meta = &blockTickGetMeta;
-    w.set_block = &blockTickSet;
-    w.set_block_meta = &blockTickSetMeta;
-    w.set_block_notify = &blockTickSetNotify;
-    w.set_block_update = &blockTickSetUpdate;
-    w.set_block_meta_notify = &blockTickSetMetaNotify;
-    w.set_block_and_meta = &blockTickSetAndMeta;
-    w.get_block_light = &blockTickLight;
-    w.can_see_sky = &blockTickSeeSky;
-    w.attach_world = &blockTickAttachWorld;
-    w.attach_torch = &blockTickAttachTorch;
-    w.is_solid = &blockTickIsSolid;
-    w.is_solid_nc = &blockTickIsSolidNc;
-    w.is_water_or_lava = &blockTickWaterLava;
-    w.is_water = &blockTickIsWater;
-    w.block_registered = &blockTickRegistered;
-    w.collidable_box = &blockTickCollidableBox;
-    w.schedule_update = &blockTickSchedule;
-    w.mark_update = &blockTickMark;
-    w.notify_neighbors = &blockTickNotifyNeighbors;
-    w.spawn_drop = &blockTickSpawnDrop;
-    w.spawn_falling = &blockTickSpawnFalling;
-    w.drop_occupant = &blockTickDropOccupant;
-    return w;
+extern "C" void blockTickDetonateTnt(int32_t x, int32_t y, int32_t z) {
+    if (Block::blocksList[46]) {
+        Block::blocksList[46]->onBlockDestroyedByPlayer(gBlockTickWorld, x, y, z, 0);
+    }
 }
-
-const RustBridge::BlockTickWorld& blockTickWorld() {
-    static const RustBridge::BlockTickWorld table = makeBlockTickWorld();
-    return table;
-}
-
-} // namespace
 
 class BlockSand : public Block {
 public:
@@ -569,30 +529,30 @@ public:
         const int64_t treeSeed = static_cast<int64_t>(action.seed);
         world->setBlockWithNotify(x, y, z, 0);
 
-        current_world = world;
+        gBlockTickWorld = world;
 
         WorldAccessor accessor {
             .get_block_id = [](int32_t x, int32_t y, int32_t z) -> uint8_t {
-                return current_world->getBlockId(x, y, z);
+                return gBlockTickWorld->getBlockId(x, y, z);
             },
             .set_block_id = [](int32_t x, int32_t y, int32_t z, uint8_t id) {
-                current_world->setBlock(x, y, z, id);
+                gBlockTickWorld->setBlock(x, y, z, id);
             },
             .get_block_meta = [](int32_t x, int32_t y, int32_t z) -> uint8_t {
-                return current_world->getBlockMetadata(x, y, z);
+                return gBlockTickWorld->getBlockMetadata(x, y, z);
             },
             .set_block_meta = [](int32_t x, int32_t y, int32_t z, uint8_t meta) {
-                current_world->setBlockMetadata(x, y, z, meta);
+                gBlockTickWorld->setBlockMetadata(x, y, z, meta);
             },
             .allows_attachment = [](int32_t x, int32_t y, int32_t z) -> bool {
-                int id = current_world->getBlockId(x, y, z);
+                int id = gBlockTickWorld->getBlockId(x, y, z);
                 return id >= 0 && id < 256 && Block::allowsAttachmentArr[id];
             },
             .is_block_solid = [](int32_t x, int32_t y, int32_t z) -> bool {
-                return current_world->isBlockSolid(x, y, z);
+                return gBlockTickWorld->isBlockSolid(x, y, z);
             },
             .get_height_value = [](int32_t x, int32_t z) -> int32_t {
-                return current_world->getHeightValue(x, z);
+                return gBlockTickWorld->getHeightValue(x, z);
             }
         };
 
@@ -607,7 +567,7 @@ public:
             generated = alpha_generate_tree(accessor, treeSeed, x, y, z);
         }
 
-        current_world = nullptr;
+        gBlockTickWorld = nullptr;
 
         if (!generated) {
             world->setBlockWithNotify(x, y, z, blockID);
