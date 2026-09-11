@@ -136,9 +136,7 @@ impl Conn {
 
         thread::Builder::new()
             .name(format!("conn-write-{remote}"))
-            .spawn({
-                let remote = remote.clone();
-                move || {
+            .spawn(move || {
                 // Drain-then-FIN: queued kick bytes must reach the client,
                 // so close only stops the writer after the queue empties
                 // (a Both-shutdown here would RST pending data away).
@@ -162,7 +160,6 @@ impl Conn {
                         Err(mpsc::RecvTimeoutError::Timeout) => {}
                         Err(mpsc::RecvTimeoutError::Disconnected) => return,
                     }
-                }
                 }
             })
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;

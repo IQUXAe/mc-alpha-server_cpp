@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["staticlib"]
+# staticlib feeds the C++ server until the cutout; rlib feeds the
+# native binary (and disappears with the staticlib at the cutout).
+crate-type = ["staticlib", "rlib"]
 
 [profile.release]
 lto = true

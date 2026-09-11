@@ -829,6 +829,33 @@ impl Server {
         log::info(&format!("Saved level.dat and flushed {saved} loaded chunks to disk."));
     }
 
+    /// Graceful shutdown (mirrors the `run` tail): kick everyone with
+    /// the players still listed (like C++, no leave chat here), save
+    /// players with held snapshots, then flush the world.
+    pub fn shutdown(&mut self) {
+        self.running = false;
+        log::info("Stopping server");
+        let cids: Vec<ConnId> = self.sessions.keys().copied().collect();
+        for cid in cids {
+            if let Some(mut sess) = self.sessions.remove(&cid) {
+                let held = match &mut sess.state {
+                    SessionState::Play(play, _) => {
+                        play.outbox.push(pkt_kick("Server shutting down"));
+                        play.held_id
+                    }
+                    SessionState::Login(_) => 0,
+                };
+                sess.flush();
+                if let SessionState::Play(play, _) = &sess.state {
+                    self.save_player(play.player, held);
+                }
+                self.remove_session(cid, sess);
+            }
+        }
+        self.save_world();
+        log::info("Server stopped.");
+    }
+
     /// Kick a player by name (mirrors the console `kick`).
     fn kick_player(&mut self, name: &str, reason: &str) -> bool {
         let lower = admin_normalize(name);

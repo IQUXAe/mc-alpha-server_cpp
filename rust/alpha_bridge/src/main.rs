@@ -1,0 +1,159 @@
+//! Native server binary (mirrors `src/main.cpp` + the `MinecraftServer`
+//! run loop): properties, world open, socket bind, console thread, 20
+//! TPS tick loop with lag accounting, graceful shutdown on stop/signal.
+//!
+//! Usage: `alpha_server [server.properties] [world-dir] [port]`
+//! (all optional; the world defaults to `world/<level-name>`, the port
+//! to `server-port`).
+
+use std::io::BufRead;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+
+use alpha_bridge::server::Server;
+use alpha_bridge::server_config::ServerConfig;
+use alpha_bridge::server_log as log;
+
+static STOP: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn signal_handler(signum: libc::c_int) {
+    if STOP.swap(true, Ordering::SeqCst) {
+        // Second signal: C++ force-kills here; exit without saving.
+        std::process::exit(128 + signum);
+    }
+}
+
+fn main() {
+    println!("  ___  _      _         ___                      ");
+    println!(" / _ \\| |_ __| |_  __ _/ __| ___ _ ___ _____ _ _ ");
+    println!("| (_) | | '_ \\ ' \\/ _` \\__ \\/ -_) '_\\ V / -_) '_|");
+    println!(" \\___/|_| .__/_||_\\__,_|___/\\___|_|  \\_/\\___|_|  ");
+    println!("        |_|  Minecraft Alpha 1.2.6 - Rust Edition ");
+    println!();
+
+    let args: Vec<String> = std::env::args().collect();
+    let props_path = args.get(1).map(String::as_str).unwrap_or("server.properties");
+
+    log::info("Starting Minecraft server version 0.2.8 (Alpha 1.2.6)");
+    log::info("Loading properties");
+    let level_name = ServerConfig::open(props_path).get_string("level-name", "world");
+    let world_dir = args
+        .get(2)
+        .cloned()
+        .unwrap_or_else(|| format!("world/{level_name}"));
+    let player_dir = format!("{world_dir}/players");
+
+    let mut server = match Server::open(
+        props_path,
+        &world_dir,
+        &player_dir,
+        "ops.txt",
+        "banned-players.txt",
+        "banned-ips.txt",
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            log::severe(&format!("Failed to initialize server: {e}"));
+            std::process::exit(1);
+        }
+    };
+    if let Some(port_arg) = args.get(3) {
+        if let Ok(port) = port_arg.parse::<i32>() {
+            server.settings.port = port;
+        }
+    }
+    if !server.settings.online_mode {
+        log::warning("**** SERVER IS RUNNING IN OFFLINE/INSECURE MODE!");
+        log::warning("The server will make no attempt to authenticate usernames. Beware.");
+        log::warning("While this makes the game possible to play without internet access, it also opens up the ability for hackers to connect with any username they choose.");
+        log::warning("To change this, set \"online-mode\" to \"true\" in the server.properties file.");
+    }
+
+    let bind_ip = server.settings.server_ip.clone();
+    let port = server.settings.port;
+    let addr = format!("{}:{port}", if bind_ip.is_empty() { "0.0.0.0" } else { &bind_ip });
+    let listener = match std::net::TcpListener::bind(&addr) {
+        Ok(l) => l,
+        Err(e) => {
+            log::warning("**** FAILED TO BIND TO PORT!");
+            log::warning(&format!("The exception was: {e}"));
+            log::warning("Perhaps a server is already running on that port?");
+            std::process::exit(1);
+        }
+    };
+    if listener.set_nonblocking(true).is_err() {
+        log::severe("Failed to set the listener non-blocking");
+        std::process::exit(1);
+    }
+    let display = if bind_ip.is_empty() { "*" } else { bind_ip.as_str() };
+    log::info(&format!("Starting Minecraft server on {display}:{port}"));
+    log::info("Done! For help, type \"help\" or \"?\"");
+
+    unsafe {
+        let handler = signal_handler as *const () as libc::sighandler_t;
+        libc::signal(libc::SIGINT, handler);
+        libc::signal(libc::SIGTERM, handler);
+    }
+
+    let (console_tx, console_rx) = std::sync::mpsc::channel::<String>();
+    std::thread::Builder::new()
+        .name("console".to_string())
+        .spawn(move || {
+            let stdin = std::io::stdin();
+            for line in stdin.lock().lines() {
+                match line {
+                    Ok(l) => {
+                        if console_tx.send(l).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        })
+        .ok();
+
+    // Microsecond accounting (millis truncate the 1 ms sleeps to zero
+    // on coarse timers and the tick loop would starve forever).
+    const TICK_MICROS: i64 = 50_000;
+    let mut last = Instant::now();
+    let mut lag: i64 = 0;
+    loop {
+        while let Ok(line) = console_rx.try_recv() {
+            server.queue_console(line);
+        }
+        if STOP.load(Ordering::SeqCst) {
+            server.shutdown();
+            break;
+        }
+        let now = Instant::now();
+        let mut elapsed = now.saturating_duration_since(last).as_micros() as i64;
+        last = now;
+        if elapsed > 2_000_000 {
+            log::warning(
+                "Can't keep up! Did the system time change, or is the server overloaded?",
+            );
+            elapsed = 2_000_000;
+        }
+        lag += elapsed;
+        while lag >= TICK_MICROS {
+            lag -= TICK_MICROS;
+            loop {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        server.accept(stream);
+                    }
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                    Err(_) => break,
+                }
+            }
+            server.tick();
+        }
+        if !server.running {
+            server.shutdown();
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    log::info("Waiting for background threads to finish saving...");
+}
