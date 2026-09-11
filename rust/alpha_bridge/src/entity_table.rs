@@ -238,6 +238,7 @@ pub struct MobEnt {
 pub struct AnimalEnt {
     pub living: LivingBody,
     pub kind: AnimalKind,
+    pub sheared: bool,
 }
 
 #[derive(Clone, Debug)]

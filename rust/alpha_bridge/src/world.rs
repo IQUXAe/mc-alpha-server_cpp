@@ -485,7 +485,7 @@ impl World {
         }
     }
 
-    /// Falling-sand tick (mirrors `EntityFallingSand::tick`).
+        /// Falling-sand tick (mirrors `EntityFallingSand::tick`).
     pub fn tick_falling(&mut self, id: EntityId) {        self.entities.tick_base(id);
         let (block_id, motion) = match self.entities.get_mut(id) {
             Some(Entity::Falling(e)) => {
@@ -897,6 +897,80 @@ mod tests {
         assert!(!is_replaceable(0));
     }
 
+    fn add_zombie(w: &mut World, x: f64, y: f64, z: f64) -> EntityId {
+        use crate::entity_table::{LivingBody, MobEnt};
+        let id = w.entities.alloc_id();
+        let mut l = LivingBody::new(id, 0.6, 1.9, 0.0);
+        l.body.set_position(x, y, z);
+        w.entities.insert(crate::entity_table::Entity::Mob(MobEnt {
+            living: l,
+            kind: crate::entity_table::MobKind::Zombie,
+            target: None,
+            attack_cooldown: 0,
+        }));
+        id
+    }
+
+    #[test]
+    fn test_attack_kills_and_drops() {
+        let mut w = world_with_floor();
+        let id = add_zombie(&mut w, 3.5, 65.0, 4.5);
+        let before = w.entities.len();
+        w.attack_living(id, 100, None);
+        assert!(w.entities.get(id).unwrap().body().dead);
+        // Zombie drops 0..2 feathers: all spawns are items.
+        let after = w.entities.len();
+        assert!(after >= before && after <= before + 2);
+        for oid in w.entities.alive_ids() {
+            if oid == id {
+                continue;
+            }
+            assert!(matches!(
+                w.entities.get(oid).unwrap(),
+                crate::entity_table::Entity::Item(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn test_attack_resist_and_knockback() {
+        let mut w = world_with_floor();
+        let id = add_zombie(&mut w, 3.5, 65.0, 4.5);
+        let atk = add_zombie(&mut w, 8.5, 65.0, 4.5);
+        w.attack_living(id, 6, Some(atk));
+        let l = match w.entities.get(id).unwrap() {
+            crate::entity_table::Entity::Mob(m) => m.living.clone(),
+            _ => unreachable!(),
+        };
+        assert_eq!((l.health, l.last_damage, l.hurt_time), (14, 6, 10));
+        // Knocked away from the attacker (attacker east => push west).
+        assert!(l.body.motion[0] < 0.0);
+    }
+
+    #[test]
+    fn test_tick_living_drowns() {
+        let mut w = world_with_floor();
+        // Water column instead of air above the floor.
+        for y in 64..68 {
+            w.set_block_id(3, y, 4, 8);
+        }
+        let id = add_zombie(&mut w, 3.5, 65.0, 4.5);
+        // Force air to the edge: one tick must drown for 2 damage.
+        if let Some(crate::entity_table::Entity::Mob(m)) = w.entities.get_mut(id) {
+            m.living.body.air = -19;
+        }
+        let hp_before = match w.entities.get(id).unwrap() {
+            crate::entity_table::Entity::Mob(m) => m.living.health,
+            _ => unreachable!(),
+        };
+        w.tick_living(id);
+        let hp_after = match w.entities.get(id).unwrap() {
+            crate::entity_table::Entity::Mob(m) => m.living.health,
+            _ => unreachable!(),
+        };
+        assert_eq!(hp_before - hp_after, 2);
+    }
+
     fn add_boat(w: &mut World, x: f64, y: f64, z: f64) -> EntityId {
         use crate::entity_table::BoatEnt;
         let id = w.entities.alloc_id();
@@ -965,5 +1039,188 @@ mod tests {
         assert_eq!((dir, time), (-1, 10));
         assert!(w.damage_boat(id, 5));
         assert!(w.entities.get(id).unwrap().body().dead);
+    }
+}
+
+impl World {
+    fn living_eye_height(e: &Entity) -> f64 {
+        match e {
+            Entity::Player(_) => 1.62,
+            _ => e.body().height as f64 * 0.85,
+        }
+    }
+
+    /// Damage pipeline on a native living row (mirrors
+    /// `EntityLiving::attackEntityFrom` + `onDeath` with mob/animal drops).
+    /// `attacker` supplies knockback direction; `None` skips it.
+    pub fn attack_living(&mut self, id: EntityId, amount: i32, attacker: Option<EntityId>) {
+        use crate::entity_living::{AttackInput, living_attack_run};
+        let input = match self.entities.get(id) {
+            Some(Entity::Mob(_)) | Some(Entity::Animal(_)) => {
+                let (l, px, pz) = match self.entities.get(id) {
+                    Some(Entity::Mob(m)) => (&m.living, m.living.body.pos[0], m.living.body.pos[2]),
+                    Some(Entity::Animal(a)) => (&a.living, a.living.body.pos[0], a.living.body.pos[2]),
+                    _ => unreachable!(),
+                };
+                let (ax, az, has) = match attacker.and_then(|a| self.entities.get(a)) {
+                    Some(a) => (a.body().pos[0], a.body().pos[2], true),
+                    None => (0.0, 0.0, false),
+                };
+                AttackInput {
+                    health: l.health,
+                    hurt_resist: l.hurt_resist,
+                    max_hurt_resist: l.max_hurt_resist,
+                    last_damage: l.last_damage,
+                    hurt_time_in: l.hurt_time,
+                    attack_time_in: l.attack_time,
+                    dead: l.body.dead,
+                    amount,
+                    has_attacker: has,
+                    self_x: px,
+                    self_z: pz,
+                    atk_x: ax,
+                    atk_z: az,
+                    motion_x: l.body.motion[0],
+                    motion_y: l.body.motion[1],
+                    motion_z: l.body.motion[2],
+                }
+            }
+            _ => return,
+        };
+        let result = {
+            let rng = &mut self.rng;
+            living_attack_run(&input, &mut || rng.next_double())
+        };
+        let r = match result {
+            Some(r) => r,
+            None => return,
+        };
+        let died = r.died;
+        match self.entities.get_mut(id) {
+            Some(Entity::Mob(m)) => {
+                m.living.health = r.health;
+                m.living.last_damage = r.last_damage;
+                m.living.hurt_resist = r.hurt_resist;
+                m.living.hurt_time = r.hurt_time;
+                m.living.attack_time = r.attack_time;
+                if r.knocked {
+                    m.living.body.motion = [r.kmx, r.kmy, r.kmz];
+                }
+            }
+            Some(Entity::Animal(a)) => {
+                a.living.health = r.health;
+                a.living.last_damage = r.last_damage;
+                a.living.hurt_resist = r.hurt_resist;
+                a.living.hurt_time = r.hurt_time;
+                a.living.attack_time = r.attack_time;
+                if r.knocked {
+                    a.living.body.motion = [r.kmx, r.kmy, r.kmz];
+                }
+            }
+            _ => return,
+        }
+        if died {
+            self.kill_living(id);
+        }
+    }
+
+    /// Death: dismount both sides, spawn kind drops, mark dead (mirrors
+    /// `EntityLiving::onDeath` + mob/animal `onDeath`).
+    pub fn kill_living(&mut self, id: EntityId) {
+        let (px, py, pz) = match self.entities.get(id) {
+            Some(Entity::Mob(m)) => (m.living.body.pos[0], m.living.body.pos[1], m.living.body.pos[2]),
+            Some(Entity::Animal(a)) => (a.living.body.pos[0], a.living.body.pos[1], a.living.body.pos[2]),
+            _ => return,
+        };
+        // Dismount rider and vehicle.
+        let (riding, ridden_by) = match self.entities.get(id) {
+            Some(e) => (e.body().riding, e.body().ridden_by),
+            None => return,
+        };
+        if riding >= 0 {
+            self.entities.mount(id, None);
+        }
+        if ridden_by >= 0 {
+            self.entities.mount(ridden_by, None);
+        }
+        // Kind drops (counts mirror the C++ getDropCount formulas).
+        let (drop_id, drop_count) = self.living_drops(id);
+        for _ in 0..drop_count {
+            self.spawn_item_entity(drop_id, 1, 0, px, py, pz);
+        }
+        if let Some(e) = self.entities.get_mut(id) {
+            e.body_mut().dead = true;
+        }
+    }
+
+    fn living_drops(&mut self, id: EntityId) -> (i32, i32) {
+        // Counts mirror the C++ getDropCount formulas exactly (zombie and
+        // spider roll 0..2, the rest 1..3). Draws come from the world RNG.
+        match self.entities.get(id) {
+            Some(Entity::Mob(m)) => match m.kind {
+                crate::entity_table::MobKind::Spider => (287, self.rng.next_int_bound(3)),
+                crate::entity_table::MobKind::Zombie => (288, self.rng.next_int_bound(3)),
+                crate::entity_table::MobKind::Skeleton => (262, 1 + self.rng.next_int_bound(3)),
+                crate::entity_table::MobKind::Creeper => (289, self.rng.next_int_bound(3)),
+            },
+            Some(Entity::Animal(a)) => match a.kind {
+                crate::entity_table::AnimalKind::Sheep if a.sheared => (0, 0),
+                crate::entity_table::AnimalKind::Sheep => (35, 1 + self.rng.next_int_bound(3)),
+                crate::entity_table::AnimalKind::Pig => (319, 1 + self.rng.next_int_bound(3)),
+                crate::entity_table::AnimalKind::Chicken => (288, 1 + self.rng.next_int_bound(3)),
+                crate::entity_table::AnimalKind::Cow => (334, 1 + self.rng.next_int_bound(3)),
+            },
+            _ => (0, 0),
+        }
+    }
+
+    /// Per-tick living maintenance (mirrors `EntityLiving::tick`).
+    pub fn tick_living(&mut self, id: EntityId) {
+        self.entities.tick_base(id);
+        let (alive, opaque, water, air, hurt, attack, resist) = match self.entities.get(id) {
+            Some(Entity::Mob(_)) | Some(Entity::Animal(_)) => {
+                let l = match self.entities.get(id) {
+                    Some(Entity::Mob(m)) => &m.living,
+                    Some(Entity::Animal(a)) => &a.living,
+                    _ => unreachable!(),
+                };
+                let eye = l.body.pos[1] + l.body.height as f64 * 0.85;
+                let ex = l.body.pos[0].floor() as i32;
+                let ey = eye.floor() as i32;
+                let ez = l.body.pos[2].floor() as i32;
+                (
+                    !l.body.dead,
+                    self.is_solid(ex, ey, ez),
+                    self.material_at(ex, ey, ez) == Material::WATER,
+                    l.body.air,
+                    l.hurt_time,
+                    l.attack_time,
+                    l.hurt_resist,
+                )
+            }
+            _ => return,
+        };
+        let t = crate::entity_living::alpha_living_tick(alive, opaque, water, air, hurt, attack, resist);
+        match self.entities.get_mut(id) {
+            Some(Entity::Mob(m)) => {
+                m.living.body.air = t.air;
+                m.living.hurt_time = t.hurt_time;
+                m.living.attack_time = t.attack_time;
+                m.living.hurt_resist = t.hurt_resist;
+            }
+            Some(Entity::Animal(a)) => {
+                a.living.body.air = t.air;
+                a.living.hurt_time = t.hurt_time;
+                a.living.attack_time = t.attack_time;
+                a.living.hurt_resist = t.hurt_resist;
+            }
+            _ => return,
+        }
+        if t.suffocate {
+            self.attack_living(id, 1, None);
+        }
+        if t.drown {
+            self.attack_living(id, 2, None);
+        }
     }
 }

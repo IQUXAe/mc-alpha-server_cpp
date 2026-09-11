@@ -43,6 +43,100 @@ pub extern "C" fn alpha_living_heal(health: i16, max_health: i16, amount: i32, d
 /// (leaving `out` untouched) when the hit is ignored outright. Timer inputs
 /// round-trip so the resist-window branch (which leaves them alone) applies
 /// cleanly on the C++ side.
+pub struct AttackInput {
+    pub health: i16,
+    pub hurt_resist: i32,
+    pub max_hurt_resist: i32,
+    pub last_damage: i32,
+    pub hurt_time_in: i32,
+    pub attack_time_in: i32,
+    pub dead: bool,
+    pub amount: i32,
+    pub has_attacker: bool,
+    pub self_x: f64,
+    pub self_z: f64,
+    pub atk_x: f64,
+    pub atk_z: f64,
+    pub motion_x: f64,
+    pub motion_y: f64,
+    pub motion_z: f64,
+}
+
+/// Shared core: computes the result, drawing jitter from `next_f01`.
+/// Returns `None` for ignored hits.
+pub fn living_attack_run(input: &AttackInput, next_f01: &mut dyn FnMut() -> f64) -> Option<AttackResult> {
+    if input.amount <= 0 || input.dead || input.health <= 0 {
+        return None;
+    }
+    let mut r = AttackResult {
+        health: input.health,
+        last_damage: input.last_damage,
+        hurt_resist: input.hurt_resist,
+        hurt_time: input.hurt_time_in,
+        attack_time: input.attack_time_in,
+        knocked: false,
+        kmx: input.motion_x,
+        kmy: input.motion_y,
+        kmz: input.motion_z,
+        send_status: false,
+        died: false,
+    };
+    let mut knockback = true;
+    if input.hurt_resist > input.max_hurt_resist / 2 {
+        if input.amount <= input.last_damage {
+            return None;
+        }
+        r.health = input.health.wrapping_sub((input.amount - input.last_damage) as i16);
+        r.last_damage = input.amount;
+        knockback = false;
+    } else {
+        r.last_damage = input.amount;
+        r.hurt_resist = input.max_hurt_resist;
+        r.hurt_time = 10;
+        r.attack_time = 10;
+        r.health = input.health.wrapping_sub(input.amount as i16);
+    }
+
+    if knockback && input.has_attacker {
+        let mut dx = input.atk_x - input.self_x;
+        let mut dz = input.atk_z - input.self_z;
+        // Degenerate direction: jitter until non-trivial (C++ draw order kept).
+        let mut guard = 0;
+        while dx * dx + dz * dz < 1.0e-4 {
+            let a = next_f01();
+            let b = next_f01();
+            let c = next_f01();
+            let d = next_f01();
+            dx = (a - b) * 0.01;
+            dz = (c - d) * 0.01;
+            guard += 1;
+            if guard > 64 {
+                break;
+            }
+        }
+        let dist = (dx * dx + dz * dz).sqrt();
+        if dist > 0.0 {
+            let (mut mx, mut my, mut mz) = (input.motion_x * 0.5, input.motion_y * 0.5, input.motion_z * 0.5);
+            mx -= dx / dist * 0.4;
+            my += 0.4;
+            mz -= dz / dist * 0.4;
+            if my > 0.4 {
+                my = 0.4;
+            }
+            r.knocked = true;
+            r.kmx = mx;
+            r.kmy = my;
+            r.kmz = mz;
+        }
+        r.send_status = true;
+    }
+
+    if r.health <= 0 {
+        r.died = true;
+    }
+    Some(r)
+}
+
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn alpha_living_attack(
@@ -65,79 +159,37 @@ pub unsafe extern "C" fn alpha_living_attack(
     motion_z: f64,
     out: *mut AttackResult,
 ) -> bool {
-    if out.is_null() || amount <= 0 || dead || health <= 0 {
+    if out.is_null() {
         return false;
     }
-    let mut r = AttackResult {
+    let input = AttackInput {
         health,
-        last_damage,
         hurt_resist,
-        hurt_time: hurt_time_in,
-        attack_time: attack_time_in,
-        knocked: false,
-        kmx: motion_x,
-        kmy: motion_y,
-        kmz: motion_z,
-        send_status: false,
-        died: false,
+        max_hurt_resist,
+        last_damage,
+        hurt_time_in,
+        attack_time_in,
+        dead,
+        amount,
+        has_attacker,
+        self_x,
+        self_z,
+        atk_x,
+        atk_z,
+        motion_x,
+        motion_y,
+        motion_z,
     };
-    let mut knockback = true;
-    if hurt_resist > max_hurt_resist / 2 {
-        if amount <= last_damage {
-            return false;
-        }
-        r.health = health.wrapping_sub((amount - last_damage) as i16);
-        r.last_damage = amount;
-        knockback = false;
-    } else {
-        r.last_damage = amount;
-        r.hurt_resist = max_hurt_resist;
-        r.hurt_time = 10;
-        r.attack_time = 10;
-        r.health = health.wrapping_sub(amount as i16);
-    }
-
-    if knockback && has_attacker {
-        let mut dx = atk_x - self_x;
-        let mut dz = atk_z - self_z;
-        // Degenerate direction: jitter until non-trivial (C++ draw order kept).
-        let mut guard = 0;
-        while dx * dx + dz * dz < 1.0e-4 {
-            let a = next_f01.map(|f| f()).unwrap_or(0.0);
-            let b = next_f01.map(|f| f()).unwrap_or(0.0);
-            let c = next_f01.map(|f| f()).unwrap_or(0.0);
-            let d = next_f01.map(|f| f()).unwrap_or(0.0);
-            dx = (a - b) * 0.01;
-            dz = (c - d) * 0.01;
-            guard += 1;
-            if guard > 64 {
-                break;
+    let mut cb = || next_f01.map(|f| f()).unwrap_or(0.0);
+    match living_attack_run(&input, &mut cb) {
+        Some(r) => {
+            unsafe {
+                *out = r;
             }
+            true
         }
-        let dist = (dx * dx + dz * dz).sqrt();
-        if dist > 0.0 {
-            let (mut mx, mut my, mut mz) = (motion_x * 0.5, motion_y * 0.5, motion_z * 0.5);
-            mx -= dx / dist * 0.4;
-            my += 0.4;
-            mz -= dz / dist * 0.4;
-            if my > 0.4 {
-                my = 0.4;
-            }
-            r.knocked = true;
-            r.kmx = mx;
-            r.kmy = my;
-            r.kmz = mz;
-        }
-        r.send_status = true;
+        None => false,
     }
-
-    if r.health <= 0 {
-        r.died = true;
-    }
-    unsafe {
-        *out = r;
-    }
-    true
 }
 
 /// Per-tick living state (mirrors `EntityLiving::tick` minus the virtual
