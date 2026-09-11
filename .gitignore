@@ -12,5 +12,4 @@ ops.txt
 *.DS_Store
 
 # Rust build artifacts
-rust/**/target/
-rust/**/.rustc_info.json
+/target/
