@@ -1,11 +1,5 @@
-use std::net::{TcpStream, Shutdown};
-use std::thread;
-use std::sync::{Arc, Mutex, Condvar};
-use std::sync::atomic::{AtomicBool, Ordering, AtomicUsize};
-use std::collections::VecDeque;
-use libc::{c_char, c_int, size_t};
-use std::ffi::{CStr, CString};
-use std::io::{Read, Write};
+use std::net::TcpStream;
+use std::io::Read;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -108,384 +102,67 @@ pub enum PacketData {
     },
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket1Login {
-    pub protocol_version: i32,
-    pub username: *const c_char,
-    pub password: *const c_char,
-    pub map_seed: i64,
-    pub dimension: i8,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket2Handshake {
-    pub username: *const c_char,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket3Chat {
-    pub message: *const c_char,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket5PlayerInventory {
-    pub inventory_type: i32,
-    pub item_count: i16,
-    pub slots: *const FfiSlotData,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket7UseEntity {
-    pub player_entity_id: i32,
-    pub target_entity_id: i32,
-    pub is_left_click: bool,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket10Flying {
-    pub on_ground: bool,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket11PlayerPosition {
-    pub x: f64,
-    pub y: f64,
-    pub stance: f64,
-    pub z: f64,
-    pub on_ground: bool,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket12PlayerLook {
-    pub yaw: f32,
-    pub pitch: f32,
-    pub on_ground: bool,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket13PlayerLookMove {
-    pub x: f64,
-    pub y: f64,
-    pub stance: f64,
-    pub z: f64,
-    pub yaw: f32,
-    pub pitch: f32,
-    pub on_ground: bool,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket14BlockDig {
-    pub status: i8,
-    pub x: i32,
-    pub y: i8,
-    pub z: i32,
-    pub face: i8,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket15Place {
-    pub item_id: i16,
-    pub x: i32,
-    pub y: i8,
-    pub z: i32,
-    pub direction: i8,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket16BlockItemSwitch {
-    pub entity_id: i32,
-    pub item_id: i16,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket18ArmAnimation {
-    pub entity_id: i32,
-    pub animate: i8,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket21PickupSpawn {
-    pub entity_id: i32,
-    pub item_id: i16,
-    pub count: i8,
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-    pub rotation: i8,
-    pub pitch: i8,
-    pub roll: i8,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket23VehicleSpawn {
-    pub entity_id: i32,
-    pub vehicle_type: i8,
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket59ComplexEntity {
-    pub x: i32,
-    pub y: i16,
-    pub z: i32,
-    pub nbt_data: *const u8,
-    pub nbt_len: size_t,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket4UpdateTime {
-    pub time: i64,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket6SpawnPosition {
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket8UpdateHealth {
-    pub health: i8,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket9Respawn {
-    pub dummy: u8,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket17AddToInventory {
-    pub item_id: i16,
-    pub count: i8,
-    pub damage: i16,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket20NamedEntitySpawn {
-    pub entity_id: i32,
-    pub name: *const c_char,
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-    pub rotation: i8,
-    pub pitch: i8,
-    pub current_item: i16,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket22Collect {
-    pub collected_entity_id: i32,
-    pub collector_entity_id: i32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket24MobSpawn {
-    pub entity_id: i32,
-    pub mob_type: u8,
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-    pub yaw: i8,
-    pub pitch: i8,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket28EntityVelocity {
-    pub entity_id: i32,
-    pub motion_x: i16,
-    pub motion_y: i16,
-    pub motion_z: i16,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket29DestroyEntity {
-    pub entity_id: i32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket30Entity {
-    pub entity_id: i32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket31RelEntityMove {
-    pub entity_id: i32,
-    pub dx: i8,
-    pub dy: i8,
-    pub dz: i8,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket32EntityLook {
-    pub entity_id: i32,
-    pub yaw: i8,
-    pub pitch: i8,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket33RelEntityMoveLook {
-    pub entity_id: i32,
-    pub dx: i8,
-    pub dy: i8,
-    pub dz: i8,
-    pub yaw: i8,
-    pub pitch: i8,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket34EntityTeleport {
-    pub entity_id: i32,
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-    pub yaw: i8,
-    pub pitch: i8,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket38EntityStatus {
-    pub entity_id: i32,
-    pub status: i8,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket39AttachEntity {
-    pub entity_id: i32,
-    pub vehicle_id: i32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket50PreChunk {
-    pub x: i32,
-    pub z: i32,
-    pub mode: bool,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket53BlockChange {
-    pub x: i32,
-    pub y: i8,
-    pub z: i32,
-    pub block_type: u8,
-    pub metadata: u8,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RustPacket255KickDisconnect {
-    pub reason: *const c_char,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub union RustPacketUnion {
-    pub login: RustPacket1Login,
-    pub handshake: RustPacket2Handshake,
-    pub chat: RustPacket3Chat,
-    pub update_time: RustPacket4UpdateTime,
-    pub inventory: RustPacket5PlayerInventory,
-    pub spawn_position: RustPacket6SpawnPosition,
-    pub use_entity: RustPacket7UseEntity,
-    pub update_health: RustPacket8UpdateHealth,
-    pub respawn: RustPacket9Respawn,
-    pub flying: RustPacket10Flying,
-    pub position: RustPacket11PlayerPosition,
-    pub look: RustPacket12PlayerLook,
-    pub look_move: RustPacket13PlayerLookMove,
-    pub block_dig: RustPacket14BlockDig,
-    pub place: RustPacket15Place,
-    pub item_switch: RustPacket16BlockItemSwitch,
-    pub add_to_inventory: RustPacket17AddToInventory,
-    pub arm_anim: RustPacket18ArmAnimation,
-    pub named_entity_spawn: RustPacket20NamedEntitySpawn,
-    pub pickup_spawn: RustPacket21PickupSpawn,
-    pub collect: RustPacket22Collect,
-    pub vehicle_spawn: RustPacket23VehicleSpawn,
-    pub mob_spawn: RustPacket24MobSpawn,
-    pub entity_velocity: RustPacket28EntityVelocity,
-    pub destroy_entity: RustPacket29DestroyEntity,
-    pub entity: RustPacket30Entity,
-    pub rel_entity_move: RustPacket31RelEntityMove,
-    pub entity_look: RustPacket32EntityLook,
-    pub rel_entity_move_look: RustPacket33RelEntityMoveLook,
-    pub entity_teleport: RustPacket34EntityTeleport,
-    pub entity_status: RustPacket38EntityStatus,
-    pub attach_entity: RustPacket39AttachEntity,
-    pub pre_chunk: RustPacket50PreChunk,
-    pub block_change: RustPacket53BlockChange,
-    pub complex_entity: RustPacket59ComplexEntity,
-    pub kick: RustPacket255KickDisconnect,
-}
-
-#[repr(C)]
-pub struct RustPacket {
-    pub packet_id: u8,
-    pub data: RustPacketUnion,
-}
-
-#[repr(C)]
-pub struct RustNetworkManager {
-    is_running: Arc<AtomicBool>,
-    is_server_terminating: Arc<AtomicBool>,
-    is_terminating: Arc<AtomicBool>,
-    termination_reason: Arc<Mutex<String>>,
-    
-    // Read queue (popped by C++ processReadPackets)
-    read_queue: Arc<Mutex<VecDeque<PacketData>>>,
-    
-    // Write queue (pushed by C++ addToSendQueue, popped by Rust write thread)
-    // Tuple: (payload_bytes, is_chunk_data)
-    write_queue: Arc<(Mutex<VecDeque<(Vec<u8>, bool)>>, Condvar)>,
-    
-    send_queue_byte_length: Arc<AtomicUsize>,
-    stream: TcpStream,
-    read_thread: Option<thread::JoinHandle<()>>,
-    write_thread: Option<thread::JoinHandle<()>>,
-}
-
-unsafe fn c_to_str<'a>(ptr: *const c_char) -> &'a str {
-    if ptr.is_null() {
-        return "";
-    }
-    CStr::from_ptr(ptr).to_str().unwrap_or("")
+/// Outbound tracker packet (safe replacement for the old C packet
+/// union: only the kinds the tracker emits, with owned payloads, so
+/// encoding needs no unsafe at all).
+#[derive(Clone, Debug)]
+pub enum RustPacket {
+    BlockItemSwitch { entity_id: i32, item_id: i16 },
+    ArmAnimation { entity_id: i32, animate: i8 },
+    NamedEntitySpawn {
+        entity_id: i32,
+        username: String,
+        x: i32,
+        y: i32,
+        z: i32,
+        rotation: i8,
+        pitch: i8,
+        current_item: i16,
+    },
+    PickupSpawn {
+        entity_id: i32,
+        item_id: i16,
+        count: i8,
+        x: i32,
+        y: i32,
+        z: i32,
+        rotation: i8,
+        pitch: i8,
+        roll: i8,
+    },
+    VehicleSpawn { entity_id: i32, vehicle_type: i8, x: i32, y: i32, z: i32 },
+    MobSpawn {
+        entity_id: i32,
+        mob_type: u8,
+        x: i32,
+        y: i32,
+        z: i32,
+        yaw: i8,
+        pitch: i8,
+    },
+    EntityVelocity { entity_id: i32, motion_x: i16, motion_y: i16, motion_z: i16 },
+    DestroyEntity { entity_id: i32 },
+    Entity { entity_id: i32 },
+    RelEntityMove { entity_id: i32, dx: i8, dy: i8, dz: i8 },
+    EntityLook { entity_id: i32, yaw: i8, pitch: i8 },
+    RelEntityMoveLook {
+        entity_id: i32,
+        dx: i8,
+        dy: i8,
+        dz: i8,
+        yaw: i8,
+        pitch: i8,
+    },
+    EntityTeleport {
+        entity_id: i32,
+        x: i32,
+        y: i32,
+        z: i32,
+        yaw: i8,
+        pitch: i8,
+    },
+    EntityStatus { entity_id: i32, status: i8 },
+    AttachEntity { entity_id: i32, vehicle_id: i32 },
 }
 
 fn read_exact(stream: &mut TcpStream, buf: &mut [u8]) -> std::io::Result<()> {
@@ -734,255 +411,6 @@ pub(crate) fn read_packet_payload(stream: &mut TcpStream, packet_id: u8) -> std:
     }
 }
 
-impl RustNetworkManager {
-    fn shutdown(&self, reason: String) {
-        if !self.is_running.swap(false, Ordering::SeqCst) {
-            return;
-        }
-        if let Ok(mut tr) = self.termination_reason.lock() {
-            *tr = reason;
-        }
-        self.is_terminating.store(true, Ordering::SeqCst);
-        let _ = self.stream.shutdown(Shutdown::Both);
-        
-        let &(_, ref cv) = &*self.write_queue;
-        cv.notify_all();
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn rust_network_manager_create(socket_fd: c_int) -> *mut RustNetworkManager {
-    use std::os::unix::io::FromRawFd;
-    let stream = TcpStream::from_raw_fd(socket_fd);
-    let _ = stream.set_nodelay(true);
-    
-    let is_running = Arc::new(AtomicBool::new(true));
-    let is_server_terminating = Arc::new(AtomicBool::new(false));
-    let is_terminating = Arc::new(AtomicBool::new(false));
-    let termination_reason = Arc::new(Mutex::new(String::new()));
-    let read_queue = Arc::new(Mutex::new(VecDeque::new()));
-    let write_queue = Arc::new((Mutex::new(VecDeque::<(Vec<u8>, bool)>::new()), Condvar::new()));
-    let send_queue_byte_length = Arc::new(AtomicUsize::new(0));
-
-    let is_running_c = is_running.clone();
-    let is_terminating_c = is_terminating.clone();
-    let termination_reason_c = termination_reason.clone();
-    let read_queue_c = read_queue.clone();
-    let write_queue_c = write_queue.clone();
-    let mut stream_read = match stream.try_clone() {
-        Ok(s) => s,
-        Err(_) => {
-            // Cannot clone the underlying fd for the read side. We must drop
-            // the original TcpStream (it closes the fd via Drop) before
-            // returning a null pointer, otherwise the C++ caller still owns
-            // the raw socket and will leak it.
-            return std::ptr::null_mut();
-        }
-    };
-
-    let read_thread = thread::spawn(move || {
-        while is_running_c.load(Ordering::SeqCst) {
-            match read_u8(&mut stream_read) {
-                Ok(packet_id) => {
-                    match read_packet_payload(&mut stream_read, packet_id) {
-                        Ok(pkt_data) => {
-                            if let Ok(mut q) = read_queue_c.lock() {
-                                q.push_back(pkt_data);
-                            }
-                        }
-                        Err(e) => {
-                            if !is_terminating_c.load(Ordering::SeqCst) {
-                                let err_reason = format!("Internal exception: {}", e);
-                                if let Ok(mut tr) = termination_reason_c.lock() {
-                                    *tr = err_reason;
-                                }
-                                is_terminating_c.store(true, Ordering::SeqCst);
-                                is_running_c.store(false, Ordering::SeqCst);
-                                let _ = stream_read.shutdown(Shutdown::Both);
-                                let &(_, ref cv) = &*write_queue_c;
-                                cv.notify_all();
-                            }
-                            return;
-                        }
-                    }
-                }
-                Err(_) => {
-                    if !is_terminating_c.load(Ordering::SeqCst) {
-                        if let Ok(mut tr) = termination_reason_c.lock() {
-                            *tr = "End of stream".to_string();
-                        }
-                        is_terminating_c.store(true, Ordering::SeqCst);
-                        is_running_c.store(false, Ordering::SeqCst);
-                        let _ = stream_read.shutdown(Shutdown::Both);
-                        let &(_, ref cv) = &*write_queue_c;
-                        cv.notify_all();
-                    }
-                    return;
-                }
-            }
-        }
-    });
-
-    let is_running_c = is_running.clone();
-    let is_terminating_c = is_terminating.clone();
-    let termination_reason_c = termination_reason.clone();
-    let write_queue_c = write_queue.clone();
-    let send_queue_byte_length_c = send_queue_byte_length.clone();
-    let mut stream_write = match stream.try_clone() {
-        Ok(s) => s,
-        Err(_) => {
-            // Cannot clone the write side. We've already spawned the read
-            // thread holding stream_read. Shutdown the original stream so
-            // its Drop releases the underlying fd, and signal the read
-            // thread to bail. We DO NOT touch stream_read here because
-            // its ownership moved into the read_thread closure.
-            is_running.store(false, Ordering::SeqCst);
-            drop(stream);
-            // Notify any blocked writer so the read thread's looping on
-            // its condvar will eventually observe is_running=false.
-            let &(_, ref cv) = &*write_queue;
-            cv.notify_all();
-            return std::ptr::null_mut();
-        }
-    };
-
-    let write_thread = thread::spawn(move || {
-        let &(ref lock, ref cv) = &*write_queue_c;
-        while is_running_c.load(Ordering::SeqCst) {
-            let mut pkt = None;
-            // NOTE: with panic="abort" no unwrap() is allowed here:
-            // a panic in this thread would kill the whole server.
-            // A poisoned mutex means another thread panicked; recover
-            // the guard and shut the writer down gracefully instead.
-            let mut guard = match lock.lock() {
-                Ok(g) => g,
-                Err(poisoned) => poisoned.into_inner(),
-            };
-            loop {
-                if !is_running_c.load(Ordering::SeqCst) {
-                    return;
-                }
-
-                // Prioritize data_packets (non-chunk packets first)
-                // Find first packet with is_chunk_data == false
-                let mut found_idx = None;
-                for (i, (_, is_chunk)) in guard.iter().enumerate() {
-                    if !is_chunk {
-                        found_idx = Some(i);
-                        break;
-                    }
-                }
-
-                if let Some(idx) = found_idx {
-                    // idx was just found via iter().enumerate(): always in bounds,
-                    // but remove() returns Option, so fall back to pop_front().
-                    match guard.remove(idx) {
-                        Some((data, _)) => pkt = Some(data),
-                        None => pkt = guard.pop_front().map(|(d, _)| d),
-                    }
-                    break;
-                } else if !guard.is_empty() {
-                    pkt = guard.pop_front().map(|(d, _)| d);
-                    break;
-                }
-
-                // Spurious wakeups are expected with Condvar: loop and re-check.
-                // On poison, exit the writer instead of aborting the process.
-                match cv.wait(guard) {
-                    Ok(g) => guard = g,
-                    Err(_) => return,
-                }
-            }
-            drop(guard);
-
-            if let Some(data) = pkt {
-                let len = data.len();
-                if stream_write.write_all(&data).is_err() {
-                    if !is_terminating_c.load(Ordering::SeqCst) {
-                        if let Ok(mut tr) = termination_reason_c.lock() {
-                            *tr = "Write error".to_string();
-                        }
-                        is_terminating_c.store(true, Ordering::SeqCst);
-                        is_running_c.store(false, Ordering::SeqCst);
-                        let _ = stream_write.shutdown(Shutdown::Both);
-                    }
-                    return;
-                }
-                send_queue_byte_length_c.fetch_sub(len, Ordering::Relaxed);
-            }
-        }
-    });
-
-    Box::into_raw(Box::new(RustNetworkManager {
-        is_running,
-        is_server_terminating,
-        is_terminating,
-        termination_reason,
-        read_queue,
-        write_queue,
-        send_queue_byte_length,
-        stream,
-        read_thread: Some(read_thread),
-        write_thread: Some(write_thread),
-    }))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn rust_network_manager_destroy(manager: *mut RustNetworkManager) {
-    if manager.is_null() {
-        return;
-    }
-    
-    let mut m = Box::from_raw(manager);
-    m.is_running.store(false, Ordering::SeqCst);
-    let _ = m.stream.shutdown(Shutdown::Both);
-    
-    let &(_, ref cv) = &*m.write_queue;
-    cv.notify_all();
-
-    if let Some(t) = m.read_thread.take() {
-        let _ = t.join();
-    }
-    if let Some(t) = m.write_thread.take() {
-        let _ = t.join();
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn rust_network_manager_send(
-    manager: *mut RustNetworkManager,
-    data_ptr: *const u8,
-    data_len: size_t,
-    is_chunk_data: bool,
-) {
-    if manager.is_null() || data_ptr.is_null() || data_len == 0 {
-        return;
-    }
-    let m = &*manager;
-    if m.is_server_terminating.load(Ordering::Relaxed) {
-        return;
-    }
-    // We have to copy the C++-side bytes because the caller may free
-    // the source buffer as soon as this function returns. A copy is
-    // unavoidable across the FFI boundary without an explicit lifetime
-    // contract; `.to_vec()` allocates exactly once per packet.
-    //
-    // NOTE: send_queue_byte_length accounting is intentionally Relaxed
-    // here and at the matching fetch_sub site. The byte counter is only
-    // used by NetworkManager::processReadPackets() as an early-exit hint
-    // ("send buffer overflow"); ordering between successive enqueues
-    // doesn't matter for that check, and SeqCst was costing the writer
-    // ~50ns/packet on hot paths like chunk streaming.
-    let bytes = std::slice::from_raw_parts(data_ptr, data_len).to_vec();
-    m.send_queue_byte_length.fetch_add(data_len, Ordering::Relaxed);
-
-    let &(ref lock, ref cv) = &*m.write_queue;
-    if let Ok(mut q) = lock.lock() {
-        q.push_back((bytes, is_chunk_data));
-    }
-    cv.notify_one();
-}
-
 pub(crate) fn put_u8(buf: &mut Vec<u8>, v: u8) { buf.push(v); }
 pub(crate) fn put_i8(buf: &mut Vec<u8>, v: i8) { buf.push(v as u8); }
 pub(crate) fn put_i16(buf: &mut Vec<u8>, v: i16) { buf.extend_from_slice(&v.to_be_bytes()); }
@@ -995,667 +423,137 @@ pub(crate) fn put_str(buf: &mut Vec<u8>, s: &str) {
     put_i16(buf, bytes.len() as i16);
     buf.extend_from_slice(bytes);
 }
-fn c_to_str_safe(ptr: *const c_char) -> &'static str {
-    if ptr.is_null() { return ""; }
-    unsafe { CStr::from_ptr(ptr) }.to_str().unwrap_or("")
-}
-
-pub fn encode_packet(pkt: &RustPacket, buf: &mut Vec<u8>) -> bool {
-    put_u8(buf, pkt.packet_id);
-    unsafe {
-        match pkt.packet_id {
-            0 => true,
-            1 => {
-                put_i32(buf, pkt.data.login.protocol_version);
-                put_str(buf, c_to_str_safe(pkt.data.login.username));
-                put_str(buf, c_to_str_safe(pkt.data.login.password));
-                put_i64(buf, pkt.data.login.map_seed);
-                put_i8(buf, pkt.data.login.dimension);
-                true
-            }
-            2 => {
-                put_str(buf, c_to_str_safe(pkt.data.handshake.username));
-                true
-            }
-            3 => {
-                put_str(buf, c_to_str_safe(pkt.data.chat.message));
-                true
-            }
-            4 => {
-                put_i64(buf, pkt.data.update_time.time);
-                true
-            }
-            5 => {
-                put_i32(buf, pkt.data.inventory.inventory_type);
-                put_i16(buf, pkt.data.inventory.item_count);
-                if !pkt.data.inventory.slots.is_null() && pkt.data.inventory.item_count > 0 {
-                    let slots = std::slice::from_raw_parts(pkt.data.inventory.slots, pkt.data.inventory.item_count as usize);
-                    for s in slots {
-                        put_i16(buf, s.item_id);
-                        if s.item_id >= 0 {
-                            put_i8(buf, s.count);
-                            put_i16(buf, s.damage);
-                        }
-                    }
-                }
-                true
-            }
-            6 => {
-                put_i32(buf, pkt.data.spawn_position.x);
-                put_i32(buf, pkt.data.spawn_position.y);
-                put_i32(buf, pkt.data.spawn_position.z);
-                true
-            }
-            7 => {
-                put_i32(buf, pkt.data.use_entity.player_entity_id);
-                put_i32(buf, pkt.data.use_entity.target_entity_id);
-                put_u8(buf, if pkt.data.use_entity.is_left_click { 1 } else { 0 });
-                true
-            }
-            8 => {
-                put_i8(buf, pkt.data.update_health.health);
-                true
-            }
-            9 => true,
-            10 => {
-                put_u8(buf, if pkt.data.flying.on_ground { 1 } else { 0 });
-                true
-            }
-            11 => {
-                put_f64(buf, pkt.data.position.x);
-                put_f64(buf, pkt.data.position.y);
-                put_f64(buf, pkt.data.position.stance);
-                put_f64(buf, pkt.data.position.z);
-                put_u8(buf, if pkt.data.position.on_ground { 1 } else { 0 });
-                true
-            }
-            12 => {
-                put_f32(buf, pkt.data.look.yaw);
-                put_f32(buf, pkt.data.look.pitch);
-                put_u8(buf, if pkt.data.look.on_ground { 1 } else { 0 });
-                true
-            }
-            13 => {
-                put_f64(buf, pkt.data.look_move.x);
-                put_f64(buf, pkt.data.look_move.y);
-                put_f64(buf, pkt.data.look_move.stance);
-                put_f64(buf, pkt.data.look_move.z);
-                put_f32(buf, pkt.data.look_move.yaw);
-                put_f32(buf, pkt.data.look_move.pitch);
-                put_u8(buf, if pkt.data.look_move.on_ground { 1 } else { 0 });
-                true
-            }
-            14 => {
-                put_i8(buf, pkt.data.block_dig.status);
-                put_i32(buf, pkt.data.block_dig.x);
-                put_i8(buf, pkt.data.block_dig.y);
-                put_i32(buf, pkt.data.block_dig.z);
-                put_i8(buf, pkt.data.block_dig.face);
-                true
-            }
-            15 => {
-                put_i16(buf, pkt.data.place.item_id);
-                put_i32(buf, pkt.data.place.x);
-                put_i8(buf, pkt.data.place.y);
-                put_i32(buf, pkt.data.place.z);
-                put_i8(buf, pkt.data.place.direction);
-                true
-            }
-            16 => {
-                put_i32(buf, pkt.data.item_switch.entity_id);
-                put_i16(buf, pkt.data.item_switch.item_id);
-                true
-            }
-            17 => {
-                put_i16(buf, pkt.data.add_to_inventory.item_id);
-                put_i8(buf, pkt.data.add_to_inventory.count);
-                put_i16(buf, pkt.data.add_to_inventory.damage);
-                true
-            }
-            18 => {
-                put_i32(buf, pkt.data.arm_anim.entity_id);
-                put_i8(buf, pkt.data.arm_anim.animate);
-                true
-            }
-            20 => {
-                put_i32(buf, pkt.data.named_entity_spawn.entity_id);
-                put_str(buf, c_to_str_safe(pkt.data.named_entity_spawn.name));
-                put_i32(buf, pkt.data.named_entity_spawn.x);
-                put_i32(buf, pkt.data.named_entity_spawn.y);
-                put_i32(buf, pkt.data.named_entity_spawn.z);
-                put_i8(buf, pkt.data.named_entity_spawn.rotation);
-                put_i8(buf, pkt.data.named_entity_spawn.pitch);
-                put_i16(buf, pkt.data.named_entity_spawn.current_item);
-                true
-            }
-            21 => {
-                put_i32(buf, pkt.data.pickup_spawn.entity_id);
-                put_i16(buf, pkt.data.pickup_spawn.item_id);
-                put_i8(buf, pkt.data.pickup_spawn.count);
-                put_i32(buf, pkt.data.pickup_spawn.x);
-                put_i32(buf, pkt.data.pickup_spawn.y);
-                put_i32(buf, pkt.data.pickup_spawn.z);
-                put_i8(buf, pkt.data.pickup_spawn.rotation);
-                put_i8(buf, pkt.data.pickup_spawn.pitch);
-                put_i8(buf, pkt.data.pickup_spawn.roll);
-                true
-            }
-            22 => {
-                put_i32(buf, pkt.data.collect.collected_entity_id);
-                put_i32(buf, pkt.data.collect.collector_entity_id);
-                true
-            }
-            23 => {
-                put_i32(buf, pkt.data.vehicle_spawn.entity_id);
-                put_i8(buf, pkt.data.vehicle_spawn.vehicle_type);
-                put_i32(buf, pkt.data.vehicle_spawn.x);
-                put_i32(buf, pkt.data.vehicle_spawn.y);
-                put_i32(buf, pkt.data.vehicle_spawn.z);
-                true
-            }
-            24 => {
-                put_i32(buf, pkt.data.mob_spawn.entity_id);
-                put_u8(buf, pkt.data.mob_spawn.mob_type);
-                put_i32(buf, pkt.data.mob_spawn.x);
-                put_i32(buf, pkt.data.mob_spawn.y);
-                put_i32(buf, pkt.data.mob_spawn.z);
-                put_i8(buf, pkt.data.mob_spawn.yaw);
-                put_i8(buf, pkt.data.mob_spawn.pitch);
-                true
-            }
-            28 => {
-                put_i32(buf, pkt.data.entity_velocity.entity_id);
-                put_i16(buf, pkt.data.entity_velocity.motion_x);
-                put_i16(buf, pkt.data.entity_velocity.motion_y);
-                put_i16(buf, pkt.data.entity_velocity.motion_z);
-                true
-            }
-            29 => {
-                put_i32(buf, pkt.data.destroy_entity.entity_id);
-                true
-            }
-            30 => {
-                put_i32(buf, pkt.data.entity.entity_id);
-                true
-            }
-            31 => {
-                put_i32(buf, pkt.data.rel_entity_move.entity_id);
-                put_i8(buf, pkt.data.rel_entity_move.dx);
-                put_i8(buf, pkt.data.rel_entity_move.dy);
-                put_i8(buf, pkt.data.rel_entity_move.dz);
-                true
-            }
-            32 => {
-                put_i32(buf, pkt.data.entity_look.entity_id);
-                put_i8(buf, pkt.data.entity_look.yaw);
-                put_i8(buf, pkt.data.entity_look.pitch);
-                true
-            }
-            33 => {
-                put_i32(buf, pkt.data.rel_entity_move_look.entity_id);
-                put_i8(buf, pkt.data.rel_entity_move_look.dx);
-                put_i8(buf, pkt.data.rel_entity_move_look.dy);
-                put_i8(buf, pkt.data.rel_entity_move_look.dz);
-                put_i8(buf, pkt.data.rel_entity_move_look.yaw);
-                put_i8(buf, pkt.data.rel_entity_move_look.pitch);
-                true
-            }
-            34 => {
-                put_i32(buf, pkt.data.entity_teleport.entity_id);
-                put_i32(buf, pkt.data.entity_teleport.x);
-                put_i32(buf, pkt.data.entity_teleport.y);
-                put_i32(buf, pkt.data.entity_teleport.z);
-                put_i8(buf, pkt.data.entity_teleport.yaw);
-                put_i8(buf, pkt.data.entity_teleport.pitch);
-                true
-            }
-            38 => {
-                put_i32(buf, pkt.data.entity_status.entity_id);
-                put_i8(buf, pkt.data.entity_status.status);
-                true
-            }
-            39 => {
-                put_i32(buf, pkt.data.attach_entity.entity_id);
-                put_i32(buf, pkt.data.attach_entity.vehicle_id);
-                true
-            }
-            50 => {
-                put_i32(buf, pkt.data.pre_chunk.x);
-                put_i32(buf, pkt.data.pre_chunk.z);
-                put_u8(buf, if pkt.data.pre_chunk.mode { 1 } else { 0 });
-                true
-            }
-            53 => {
-                put_i32(buf, pkt.data.block_change.x);
-                put_i8(buf, pkt.data.block_change.y);
-                put_i32(buf, pkt.data.block_change.z);
-                put_u8(buf, pkt.data.block_change.block_type);
-                put_u8(buf, pkt.data.block_change.metadata);
-                true
-            }
-            59 => {
-                put_i32(buf, pkt.data.complex_entity.x);
-                put_i16(buf, pkt.data.complex_entity.y);
-                put_i32(buf, pkt.data.complex_entity.z);
-                let len = pkt.data.complex_entity.nbt_len as i16;
-                put_i16(buf, len);
-                if !pkt.data.complex_entity.nbt_data.is_null() && len > 0 {
-                    let slice = std::slice::from_raw_parts(pkt.data.complex_entity.nbt_data, len as usize);
-                    buf.extend_from_slice(slice);
-                }
-                true
-            }
-            255 => {
-                put_str(buf, c_to_str_safe(pkt.data.kick.reason));
-                true
-            }
-            _ => false,
-        }
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn rust_network_manager_send_packet(
-    manager: *mut RustNetworkManager,
-    packet: *const RustPacket,
-    is_chunk_data: bool,
-) -> bool {
-    if manager.is_null() || packet.is_null() {
-        return false;
-    }
-    let m = &*manager;
-    if m.is_server_terminating.load(Ordering::Relaxed) {
-        return false;
-    }
-    let mut bytes = Vec::with_capacity(64);
-    if !encode_packet(&*packet, &mut bytes) {
-        return false;
-    }
-    let len = bytes.len();
-    m.send_queue_byte_length.fetch_add(len, Ordering::Relaxed);
-
-    let &(ref lock, ref cv) = &*m.write_queue;
-    if let Ok(mut q) = lock.lock() {
-        q.push_back((bytes, is_chunk_data));
-    }
-    cv.notify_one();
-    true
-}
-
-unsafe fn to_ffi_packet(pkt: PacketData) -> RustPacket {
+/// Encode one outbound tracker packet (field order mirrors the vanilla
+/// readers byte-for-byte; see the audit against the java/ sources).
+pub fn encode_packet(pkt: &RustPacket, buf: &mut Vec<u8>) {
     match pkt {
-        PacketData::KeepAlive => RustPacket {
-            packet_id: 0,
-            data: std::mem::zeroed(),
-        },
-        PacketData::Login { protocol_version, username, password, map_seed, dimension } => {
-            let u_c = CString::new(username).unwrap_or_default().into_raw();
-            let p_c = CString::new(password).unwrap_or_default().into_raw();
-            RustPacket {
-                packet_id: 1,
-                data: RustPacketUnion {
-                    login: RustPacket1Login {
-                        protocol_version,
-                        username: u_c,
-                        password: p_c,
-                        map_seed,
-                        dimension,
-                    }
-                }
-            }
+        RustPacket::BlockItemSwitch { entity_id, item_id } => {
+            put_u8(buf, 16);
+            put_i32(buf, *entity_id);
+            put_i16(buf, *item_id);
         }
-        PacketData::Handshake { username } => {
-            let u_c = CString::new(username).unwrap_or_default().into_raw();
-            RustPacket {
-                packet_id: 2,
-                data: RustPacketUnion {
-                    handshake: RustPacket2Handshake {
-                        username: u_c,
-                    }
-                }
-            }
+        RustPacket::ArmAnimation { entity_id, animate } => {
+            put_u8(buf, 18);
+            put_i32(buf, *entity_id);
+            put_i8(buf, *animate);
         }
-        PacketData::Chat { message } => {
-            let m_c = CString::new(message).unwrap_or_default().into_raw();
-            RustPacket {
-                packet_id: 3,
-                data: RustPacketUnion {
-                    chat: RustPacket3Chat {
-                        message: m_c,
-                    }
-                }
-            }
+        RustPacket::NamedEntitySpawn {
+            entity_id,
+            username,
+            x,
+            y,
+            z,
+            rotation,
+            pitch,
+            current_item,
+        } => {
+            put_u8(buf, 20);
+            put_i32(buf, *entity_id);
+            put_str(buf, username);
+            put_i32(buf, *x);
+            put_i32(buf, *y);
+            put_i32(buf, *z);
+            put_i8(buf, *rotation);
+            put_i8(buf, *pitch);
+            put_i16(buf, *current_item);
         }
-        PacketData::PlayerInventory { inventory_type, slots } => {
-            let count = slots.len() as i16;
-            let mut raw_slots = slots.clone();
-            raw_slots.shrink_to_fit();
-            let slots_ptr = raw_slots.as_mut_ptr();
-            std::mem::forget(raw_slots);
-            RustPacket {
-                packet_id: 5,
-                data: RustPacketUnion {
-                    inventory: RustPacket5PlayerInventory {
-                        inventory_type,
-                        item_count: count,
-                        slots: slots_ptr,
-                    }
-                }
-            }
+        RustPacket::PickupSpawn {
+            entity_id,
+            item_id,
+            count,
+            x,
+            y,
+            z,
+            rotation,
+            pitch,
+            roll,
+        } => {
+            put_u8(buf, 21);
+            put_i32(buf, *entity_id);
+            put_i16(buf, *item_id);
+            put_i8(buf, *count);
+            put_i32(buf, *x);
+            put_i32(buf, *y);
+            put_i32(buf, *z);
+            put_i8(buf, *rotation);
+            put_i8(buf, *pitch);
+            put_i8(buf, *roll);
         }
-        PacketData::UseEntity { player_entity_id, target_entity_id, is_left_click } => {
-            RustPacket {
-                packet_id: 7,
-                data: RustPacketUnion {
-                    use_entity: RustPacket7UseEntity {
-                        player_entity_id,
-                        target_entity_id,
-                        is_left_click,
-                    }
-                }
-            }
+        RustPacket::VehicleSpawn { entity_id, vehicle_type, x, y, z } => {
+            put_u8(buf, 23);
+            put_i32(buf, *entity_id);
+            put_i8(buf, *vehicle_type);
+            put_i32(buf, *x);
+            put_i32(buf, *y);
+            put_i32(buf, *z);
         }
-        PacketData::Respawn => RustPacket {
-            packet_id: 9,
-            data: std::mem::zeroed(),
-        },
-        PacketData::Flying { on_ground } => {
-            RustPacket {
-                packet_id: 10,
-                data: RustPacketUnion {
-                    flying: RustPacket10Flying {
-                        on_ground,
-                    }
-                }
-            }
+        RustPacket::MobSpawn { entity_id, mob_type, x, y, z, yaw, pitch } => {
+            put_u8(buf, 24);
+            put_i32(buf, *entity_id);
+            put_u8(buf, *mob_type);
+            put_i32(buf, *x);
+            put_i32(buf, *y);
+            put_i32(buf, *z);
+            put_i8(buf, *yaw);
+            put_i8(buf, *pitch);
         }
-        PacketData::PlayerPosition { x, y, stance, z, on_ground } => {
-            RustPacket {
-                packet_id: 11,
-                data: RustPacketUnion {
-                    position: RustPacket11PlayerPosition {
-                        x,
-                        y,
-                        stance,
-                        z,
-                        on_ground,
-                    }
-                }
-            }
+        RustPacket::EntityVelocity { entity_id, motion_x, motion_y, motion_z } => {
+            put_u8(buf, 28);
+            put_i32(buf, *entity_id);
+            put_i16(buf, *motion_x);
+            put_i16(buf, *motion_y);
+            put_i16(buf, *motion_z);
         }
-        PacketData::PlayerLook { yaw, pitch, on_ground } => {
-            RustPacket {
-                packet_id: 12,
-                data: RustPacketUnion {
-                    look: RustPacket12PlayerLook {
-                        yaw,
-                        pitch,
-                        on_ground,
-                    }
-                }
-            }
+        RustPacket::DestroyEntity { entity_id } => {
+            put_u8(buf, 29);
+            put_i32(buf, *entity_id);
         }
-        PacketData::PlayerLookMove { x, y, stance, z, yaw, pitch, on_ground } => {
-            RustPacket {
-                packet_id: 13,
-                data: RustPacketUnion {
-                    look_move: RustPacket13PlayerLookMove {
-                        x,
-                        y,
-                        stance,
-                        z,
-                        yaw,
-                        pitch,
-                        on_ground,
-                    }
-                }
-            }
+        RustPacket::Entity { entity_id } => {
+            put_u8(buf, 30);
+            put_i32(buf, *entity_id);
         }
-        PacketData::BlockDig { status, x, y, z, face } => {
-            RustPacket {
-                packet_id: 14,
-                data: RustPacketUnion {
-                    block_dig: RustPacket14BlockDig {
-                        status,
-                        x,
-                        y,
-                        z,
-                        face,
-                    }
-                }
-            }
+        RustPacket::RelEntityMove { entity_id, dx, dy, dz } => {
+            put_u8(buf, 31);
+            put_i32(buf, *entity_id);
+            put_i8(buf, *dx);
+            put_i8(buf, *dy);
+            put_i8(buf, *dz);
         }
-        PacketData::Place { item_id, x, y, z, direction } => {
-            RustPacket {
-                packet_id: 15,
-                data: RustPacketUnion {
-                    place: RustPacket15Place {
-                        item_id,
-                        x,
-                        y,
-                        z,
-                        direction,
-                    }
-                }
-            }
+        RustPacket::EntityLook { entity_id, yaw, pitch } => {
+            put_u8(buf, 32);
+            put_i32(buf, *entity_id);
+            put_i8(buf, *yaw);
+            put_i8(buf, *pitch);
         }
-        PacketData::BlockItemSwitch { entity_id, item_id } => {
-            RustPacket {
-                packet_id: 16,
-                data: RustPacketUnion {
-                    item_switch: RustPacket16BlockItemSwitch {
-                        entity_id,
-                        item_id,
-                    }
-                }
-            }
+        RustPacket::RelEntityMoveLook { entity_id, dx, dy, dz, yaw, pitch } => {
+            put_u8(buf, 33);
+            put_i32(buf, *entity_id);
+            put_i8(buf, *dx);
+            put_i8(buf, *dy);
+            put_i8(buf, *dz);
+            put_i8(buf, *yaw);
+            put_i8(buf, *pitch);
         }
-        PacketData::ArmAnimation { entity_id, animate } => {
-            RustPacket {
-                packet_id: 18,
-                data: RustPacketUnion {
-                    arm_anim: RustPacket18ArmAnimation {
-                        entity_id,
-                        animate,
-                    }
-                }
-            }
+        RustPacket::EntityTeleport { entity_id, x, y, z, yaw, pitch } => {
+            put_u8(buf, 34);
+            put_i32(buf, *entity_id);
+            put_i32(buf, *x);
+            put_i32(buf, *y);
+            put_i32(buf, *z);
+            put_i8(buf, *yaw);
+            put_i8(buf, *pitch);
         }
-        PacketData::PickupSpawn { entity_id, item_id, count, x, y, z, rotation, pitch, roll } => {
-            RustPacket {
-                packet_id: 21,
-                data: RustPacketUnion {
-                    pickup_spawn: RustPacket21PickupSpawn {
-                        entity_id,
-                        item_id,
-                        count,
-                        x,
-                        y,
-                        z,
-                        rotation,
-                        pitch,
-                        roll,
-                    }
-                }
-            }
+        RustPacket::EntityStatus { entity_id, status } => {
+            put_u8(buf, 38);
+            put_i32(buf, *entity_id);
+            put_i8(buf, *status);
         }
-        PacketData::ComplexEntity { x, y, z, nbt_data } => {
-            let mut raw_nbt = nbt_data.clone();
-            raw_nbt.shrink_to_fit();
-            let nbt_ptr = raw_nbt.as_mut_ptr();
-            let nbt_len = raw_nbt.len();
-            std::mem::forget(raw_nbt);
-            RustPacket {
-                packet_id: 59,
-                data: RustPacketUnion {
-                    complex_entity: RustPacket59ComplexEntity {
-                        x,
-                        y,
-                        z,
-                        nbt_data: nbt_ptr,
-                        nbt_len,
-                    }
-                }
-            }
-        }
-        PacketData::KickDisconnect { reason } => {
-            let r_c = CString::new(reason).unwrap_or_default().into_raw();
-            RustPacket {
-                packet_id: 255,
-                data: RustPacketUnion {
-                    kick: RustPacket255KickDisconnect {
-                        reason: r_c,
-                    }
-                }
-            }
+        RustPacket::AttachEntity { entity_id, vehicle_id } => {
+            put_u8(buf, 39);
+            put_i32(buf, *entity_id);
+            put_i32(buf, *vehicle_id);
         }
     }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn rust_network_manager_poll_parsed(
-    manager: *mut RustNetworkManager,
-) -> *mut RustPacket {
-    if manager.is_null() {
-        return std::ptr::null_mut();
-    }
-    let m = &*manager;
-    let mut q = match m.read_queue.lock() {
-        Ok(guard) => guard,
-        Err(_) => return std::ptr::null_mut(),
-    };
-    if let Some(pkt_data) = q.pop_front() {
-        let ffi_pkt = to_ffi_packet(pkt_data);
-        Box::into_raw(Box::new(ffi_pkt))
-    } else {
-        std::ptr::null_mut()
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn rust_network_manager_free_packet(packet_ptr: *mut RustPacket) {
-    if packet_ptr.is_null() {
-        return;
-    }
-    let packet = Box::from_raw(packet_ptr);
-    match packet.packet_id {
-        1 => {
-            if !packet.data.login.username.is_null() {
-                let _ = CString::from_raw(packet.data.login.username as *mut c_char);
-            }
-            if !packet.data.login.password.is_null() {
-                let _ = CString::from_raw(packet.data.login.password as *mut c_char);
-            }
-        }
-        2 => {
-            if !packet.data.handshake.username.is_null() {
-                let _ = CString::from_raw(packet.data.handshake.username as *mut c_char);
-            }
-        }
-        3 => {
-            if !packet.data.chat.message.is_null() {
-                let _ = CString::from_raw(packet.data.chat.message as *mut c_char);
-            }
-        }
-        5 => {
-            if !packet.data.inventory.slots.is_null() {
-                let _ = Vec::from_raw_parts(
-                    packet.data.inventory.slots as *mut FfiSlotData,
-                    packet.data.inventory.item_count as usize,
-                    packet.data.inventory.item_count as usize,
-                );
-            }
-        }
-        59 => {
-            if !packet.data.complex_entity.nbt_data.is_null() {
-                let _ = Vec::from_raw_parts(
-                    packet.data.complex_entity.nbt_data as *mut u8,
-                    packet.data.complex_entity.nbt_len,
-                    packet.data.complex_entity.nbt_len,
-                );
-            }
-        }
-        255 => {
-            if !packet.data.kick.reason.is_null() {
-                let _ = CString::from_raw(packet.data.kick.reason as *mut c_char);
-            }
-        }
-        _ => {}
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn rust_network_manager_shutdown(
-    manager: *mut RustNetworkManager,
-    reason: *const c_char,
-) {
-    if manager.is_null() {
-        return;
-    }
-    let m = &*manager;
-    let reason_str = c_to_str(reason).to_string();
-    m.shutdown(reason_str);
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn rust_network_manager_is_running(manager: *mut RustNetworkManager) -> bool {
-    if manager.is_null() {
-        return false;
-    }
-    (*manager).is_running.load(Ordering::SeqCst)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn rust_network_manager_is_terminating(manager: *mut RustNetworkManager) -> bool {
-    if manager.is_null() {
-        return false;
-    }
-    (*manager).is_terminating.load(Ordering::SeqCst)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn rust_network_manager_get_termination_reason(
-    manager: *mut RustNetworkManager,
-    out_buf: *mut c_char,
-    max_len: size_t,
-) {
-    if manager.is_null() || out_buf.is_null() || max_len == 0 {
-        return;
-    }
-    let m = &*manager;
-    let reason = match m.termination_reason.lock() {
-        Ok(guard) => guard,
-        Err(_) => return,
-    };
-    let c_str = match std::ffi::CString::new(reason.as_str()) {
-        Ok(s) => s,
-        Err(_) => return,
-    };
-    let bytes = c_str.as_bytes_with_nul();
-    let len = std::cmp::min(bytes.len(), max_len);
-    if len == 0 {
-        return;
-    }
-    std::ptr::copy_nonoverlapping(bytes.as_ptr() as *const c_char, out_buf, len);
-    *out_buf.add(len - 1) = 0;
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn rust_network_manager_get_send_queue_length(manager: *mut RustNetworkManager) -> size_t {
-    if manager.is_null() {
-        return 0;
-    }
-    (*manager).send_queue_byte_length.load(Ordering::Relaxed) as size_t
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn rust_network_manager_server_shutdown(manager: *mut RustNetworkManager) {
-    if manager.is_null() {
-        return;
-    }
-    (*manager).is_server_terminating.store(true, Ordering::SeqCst);
-    let &(_, ref cv) = &*(*manager).write_queue;
-    cv.notify_all();
 }
 
 #[cfg(test)]
@@ -1663,53 +561,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_encode_chat_packet() {
-        let msg = CString::new("Hello World").unwrap();
-        let pkt = RustPacket {
-            packet_id: 3,
-            data: RustPacketUnion {
-                chat: RustPacket3Chat {
-                    message: msg.as_ptr(),
-                },
-            },
+    fn test_encode_named_spawn_roundtrip() {
+        let pkt = RustPacket::NamedEntitySpawn {
+            entity_id: 7,
+            username: "steve".to_string(),
+            x: 160,
+            y: 1024,
+            z: -48,
+            rotation: 64,
+            pitch: -32,
+            current_item: 278,
         };
         let mut buf = Vec::new();
-        assert!(encode_packet(&pkt, &mut buf));
-        assert_eq!(buf[0], 3); // Packet ID
-        assert_eq!(&buf[1..3], &(11u16).to_be_bytes()); // length 11
-        assert_eq!(&buf[3..], b"Hello World");
+        encode_packet(&pkt, &mut buf);
+        assert_eq!(buf[0], 20);
+        assert_eq!(&buf[1..5], &7i32.to_be_bytes());
+        assert_eq!(&buf[5..7], &5u16.to_be_bytes());
+        assert_eq!(&buf[7..12], b"steve");
     }
 
     #[test]
-    fn test_encode_update_health() {
-        let pkt = RustPacket {
-            packet_id: 8,
-            data: RustPacketUnion {
-                update_health: RustPacket8UpdateHealth {
-                    health: 15,
-                },
-            },
+    fn test_encode_mob_spawn_roundtrip() {
+        let pkt = RustPacket::MobSpawn {
+            entity_id: 9,
+            mob_type: 50,
+            x: 1,
+            y: 2,
+            z: 3,
+            yaw: 10,
+            pitch: -10,
         };
         let mut buf = Vec::new();
-        assert!(encode_packet(&pkt, &mut buf));
-        assert_eq!(buf[0], 8);
-        assert_eq!(buf[1], 15);
-        assert_eq!(buf.len(), 2);
-    }
-
-    #[test]
-    fn test_encode_update_time() {
-        let pkt = RustPacket {
-            packet_id: 4,
-            data: RustPacketUnion {
-                update_time: RustPacket4UpdateTime {
-                    time: 123456789,
-                },
-            },
-        };
-        let mut buf = Vec::new();
-        assert!(encode_packet(&pkt, &mut buf));
-        assert_eq!(buf[0], 4);
-        assert_eq!(&buf[1..9], &(123456789i64).to_be_bytes());
+        encode_packet(&pkt, &mut buf);
+        assert_eq!(
+            buf,
+            vec![24, 0, 0, 0, 9, 50, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 10, 246]
+        );
     }
 }
