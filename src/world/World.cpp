@@ -1673,6 +1673,10 @@ int World::countPassiveAnimals() const {
 namespace {
 thread_local World* g_spawnerWorld = nullptr;
 thread_local bool g_spawnerHostile = true;
+// Last entity joined via spawnerTrySpawn. Needed because spawnEntityInWorld
+// defers into pendingEntities_ (flushed later), so getEntityById cannot see
+// it yet — the old code mounted via the live pointer for the same reason.
+thread_local Entity* g_spawnerLastSpawned = nullptr;
 
 extern "C" int32_t spawnerNextInt(int32_t bound) {
     std::uniform_int_distribution<int> dist(0, bound - 1);
@@ -1716,7 +1720,9 @@ extern "C" int32_t spawnerTrySpawn(uint8_t kind, float fx, float fy, float fz, f
         if (!mob->getCanSpawnHere()) return -1;
         *outMaxInChunk = mob->getMaxSpawnedInChunk();
         entityId = mob->entityId;
+        Entity* spawned = mob.get();
         world->spawnEntityInWorld(std::move(mob));
+        g_spawnerLastSpawned = spawned;
     } else {
         std::unique_ptr<EntityAnimals> animal;
         switch (kind) {
@@ -1729,7 +1735,9 @@ extern "C" int32_t spawnerTrySpawn(uint8_t kind, float fx, float fy, float fz, f
         if (!animal->getCanSpawnHere()) return -1;
         *outMaxInChunk = animal->getMaxSpawnedInChunk();
         entityId = animal->entityId;
+        Entity* spawned = animal.get();
         world->spawnEntityInWorld(std::move(animal));
+        g_spawnerLastSpawned = spawned;
     }
     return entityId;
 }
@@ -1737,7 +1745,11 @@ extern "C" int32_t spawnerTrySpawn(uint8_t kind, float fx, float fy, float fz, f
 extern "C" bool spawnerSpawnJockey(float fx, float fy, float fz, float yaw, int32_t hostId) {
     World* world = g_spawnerWorld;
     if (!world) return false;
-    Entity* host = world->getEntityById(hostId);
+    // Prefer the live pointer: the host was just joined into pendingEntities_
+    // (see above) and getEntityById cannot see it yet.
+    Entity* host = (g_spawnerLastSpawned && g_spawnerLastSpawned->entityId == hostId)
+        ? g_spawnerLastSpawned
+        : world->getEntityById(hostId);
     if (!host) return false;
     auto skeleton = std::make_unique<EntitySkeleton>(world);
     skeleton->setPositionAndRotation(fx, fy, fz, yaw, 0.0f);
@@ -1752,7 +1764,10 @@ struct SpawnerWorldGuard {
         g_spawnerWorld = world;
         g_spawnerHostile = hostile;
     }
-    ~SpawnerWorldGuard() { g_spawnerWorld = nullptr; }
+    ~SpawnerWorldGuard() {
+        g_spawnerWorld = nullptr;
+        g_spawnerLastSpawned = nullptr;
+    }
 };
 
 void gatherPlayerPositions(const std::vector<EntityPlayerMP*>& players,
