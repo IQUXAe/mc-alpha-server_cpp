@@ -486,8 +486,7 @@ impl World {
     }
 
     /// Falling-sand tick (mirrors `EntityFallingSand::tick`).
-    pub fn tick_falling(&mut self, id: EntityId) {
-        self.entities.tick_base(id);
+    pub fn tick_falling(&mut self, id: EntityId) {        self.entities.tick_base(id);
         let (block_id, motion) = match self.entities.get_mut(id) {
             Some(Entity::Falling(e)) => {
                 if e.block_id == 0 {
@@ -541,6 +540,203 @@ impl World {
             }
             _ => {}
         }
+    }
+
+    /// Boat damage (mirrors `EntityBoat::attackEntityFrom`): rock the boat,
+    /// break past 40 damage with plank/stick drops. Returns true when the
+    /// boat broke.
+    pub fn damage_boat(&mut self, id: EntityId, amount: i32) -> bool {
+        if amount <= 0 {
+            return false;
+        }
+        let broke = match self.entities.get_mut(id) {
+            Some(Entity::Boat(b)) => {
+                if b.body.dead {
+                    return false;
+                }
+                b.forward_dir = -b.forward_dir;
+                b.time_since_hit = 10;
+                b.damage_taken += amount * 10;
+                b.damage_taken > 40
+            }
+            _ => return false,
+        };
+        if !broke {
+            return false;
+        }
+        // Eject the rider like C++ before dropping materials.
+        let rider = self.entities.get(id).map(|e| e.body().ridden_by).unwrap_or(-1);
+        if rider >= 0 {
+            self.entities.mount(rider, None);
+        }
+        let (px, py, pz) = match self.entities.get(id) {
+            Some(e) => (e.body().pos[0], e.body().pos[1], e.body().pos[2]),
+            None => return true,
+        };
+        for _ in 0..3 {
+            self.spawn_item_entity(5, 1, 0, px, py, pz);
+        }
+        for _ in 0..2 {
+            self.spawn_item_entity(280, 1, 0, px, py, pz);
+        }
+        if let Some(Entity::Boat(b)) = self.entities.get_mut(id) {
+            b.body.dead = true;
+        }
+        true
+    }
+
+    /// Boat tick (mirrors `EntityBoat::tick`).
+    pub fn tick_boat(&mut self, id: EntityId) {
+        self.entities.tick_base(id);
+        let alive = match self.entities.get_mut(id) {
+            Some(Entity::Boat(b)) => {
+                if b.body.dead {
+                    return;
+                }
+                if b.time_since_hit > 0 {
+                    b.time_since_hit -= 1;
+                }
+                if b.damage_taken > 0 {
+                    b.damage_taken -= 1;
+                }
+                // Eject non-player riders (custom-logic edge case).
+                let rider = b.body.ridden_by;
+                (rider, b.body.motion[0], b.body.motion[1], b.body.motion[2])
+            }
+            _ => return,
+        };
+        if alive.0 >= 0 {
+            let is_player = matches!(self.entities.get(alive.0), Some(Entity::Player(_)));
+            if !is_player {
+                self.entities.mount(alive.0, None);
+            }
+        }
+        // Buoyancy from the water fraction under the hull.
+        let (min_x, min_y, min_z, max_x, max_y, max_z) = match self.entities.get(id) {
+            Some(e) => {
+                let b = e.body();
+                (b.bounding_box.min_x, b.bounding_box.min_y, b.bounding_box.min_z,
+                 b.bounding_box.max_x, b.bounding_box.max_y, b.bounding_box.max_z)
+            }
+            None => return,
+        };
+        let fraction = crate::entity_misc::water_fraction_scan(min_x, min_y, min_z, max_x, max_y, max_z, |x, y, z| {
+            self.is_water(x, y, z)
+        });
+        // Rider drive.
+        let rider_motion = match self.entities.get(id) {
+            Some(e) => {
+                let r = e.body().ridden_by;
+                if r >= 0 {
+                    self.entities.get(r).map(|re| (re.body().motion[0], re.body().motion[2]))
+                } else {
+                    None
+                }
+            }
+            None => return,
+        };
+        if let Some(Entity::Boat(b)) = self.entities.get_mut(id) {
+            b.body.motion[1] += 0.04 * (fraction * 2.0 - 1.0);
+            if let Some((rx, rz)) = rider_motion {
+                b.body.motion[0] += rx * 0.2;
+                b.body.motion[2] += rz * 0.2;
+            }
+            b.body.motion[0] = b.body.motion[0].clamp(-0.4, 0.4);
+            b.body.motion[2] = b.body.motion[2].clamp(-0.4, 0.4);
+            if b.body.on_ground {
+                b.body.motion[0] *= 0.5;
+                b.body.motion[1] *= 0.5;
+                b.body.motion[2] *= 0.5;
+            }
+        }
+        let motion = match self.entities.get(id) {
+            Some(e) => (e.body().motion[0], e.body().motion[1], e.body().motion[2]),
+            None => return,
+        };
+        self.move_body(id, motion.0, motion.1, motion.2);
+        // Crash: eject, drop, die.
+        let crash = match self.entities.get(id) {
+            Some(Entity::Boat(b)) => {
+                let speed =
+                    (b.body.motion[0] * b.body.motion[0] + b.body.motion[2] * b.body.motion[2]).sqrt();
+                b.body.collided_horiz && speed > 0.15
+            }
+            _ => return,
+        };
+        if crash {
+            let rider = self.entities.get(id).map(|e| e.body().ridden_by).unwrap_or(-1);
+            if rider >= 0 {
+                self.entities.mount(rider, None);
+            }
+            let (px, py, pz) = match self.entities.get(id) {
+                Some(e) => (e.body().pos[0], e.body().pos[1], e.body().pos[2]),
+                None => return,
+            };
+            for _ in 0..3 {
+                self.spawn_item_entity(5, 1, 0, px, py, pz);
+            }
+            for _ in 0..2 {
+                self.spawn_item_entity(280, 1, 0, px, py, pz);
+            }
+            if let Some(Entity::Boat(b)) = self.entities.get_mut(id) {
+                b.body.dead = true;
+            }
+            return;
+        }
+        if let Some(Entity::Boat(b)) = self.entities.get_mut(id) {
+            b.body.motion[0] *= 0.99;
+            b.body.motion[1] *= 0.95;
+            b.body.motion[2] *= 0.99;
+        }
+        // Yaw follows travel direction.
+        let (dx, dz, yaw) = match self.entities.get(id) {
+            Some(e) => {
+                let b = e.body();
+                (b.pos[0] - b.prev_pos[0], b.pos[2] - b.prev_pos[2], b.yaw)
+            }
+            None => return,
+        };
+        // NOTE: C++ reads prevPos AFTER move (already synced by tick_base
+        // at the START of next tick); here prev holds the pre-move value
+        // from this tick's tick_base, which matches because C++ compares
+        // post-move pos against the same pre-move snapshot.
+        let mut new_yaw = yaw;
+        unsafe {
+            crate::entity_misc::alpha_boat_steer(dx, dz, yaw, &mut new_yaw);
+        }
+        if let Some(Entity::Boat(b)) = self.entities.get_mut(id) {
+            b.body.yaw = new_yaw;
+            b.body.pitch = 0.0;
+        }
+        // Boat-on-boat shoves.
+        let boats: Vec<EntityId> = self
+            .entities
+            .alive_ids()
+            .into_iter()
+            .filter(|oid| {
+                *oid != id && matches!(self.entities.get(*oid), Some(Entity::Boat(_)))
+            })
+            .collect();
+        for oid in boats {
+            let (ax, az, bx, bz) = match (self.entities.get(id), self.entities.get(oid)) {
+                (Some(a), Some(b)) => (a.body().pos[0], a.body().pos[2], b.body().pos[0], b.body().pos[2]),
+                _ => continue,
+            };
+            let mut push = crate::entity_physics::PushOut { dvx1: 0.0, dvz1: 0.0, dvx2: 0.0, dvz2: 0.0 };
+            let ok = unsafe { crate::entity_physics::alpha_entity_push(ax, az, bx, bz, true, true, &mut push) };
+            if !ok {
+                continue;
+            }
+            if let Some(Entity::Boat(b)) = self.entities.get_mut(id) {
+                b.body.motion[0] += push.dvx1;
+                b.body.motion[2] += push.dvz1;
+            }
+            if let Some(Entity::Boat(o)) = self.entities.get_mut(oid) {
+                o.body.motion[0] += push.dvx2;
+                o.body.motion[2] += push.dvz2;
+            }
+        }
+        self.entities.update_rider_position(id);
     }
 }
 
@@ -699,5 +895,75 @@ mod tests {
         assert!(!is_replaceable(39));
         assert!(!is_replaceable(12));
         assert!(!is_replaceable(0));
+    }
+
+    fn add_boat(w: &mut World, x: f64, y: f64, z: f64) -> EntityId {
+        use crate::entity_table::BoatEnt;
+        let id = w.entities.alloc_id();
+        let mut b = Body::new(id, 1.5, 0.6, 0.3);
+        b.set_position(x, y, z);
+        w.entities.insert(crate::entity_table::Entity::Boat(BoatEnt {
+            body: b,
+            time_since_hit: 0,
+            damage_taken: 0,
+            forward_dir: 1,
+        }));
+        id
+    }
+
+    fn add_water_pool(w: &mut World) {
+        // 4x2x4 pool at y 63..64 inside the floor chunk.
+        for x in 6..10 {
+            for z in 6..10 {
+                w.set_block_id(x, 62, z, 1);
+                w.set_block_id(x, 63, z, 8);
+                w.set_block_id(x, 64, z, 8);
+            }
+        }
+    }
+
+    #[test]
+    fn test_boat_floats_in_water() {
+        let mut w = world_with_floor();
+        add_water_pool(&mut w);
+        let id = add_boat(&mut w, 8.0, 64.0, 8.0);
+        w.tick_boat(id);
+        let b = w.entities.get(id).unwrap().body().clone();
+        assert!(!b.dead);
+        assert!(b.motion[1] > 0.0);
+    }
+
+    #[test]
+    fn test_boat_crash_drops_and_dies() {
+        let mut w = world_with_floor();
+        // Wall column east of the boat.
+        for y in 64..67 {
+            w.set_block_id(10, y, 8, 1);
+        }
+        // Motion clamps to ±0.4 before moving: start close enough to hit.
+        let id = add_boat(&mut w, 9.0, 65.0, 8.0);
+        if let Some(crate::entity_table::Entity::Boat(b)) = w.entities.get_mut(id) {
+            b.body.motion = [3.0, 0.0, 3.0];
+        }
+        let before = w.entities.len();
+        w.tick_boat(id);
+        assert!(w.entities.get(id).unwrap().body().dead);
+        // 3 planks + 2 sticks spawned.
+        assert_eq!(w.entities.len(), before + 5);
+    }
+
+    #[test]
+    fn test_boat_damage_breaks_past_40() {
+        let mut w = world_with_floor();
+        let id = add_boat(&mut w, 8.0, 65.0, 8.0);
+        assert!(!w.damage_boat(id, 3));
+        let b = w.entities.get(id).unwrap();
+        let (dir, time) = match b {
+            crate::entity_table::Entity::Boat(b) => (b.forward_dir, b.time_since_hit),
+            _ => unreachable!(),
+        };
+        assert_eq!((dir, time), (-1, 10));
+        assert!(w.damage_boat(id, 5));
+        assert!(w.entities.get(id).unwrap().body().dead);
     }
 }
