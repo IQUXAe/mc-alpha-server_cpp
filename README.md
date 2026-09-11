@@ -1,66 +1,68 @@
 # alpha_server
 
-A C++ server implementation for Minecraft Alpha 1.2.6, written from scratch. Protocol-compatible with vanilla Alpha 1.2.6 clients.
+A Rust server implementation for Minecraft Alpha 1.2.6, written from scratch. Protocol-compatible with vanilla Alpha 1.2.6 clients.
 
 ---
 
-## Building
+## Building & running
 
-**Dependencies:** CMake 3.16+, GCC/Clang with C++23, zlib, LevelDB
+**Dependencies:** a recent stable Rust toolchain.
 
 ```bash
-mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
-./alpha_server
+cd rust/alpha_bridge
+cargo build --release
+./../../target/release/alpha_bridge [server.properties] [world-dir] [port]
 ```
+
+All three arguments are optional: properties default to
+`server.properties`, the world to `world/<level-name>`, the port to
+`server-port`. Run from the directory that holds `server.properties`
+(the world, player files, and `ops.txt` / ban lists live next to it).
 
 ---
 
 ## Architecture
 
+All logic lives in the `alpha_bridge` library (`rust/alpha_bridge/src`):
+
 | Module | Description |
 | :--- | :--- |
-| `network/` | TCP socket I/O, packet serialization, login handshake |
-| `world/` | Chunk storage (LevelDB), **100% identical terrain & biome generation**, block ticks |
-| `entity/` | Entity base, players, item drops, falling sand |
-| `server/` | Player management, block interaction, inventory logic |
-| `core/` | Items, materials, NBT, math utilities |
+| `server.rs` + `main.rs` | 20 TPS loop, sessions, chunk streaming, console, saves |
+| `session.rs` | TCP transport, login state machine, play packet handlers |
+| `world.rs` + `chunk.rs` | Chunk storage, block ticks, skylight, scheduled updates |
+| `generator.rs` + `noise`/`biome`/`density`/`caves`/`decorators` | **1:1 terrain & biome generation** |
+| `entity_*` | Players, mobs, animals, arrows, boats, physics, combat |
+| `tracker.rs` | Entity tracking fan-out to nearby players |
+| `persist.rs` | LevelDB chunk store, `level.dat`, player files (gzip-NBT) |
+| `network.rs` | Packet encode/decode for the Alpha protocol |
+| `server_config`/`server_admin`/`commands` | Properties, ops/ban lists, console commands |
+
+World data (`world/`), `server.properties`, and the ops/ban lists are
+runtime files and stay out of git.
 
 ---
 
-## Comparison with Vanilla Server
+## Comparison with the Vanilla Server
 
-Instead of a bulky list of pros and cons, here is how `alpha_server` fundamentally differs from the original Java implementation:
-
-| Feature / Aspect | Vanilla Alpha 1.2.6 (Java) | `alpha_server` (C++) |
+| Feature / Aspect | Vanilla Alpha 1.2.6 (Java) | `alpha_server` (Rust) |
 | :--- | :--- | :--- |
-| **Performance & Architecture** | | |
-| Memory Footprint | High (JVM overhead) | Minimal (Native C++) |
-| Latency & Stutter | Impacted by GC pauses | Predictable, zero GC overhead |
-| Chunk I/O | Synchronous (blocks main thread)| Asynchronous (dedicated LevelDB thread) |
-| Packet Dispatch | Reflection-based | Direct virtual calls |
-| Network Loop | Standard | Drain-all per tick (reduces movement lag) |
-| Entity Tracking | Every 2 ticks | Every tick |
-| **World & Gameplay** | | |
-| **Terrain & Biomes** | Original algorithm | **Identical to original (1:1 generation)** |
-| Mobs & AI | Fully implemented | Working on it now |
-| Redstone Logic | Fully implemented | Soon |
-| Tile Entities | Chest, Furnace, Sign logic | Fully work! |
+| Memory footprint | High (JVM overhead) | Minimal (native, no GC pauses) |
+| Terrain & biomes | Original algorithm | **Identical to original (1:1 generation)** |
+| Mobs, animals, combat | Fully implemented | Implemented (AI, spawns, attacks, drops) |
+| Tile entities | Chest, furnace, sign | Chest, furnace (with ticking), sign |
+| Multiplayer | Full | Chat, tracking, chunk streaming, inventory sync |
+| Persistence | LevelDB world, NBT players | Same formats (proven against a live C++ DB) |
+| Lighting | Full propagation | Single-chunk skylight pass on set (border seam known) |
 | Dimensions | Overworld & Nether | Overworld only |
-| Authentication | Online mode (HTTP session check) | Work |
+| Authentication | Online mode (session check) | Same (legacy endpoint; prefer offline for LAN) |
 
 ---
 
 ## Roadmap
 
-To reach full feature parity with the vanilla server, the following features are pending implementation:
-
-- Mob AI, spawning, and combat mechanics
-- Redstone signal propagation
 - Nether dimension generation and transitions
-- Operator commands (`/give`, `/tp`, etc.)
-- Proper lighting propagation on block change (currently relies on heightmap only)
+- Redstone wire signal propagation
+- Cross-chunk skylight spread (remove the border seam)
 
 ---
 

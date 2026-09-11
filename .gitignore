@@ -1,11 +1,4 @@
-build/
-CMakeCache.txt
-CMakeFiles/
-Makefile
-cmake_install.cmake
-java/
-
-# Server runtime files
+# Server runtime files (per deployment directory)
 server.properties
 banned-ips.txt
 banned-players.txt
@@ -18,12 +11,6 @@ ops.txt
 *.swp
 *.DS_Store
 
-# Local helper scripts
-build-local.sh
-
 # Rust build artifacts
 rust/**/target/
 rust/**/.rustc_info.json
-build/
-build_release/
-Testing/

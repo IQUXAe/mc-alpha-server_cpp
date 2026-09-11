@@ -1,47 +1,25 @@
-# Rust Migration Staging Area
+# Rust server sources
 
-This folder is the first safe integration point for rewriting selected subsystems in Rust.
+`alpha_bridge/` is the whole server: a library with the game logic plus
+the `alpha_bridge` binary (`src/main.rs`).
 
-## Why start here
-
-The current C++ server is tightly coupled around the main 20 TPS server tick, but some
-areas already have narrow data-oriented boundaries:
-
-- gzip/zstd compression and decompression
-- chunk persistence payloads
-- NBT-oriented serialization helpers
-
-Those are good first Rust targets because they can be tested independently and exposed
-through a small C ABI without rewriting gameplay.
-
-## What lives here now
-
-`alpha_bridge/` is a `staticlib` crate. It started with compression
-(`alpha_gzip_*`, `alpha_zstd_*`, `alpha_buffer_free`) and has since grown
-into the main migration vehicle — see `alpha_bridge.h` (~1000 lines) for the
-full FFI surface. Current Rust-owned areas include:
-
-- compression: gzip/zstd/zlib + `level.dat` NBT encode/decode
-- worldgen: `noise`, `biome`, `density`, `caves`, `decorators`, `generator`
-- storage: `chunk_loader`, `player_storage`, `nbt`
-- player logic: `player_inventory`, `player_combat`, `player_movement`,
-  `player_mining`, `player_digging` (digging state machine)
-- entities/network: `network` (packet encode + `RustNetworkManager`),
-  `pathfinder`, `tracker_math` (tracking math), `mob_spawning` (full
-  hostile/passive spawn passes via batch drivers + callback table),
-  `commands`, `block`, `tile_entity_*`, `random`
-
-## Build locally once Rust is installed
+## Build & test
 
 ```bash
 cd rust/alpha_bridge
-cargo build --release
+cargo build --release   # binary at target/release/alpha_bridge
+cargo test              # full suite (world, entities, sessions, server)
 ```
 
-The resulting static library can later be linked from CMake.
+## Layout highlights
 
-## Suggested migration order
+- `server.rs`, `main.rs` — 20 TPS loop, sessions, chunk streaming,
+  console commands, saves, shutdown.
+- `session.rs` — TCP transport (`Conn`), login state machine, play
+  packet handlers with loopback tests.
+- `world.rs`, `chunk.rs`, `generator.rs` (+ `noise`, `biome`,
+  `density`, `caves`, `decorators`) — simulation and 1:1 terrain gen.
+- `persist.rs` — LevelDB chunk store, `level.dat`, player files.
+- `network.rs` — Alpha protocol packet encode/decode.
 
-1. Replace selected compression call sites in `World.cpp` and `ServerConfigurationManager.cpp`.
-2. Add Rust-side tests for round-tripping chunk payloads.
-3. Move NBT and chunk blob encoding behind the same library.
+Docs on the storage format live in `../docs/world_storage.md`.
