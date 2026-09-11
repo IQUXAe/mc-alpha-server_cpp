@@ -4,7 +4,7 @@
 #include "../world/World.h"
 #include "../block/Block.h"
 #include "../core/MathHelper.h"
-
+#include "../core/RustBridge.h"
 #include <cstdlib>
 
 class ItemStack;
@@ -104,7 +104,7 @@ private:
             return;
         }
 
-        const double impulse = (static_cast<double>(std::rand()) / static_cast<double>(RAND_MAX)) * 0.2 + 0.1;
+        const double impulse = RustBridge::rngNextDouble() * 0.2 + 0.1;
         if (bestSide == 0) motionX = -impulse;
         if (bestSide == 1) motionX = impulse;
         if (bestSide == 2) motionY = -impulse;

@@ -73,9 +73,9 @@ protected:
 
         // Phase 2: path management — wander or re-path to target
         if (isAttacking_ || targetEntity_ == nullptr
-            || (currentPath_ != nullptr && (std::rand() % 20) != 0)) {
-            if ((currentPath_ == nullptr && (std::rand() % 80) == 0)
-                || (std::rand() % 80) == 0) {
+            || (currentPath_ != nullptr && (RustBridge::rngNextInt(20)) != 0)) {
+            if ((currentPath_ == nullptr && (RustBridge::rngNextInt(80)) == 0)
+                || (RustBridge::rngNextInt(80)) == 0) {
                 pickWanderDestination();
             }
         } else if (targetEntity_ != nullptr) {
@@ -94,9 +94,9 @@ protected:
         const int baseY = MathHelper::floor_double(boundingBox.minY);
 
         for (int i = 0; i < 10; ++i) {
-            const int cx = MathHelper::floor_double(posX) + (std::rand() % 13) - 6;
-            const int cy = baseY + (std::rand() % 7) - 3;
-            const int cz = MathHelper::floor_double(posZ) + (std::rand() % 13) - 6;
+            const int cx = MathHelper::floor_double(posX) + RustBridge::rngNextInt(13) - 6;
+            const int cy = baseY + RustBridge::rngNextInt(7) - 3;
+            const int cz = MathHelper::floor_double(posZ) + RustBridge::rngNextInt(13) - 6;
             const float w = getBlockPathWeight(cx, cy, cz);
             if (w > bestWeight) {
                 bestWeight = w;
@@ -121,7 +121,7 @@ protected:
         moveStrafing_ = 0.0f;
         isJumping_ = false;
 
-        if (currentPath_ != nullptr && (std::rand() % 100) != 0) {
+        if (currentPath_ != nullptr && RustBridge::rngNextInt(100) != 0) {
             std::optional<Vec3D> nextPos = currentPath_->getPosition(*this);
             const double widthSq = static_cast<double>(width * 2.0f);
             const double threshold = widthSq * widthSq;
@@ -171,7 +171,7 @@ protected:
         }
 
         // Jump in liquid (80% chance each tick to stay afloat)
-        if (static_cast<float>(std::rand()) / RAND_MAX < 0.8f && inLiquid) {
+        if (RustBridge::rngNextFloat() < 0.8f && inLiquid) {
             isJumping_ = true;
         }
 

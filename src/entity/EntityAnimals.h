@@ -128,7 +128,7 @@ public:
 
 protected:
     int getDropItemId() const override { return Item::porkRaw ? Item::porkRaw->itemID : 0; }
-    int getDropCount() const override { return 1 + (std::rand() % 3); }
+    int getDropCount() const override { return 1 + RustBridge::rngNextInt(3); }
 };
 
 // ==================== EntitySheep ====================
@@ -159,15 +159,13 @@ public:
     void attackEntityFrom(Entity* attacker, int amount) override {
         if (!sheared && worldObj && attacker && dynamic_cast<EntityLiving*>(attacker)) {
             sheared = true;
-            const int woolCount = 1 + (std::rand() % 3);
+            const int woolCount = 1 + RustBridge::rngNextInt(3);
             for (int i = 0; i < woolCount; ++i) {
                 auto wool = std::make_unique<EntityItem>(35, 1, 0);
                 wool->setPosition(posX, posY + static_cast<double>(height) * 0.75, posZ);
-                wool->motionY += static_cast<double>(std::rand()) / RAND_MAX * 0.05;
-                wool->motionX += (static_cast<double>(std::rand()) / RAND_MAX
-                    - static_cast<double>(std::rand()) / RAND_MAX) * 0.1;
-                wool->motionZ += (static_cast<double>(std::rand()) / RAND_MAX
-                    - static_cast<double>(std::rand()) / RAND_MAX) * 0.1;
+                wool->motionY += RustBridge::rngNextDouble() * 0.05;
+                wool->motionX += (RustBridge::rngNextDouble() - RustBridge::rngNextDouble()) * 0.1;
+                wool->motionZ += (RustBridge::rngNextDouble() - RustBridge::rngNextDouble()) * 0.1;
                 worldObj->spawnEntityInWorld(std::move(wool));
             }
         }
@@ -176,7 +174,7 @@ public:
 
 protected:
     int getDropItemId() const override { return sheared ? 0 : 35; }
-    int getDropCount() const override { return sheared ? 0 : (1 + (std::rand() % 3)); }
+    int getDropCount() const override { return sheared ? 0 : (1 + RustBridge::rngNextInt(3)); }
 };
 
 // ==================== EntityCow ====================
@@ -210,14 +208,14 @@ public:
 
 protected:
     int getDropItemId() const override { return Item::leather ? Item::leather->itemID : 0; }
-    int getDropCount() const override { return 1 + (std::rand() % 3); }
+    int getDropCount() const override { return 1 + RustBridge::rngNextInt(3); }
 };
 
 // ==================== EntityChicken ====================
 
 class EntityChicken : public EntityAnimals {
 public:
-    int eggLayTime = 6000 + (std::rand() % 6000);
+    int eggLayTime = 6000 + RustBridge::rngNextInt(6000);
 
     explicit EntityChicken(World* world) : EntityAnimals(world) {
         width = 0.3f;
@@ -236,14 +234,14 @@ public:
     void readFromNBT(const NBTCompound& nbt) override {
         EntityAnimals::readFromNBT(nbt);
         eggLayTime = nbt.getInt("EggLayTime");
-        if (eggLayTime <= 0) eggLayTime = 6000 + (std::rand() % 6000);
+        if (eggLayTime <= 0) eggLayTime = 6000 + RustBridge::rngNextInt(6000);
     }
 
     void onFall(float distance) override {}
 
 protected:
     int getDropItemId() const override { return Item::feather ? Item::feather->itemID : 0; }
-    int getDropCount() const override { return 1 + (std::rand() % 3); }
+    int getDropCount() const override { return 1 + RustBridge::rngNextInt(3); }
     void tickExtra() override {
         // Chickens fall slower
         if (motionY < 0.0 && !onGround) {
@@ -256,7 +254,7 @@ protected:
                 item->pickupDelay = 10;
                 worldObj->spawnEntityInWorld(std::move(item));
             }
-            eggLayTime = 6000 + (std::rand() % 6000);
+            eggLayTime = 6000 + RustBridge::rngNextInt(6000);
         }
     }
 };

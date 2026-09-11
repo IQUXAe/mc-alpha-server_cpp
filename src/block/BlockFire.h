@@ -2,9 +2,9 @@
 
 #include "Block.h"
 #include "../core/Material.h"
+#include "../core/RustBridge.h"
 #include "../world/World.h"
 #include "../core/MathHelper.h"
-
 #include <cstdlib>
 
 class BlockFire : public Block {
@@ -52,7 +52,7 @@ public:
             }
         } else if (!onNetherrack
                 && !(chanceToEncourageFire[world->getBlockId(x, y - 1, z)] > 0)
-                && meta == 15 && (std::rand() % 4) == 0) {
+                && meta == 15 && RustBridge::rngNextInt(4) == 0) {
             world->setBlockWithNotify(x, y, z, 0);
         } else {
             if (meta % 2 == 0 && meta > 2) {
@@ -72,7 +72,7 @@ public:
                                 chance += (ny - (y + 1)) * 100;
                             }
                             int neighborChance = getChanceOfNeighborsEncouragingFire(world, nx, ny, nz);
-                            if (neighborChance > 0 && (std::rand() % chance) < neighborChance) {
+                            if (neighborChance > 0 && RustBridge::rngNextInt(chance) < neighborChance) {
                                 world->setBlockWithNotify(nx, ny, nz, blockID);
                             }
                         }
@@ -113,9 +113,9 @@ public:
     void tryToCatchBlockOnFire(World* world, int x, int y, int z, int chance) {
         int blockId = world->getBlockId(x, y, z);
         int ability = abilityToCatchFire[blockId];
-        if (ability > 0 && (std::rand() % chance) < ability) {
+        if (ability > 0 && RustBridge::rngNextInt(chance) < ability) {
             bool isTnt = (blockId == 46);
-            if ((std::rand() % 2) == 0) {
+            if (RustBridge::rngNextInt(2) == 0) {
                 world->setBlockWithNotify(x, y, z, blockID);
             } else {
                 world->setBlockWithNotify(x, y, z, 0);

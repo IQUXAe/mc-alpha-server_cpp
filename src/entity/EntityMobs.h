@@ -143,7 +143,7 @@ protected:
                 * (dist > getAttackReach() + 1.0f ? 1.2f : 0.85f);
         }
 
-        if (inLiquid && (std::rand() % 5) != 0) {
+        if (inLiquid && RustBridge::rngNextInt(5) != 0) {
             isJumping_ = true;
         }
     }
@@ -155,7 +155,7 @@ protected:
         const int z = MathHelper::floor_double(posZ);
         const float brightness = getBrightness();
         if (brightness > 0.5f && worldObj->canBlockSeeSky(x, y, z)
-            && static_cast<float>(std::rand()) / RAND_MAX * 30.0f < (brightness - 0.4f) * 2.0f) {
+            && RustBridge::rngNextFloat() * 30.0f < (brightness - 0.4f) * 2.0f) {
             daylightBurnTicks_ = 300;
             fire = std::max(fire, 300);
         }
@@ -248,7 +248,7 @@ protected:
     bool burnsInDaylight() const override { return true; }
     int getAttackStrength() const override { return 5; }
     int getDropItemId() const override { return Item::feather ? Item::feather->itemID : 0; }
-    int getDropCount() const override { return std::rand() % 3; }
+    int getDropCount() const override { return RustBridge::rngNextInt(3); }
 };
 
 
@@ -288,7 +288,7 @@ protected:
     }
 
     int getDropItemId() const override { return Item::arrow ? Item::arrow->itemID : 0; }
-    int getDropCount() const override { return 1 + (std::rand() % 3); }
+    int getDropCount() const override { return 1 + RustBridge::rngNextInt(3); }
 };
 
 
@@ -326,14 +326,14 @@ public:
 protected:
     void attackTarget(EntityPlayerMP& player, float distance) override {
         const float brightness = getBrightness();
-        if (brightness > 0.5f && (std::rand() % 100) == 0) {
+        if (brightness > 0.5f && RustBridge::rngNextInt(100) == 0) {
             targetPlayer_ = nullptr;
             targetEntity_ = nullptr;
             currentPath_ = nullptr;
             return;
         }
 
-        if (distance > 2.0f && distance < 6.0f && (std::rand() % 10) == 0 && onGround) {
+        if (distance > 2.0f && distance < 6.0f && RustBridge::rngNextInt(10) == 0 && onGround) {
             const double dx = player.posX - posX;
             const double dz = player.posZ - posZ;
             const double len = std::max(0.001, std::sqrt(dx * dx + dz * dz));
@@ -350,7 +350,7 @@ protected:
     }
 
     int getDropItemId() const override { return Item::silk ? Item::silk->itemID : 0; }
-    int getDropCount() const override { return std::rand() % 3; }
+    int getDropCount() const override { return RustBridge::rngNextInt(3); }
 };
 
 
@@ -386,7 +386,7 @@ protected:
     }
 
     int getDropItemId() const override { return Item::gunpowder ? Item::gunpowder->itemID : 0; }
-    int getDropCount() const override { return std::rand() % 3; }
+    int getDropCount() const override { return RustBridge::rngNextInt(3); }
 
 private:
     int swellTime_ = 0;
@@ -440,7 +440,7 @@ private:
 
                     // Alpha-style destruction probability
                     const float chance = 1.0f - (dist / radius);
-                    if (static_cast<float>(std::rand()) / RAND_MAX <= chance) {
+                    if (RustBridge::rngNextFloat() <= chance) {
                         // Drop item (Alpha: blocks drop on explosion)
                         auto item = std::make_unique<EntityItem>(blockId, 1, 0);
                         item->setPosition(
@@ -463,7 +463,7 @@ private:
                     if (std::sqrt(static_cast<float>(
                         (fx - cx) * (fx - cx) + (fy - cy) * (fy - cy) + (fz - cz) * (fz - cz))) > radius) continue;
                     if (worldObj->getBlockId(fx, fy, fz) != 0) continue;
-                    if ((std::rand() % 5) == 0) {
+                    if (RustBridge::rngNextInt(5) == 0) {
                         if (worldObj->doesBlockAllowAttachment(fx, fy - 1, fz)) {
                             worldObj->setBlockWithNotify(fx, fy, fz, 51);
                         } else {

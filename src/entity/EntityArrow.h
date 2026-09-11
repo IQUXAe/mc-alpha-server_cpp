@@ -64,8 +64,7 @@ public:
         vz /= length;
 
         auto randomNoise = []() -> double {
-            return (static_cast<double>(std::rand()) / RAND_MAX
-                - static_cast<double>(std::rand()) / RAND_MAX) * 0.0075;
+            return (RustBridge::rngNextDouble() - RustBridge::rngNextDouble()) * 0.0075;
         };
 
         vx += randomNoise() * inaccuracy;
@@ -107,9 +106,9 @@ public:
             }
 
             inGround = false;
-            motionX *= (static_cast<double>(std::rand()) / RAND_MAX) * 0.2;
-            motionY *= (static_cast<double>(std::rand()) / RAND_MAX) * 0.2;
-            motionZ *= (static_cast<double>(std::rand()) / RAND_MAX) * 0.2;
+            motionX *= RustBridge::rngNextDouble() * 0.2;
+            motionY *= RustBridge::rngNextDouble() * 0.2;
+            motionZ *= RustBridge::rngNextDouble() * 0.2;
             ticksInGround = 0;
             ticksInAir = 0;
         } else {
