@@ -57,26 +57,17 @@ pub struct ResolvedMove {
 /// Y-then-X-then-Z collision resolution over a pre-gathered box list.
 /// Mirrors the `resolveMovement` lambda in `Entity::moveEntity` exactly:
 /// each pass clamps its axis against every box, then offsets the working
-/// box before the next pass. Returns false (leaving `out` untouched) on
-/// null pointers.
-#[no_mangle]
-pub unsafe extern "C" fn alpha_entity_resolve_move(
-    box_: *const FfiAabb,
+/// box before the next pass.
+pub fn alpha_entity_resolve_move(
+    box_: &FfiAabb,
     dx: f64,
     dy: f64,
     dz: f64,
-    boxes: *const FfiAabb,
-    num_boxes: usize,
-    out: *mut ResolvedMove,
+    boxes: &[FfiAabb],
+    out: &mut ResolvedMove,
 ) -> bool {
-    if box_.is_null() || out.is_null() {
-        return false;
-    }
-    if num_boxes > 0 && boxes.is_null() {
-        return false;
-    }
-    let list = unsafe { std::slice::from_raw_parts(boxes, num_boxes) };
-    let mut work: AxisAlignedBB = unsafe { *box_ }.into();
+    let list = boxes;
+    let mut work: AxisAlignedBB = (*box_).into();
     let (mut mx, mut my, mut mz) = (dx, dy, dz);
     for cb in list {
         let cb: AxisAlignedBB = (*cb).into();
@@ -93,9 +84,7 @@ pub unsafe extern "C" fn alpha_entity_resolve_move(
         mz = cb.calculate_z_offset(&work, mz);
     }
     work.offset(0.0, 0.0, mz);
-    unsafe {
-        *out = ResolvedMove { box_: work.into(), dx: mx, dy: my, dz: mz };
-    }
+    *out = ResolvedMove { box_: work.into(), dx: mx, dy: my, dz: mz };
     true
 }
 
@@ -103,24 +92,16 @@ pub unsafe extern "C" fn alpha_entity_resolve_move(
 /// `fallDistance`; when landing with accumulated distance it also writes
 /// that distance to `out_fall_event` (C++ fires `onFall` for it, `-1.0`
 /// means no event).
-#[no_mangle]
-pub unsafe extern "C" fn alpha_entity_fall_step(
+pub fn alpha_entity_fall_step(
     on_ground: bool,
     dy: f64,
     fall_distance: f32,
-    out_fall_event: *mut f32,
+    out_fall_event: &mut f32,
 ) -> f32 {
-    if out_fall_event.is_null() {
-        return fall_distance;
-    }
-    unsafe {
-        *out_fall_event = -1.0;
-    }
+    *out_fall_event = -1.0;
     if on_ground {
         if fall_distance > 0.0 {
-            unsafe {
-                *out_fall_event = fall_distance;
-            }
+            *out_fall_event = fall_distance;
             0.0
         } else {
             fall_distance
@@ -146,17 +127,16 @@ pub struct PushOut {
     pub dvz2: f64,
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn alpha_entity_push(
+pub fn alpha_entity_push(
     x1: f64,
     z1: f64,
     x2: f64,
     z2: f64,
     pushable1: bool,
     pushable2: bool,
-    out: *mut PushOut,
+    out: &mut PushOut,
 ) -> bool {
-    if out.is_null() || !pushable1 || !pushable2 {
+    if !pushable1 || !pushable2 {
         return false;
     }
     let dx = x2 - x1;
@@ -172,9 +152,7 @@ pub unsafe extern "C" fn alpha_entity_push(
         scale = 1.0;
     }
     let (ix, iz) = (nx * scale * 0.05, nz * scale * 0.05);
-    unsafe {
-        *out = PushOut { dvx1: -ix, dvz1: -iz, dvx2: ix, dvz2: iz };
-    }
+    *out = PushOut { dvx1: -ix, dvz1: -iz, dvx2: ix, dvz2: iz };
     true
 }
 
@@ -193,7 +171,7 @@ mod tests {
             dy: 0.0,
             dz: 0.0,
         };
-        assert!(unsafe { alpha_entity_resolve_move(&box_, dx, dy, dz, boxes.as_ptr(), boxes.len(), &mut out) });
+        assert!(alpha_entity_resolve_move(&box_, dx, dy, dz, boxes, &mut out));
         out
     }
 
@@ -230,32 +208,9 @@ mod tests {
     }
 
     #[test]
-    fn test_null_is_safe() {
-        let mut out = ResolvedMove {
-            box_: box_ffi(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-            dx: 0.0,
-            dy: 0.0,
-            dz: 0.0,
-        };
-        assert!(!unsafe {
-            alpha_entity_resolve_move(
-                std::ptr::null(),
-                0.0,
-                0.0,
-                0.0,
-                std::ptr::null(),
-                0,
-                &mut out,
-            )
-        });
-        let b = box_ffi(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
-        assert!(!unsafe { alpha_entity_resolve_move(&b, 0.0, 0.0, 0.0, std::ptr::null(), 1, &mut out) });
-    }
-
-    #[test]
     fn test_fall_step_landing_fires_event() {
         let mut ev = -1.0f32;
-        let next = unsafe { alpha_entity_fall_step(true, -3.0, 3.5, &mut ev) };
+        let next = alpha_entity_fall_step(true, -3.0, 3.5, &mut ev);
         assert_eq!(next, 0.0);
         assert_eq!(ev, 3.5);
     }
@@ -263,7 +218,7 @@ mod tests {
     #[test]
     fn test_fall_step_accumulates_in_air() {
         let mut ev = -1.0f32;
-        let next = unsafe { alpha_entity_fall_step(false, -2.0, 1.5, &mut ev) };
+        let next = alpha_entity_fall_step(false, -2.0, 1.5, &mut ev);
         assert_eq!(ev, -1.0);
         assert!((next - 3.5).abs() < 1e-6);
     }
@@ -271,7 +226,7 @@ mod tests {
     #[test]
     fn test_fall_step_rising_keeps_distance() {
         let mut ev = -1.0f32;
-        let next = unsafe { alpha_entity_fall_step(false, 1.0, 2.0, &mut ev) };
+        let next = alpha_entity_fall_step(false, 1.0, 2.0, &mut ev);
         assert_eq!((next, ev), (2.0, -1.0));
     }
 
@@ -280,7 +235,7 @@ mod tests {
         // e1 at origin, e2 at (3,4): matches the C++ formula by hand
         // (norm 2, scale 1/4, factor 0.05).
         let mut out = PushOut { dvx1: 0.0, dvz1: 0.0, dvx2: 0.0, dvz2: 0.0 };
-        assert!(unsafe { alpha_entity_push(0.0, 0.0, 3.0, 4.0, true, true, &mut out) });
+        assert!(alpha_entity_push(0.0, 0.0, 3.0, 4.0, true, true, &mut out));
         assert!((out.dvx2 - 0.01875).abs() < 1e-9);
         assert!((out.dvz2 - 0.025).abs() < 1e-9);
         assert!((out.dvx1 + 0.01875).abs() < 1e-9);
@@ -290,8 +245,7 @@ mod tests {
     #[test]
     fn test_push_too_close_or_locked() {
         let mut out = PushOut { dvx1: 0.0, dvz1: 0.0, dvx2: 0.0, dvz2: 0.0 };
-        assert!(!unsafe { alpha_entity_push(0.0, 0.0, 0.005, 0.0, true, true, &mut out) });
-        assert!(!unsafe { alpha_entity_push(0.0, 0.0, 3.0, 4.0, false, true, &mut out) });
-        assert!(!unsafe { alpha_entity_push(0.0, 0.0, 3.0, 4.0, true, true, std::ptr::null_mut()) });
+        assert!(!alpha_entity_push(0.0, 0.0, 0.005, 0.0, true, true, &mut out));
+        assert!(!alpha_entity_push(0.0, 0.0, 3.0, 4.0, false, true, &mut out));
     }
 }

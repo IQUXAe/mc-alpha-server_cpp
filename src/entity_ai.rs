@@ -14,8 +14,7 @@
 use crate::math_helper::{cos, sin};
 
 /// Turn clamp (mirrors `EntityCreature::clampAngle`).
-#[no_mangle]
-pub extern "C" fn alpha_ai_clamp_angle(current: f32, target: f32, max_delta: f32) -> f32 {
+pub fn alpha_ai_clamp_angle(current: f32, target: f32, max_delta: f32) -> f32 {
     let mut delta = target - current;
     while delta < -180.0 {
         delta += 360.0;
@@ -46,25 +45,19 @@ pub fn face_run(dx: f64, dz: f64, dy: f64, cur_yaw: f32, cur_pitch: f32, max_tur
     (clamp_inner(cur_yaw, yaw, max_turn), -clamp_inner(cur_pitch, pitch, max_turn))
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn alpha_ai_face_angles(
+pub fn alpha_ai_face_angles(
     dx: f64,
     dz: f64,
     dy: f64,
     cur_yaw: f32,
     cur_pitch: f32,
     max_turn: f32,
-    out_yaw: *mut f32,
-    out_pitch: *mut f32,
+    out_yaw: &mut f32,
+    out_pitch: &mut f32,
 ) -> bool {
-    if out_yaw.is_null() || out_pitch.is_null() {
-        return false;
-    }
     let (yaw, pitch) = face_run(dx, dz, dy, cur_yaw, cur_pitch, max_turn);
-    unsafe {
-        *out_yaw = yaw;
-        *out_pitch = pitch;
-    }
+    *out_yaw = yaw;
+    *out_pitch = pitch;
     true
 }
 
@@ -88,8 +81,7 @@ fn clamp_inner(current: f32, target: f32, max_delta: f32) -> f32 {
 /// Wander weights (mirrors `getBlockPathWeight`): animals prefer grass
 /// (10.0), else light level minus a half; mobs score everything 0.0, so
 /// the first candidate wins like C++ (`bestWeight` starts at -99999).
-#[no_mangle]
-pub extern "C" fn alpha_ai_animal_path_weight(below_grass: bool, light: i32) -> f32 {
+pub fn alpha_ai_animal_path_weight(below_grass: bool, light: i32) -> f32 {
     if below_grass {
         10.0
     } else {
@@ -97,8 +89,7 @@ pub extern "C" fn alpha_ai_animal_path_weight(below_grass: bool, light: i32) -> 
     }
 }
 
-#[no_mangle]
-pub extern "C" fn alpha_ai_mob_path_weight() -> f32 {
+pub fn alpha_ai_mob_path_weight() -> f32 {
     0.0
 }
 
@@ -157,8 +148,7 @@ pub fn steer_run(
     SteerOut { new_yaw, strafe, forward, jump: dy > 0.0 }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn alpha_ai_steer_to_point(
+pub fn alpha_ai_steer_to_point(
     dx: f64,
     dz: f64,
     dy: f64,
@@ -168,14 +158,9 @@ pub unsafe extern "C" fn alpha_ai_steer_to_point(
     tgt_dx: f64,
     tgt_dz: f64,
     forward_in: f32,
-    out: *mut SteerOut,
+    out: &mut SteerOut,
 ) -> bool {
-    if out.is_null() {
-        return false;
-    }
-    unsafe {
-        *out = steer_run(dx, dz, dy, cur_yaw, is_attacking, has_target, tgt_dx, tgt_dz, forward_in);
-    }
+    *out = steer_run(dx, dz, dy, cur_yaw, is_attacking, has_target, tgt_dx, tgt_dz, forward_in);
     true
 }
 
@@ -229,24 +214,18 @@ mod tests {
     fn test_face_angles_east() {
         // Target due east (+x): yaw = atan2(0,1)*180/pi - 90 = -90.
         let (mut yaw, mut pitch) = (0.0f32, 0.0f32);
-        assert!(unsafe { alpha_ai_face_angles(5.0, 0.0, 0.0, 0.0, 0.0, 30.0, &mut yaw, &mut pitch) });
+        assert!(alpha_ai_face_angles(5.0, 0.0, 0.0, 0.0, 0.0, 30.0, &mut yaw, &mut pitch));
         assert_eq!(yaw, -30.0); // clamped turn toward -90
         assert_eq!(pitch, -0.0);
-    }
-
-    #[test]
-    fn test_face_angles_null_is_safe() {
-        let mut yaw = 0.0f32;
-        assert!(!unsafe { alpha_ai_face_angles(1.0, 0.0, 0.0, 0.0, 0.0, 30.0, &mut yaw, std::ptr::null_mut()) });
     }
 
     #[test]
     fn test_steer_straight_ahead() {
         // Point due east of a creature facing east (yaw -90): no turn.
         let mut out = SteerOut { new_yaw: 0.0, strafe: 0.0, forward: 0.0, jump: false };
-        assert!(unsafe {
+        assert!(
             alpha_ai_steer_to_point(5.0, 0.0, 0.0, -90.0, false, false, 0.0, 0.0, 0.0, &mut out)
-        });
+        );
         assert!((out.new_yaw + 90.0).abs() < 1e-4);
         assert_eq!(out.strafe, 0.0);
         assert!(!out.jump);
@@ -257,9 +236,9 @@ mod tests {
         // Point due west while facing east: 180 normalised to -180,
         // clamped to a -30 turn.
         let mut out = SteerOut { new_yaw: 0.0, strafe: 0.0, forward: 0.0, jump: false };
-        assert!(unsafe {
+        assert!(
             alpha_ai_steer_to_point(-5.0, 0.0, 1.0, -90.0, false, false, 0.0, 0.0, 0.0, &mut out)
-        });
+        );
         assert!((out.new_yaw + 120.0).abs() < 1e-4);
         assert!(out.jump);
     }
@@ -268,9 +247,9 @@ mod tests {
     fn test_steer_strafe_uses_input_forward() {
         // Attacking: strafe formula applied to the passed forward value.
         let mut out = SteerOut { new_yaw: 0.0, strafe: 0.0, forward: 0.0, jump: false };
-        assert!(unsafe {
+        assert!(
             alpha_ai_steer_to_point(5.0, 0.0, 0.0, -90.0, true, true, 5.0, 0.0, 0.7, &mut out)
-        });
+        );
         // Target straight ahead: strafe angle 90deg -> sin=1, cos~0.
         assert!((out.strafe + 0.7).abs() < 1e-4);
         assert!(out.forward.abs() < 1e-4);
@@ -279,7 +258,7 @@ mod tests {
     #[test]
     fn test_face_run_matches_ffi_shell() {
         let (mut yaw, mut pitch) = (0.0f32, 0.0f32);
-        assert!(unsafe { alpha_ai_face_angles(5.0, 0.0, 0.0, 0.0, 0.0, 30.0, &mut yaw, &mut pitch) });
+        assert!(alpha_ai_face_angles(5.0, 0.0, 0.0, 0.0, 0.0, 30.0, &mut yaw, &mut pitch));
         assert_eq!(face_run(5.0, 0.0, 0.0, 0.0, 0.0, 30.0), (yaw, pitch));
     }
 
@@ -287,9 +266,9 @@ mod tests {
     fn test_steer_run_matches_ffi_shell() {
         let a = steer_run(5.0, 1.0, 1.0, -90.0, true, true, 5.0, 0.0, 0.7);
         let mut b = SteerOut { new_yaw: 0.0, strafe: 0.0, forward: 0.0, jump: false };
-        assert!(unsafe {
+        assert!(
             alpha_ai_steer_to_point(5.0, 1.0, 1.0, -90.0, true, true, 5.0, 0.0, 0.7, &mut b)
-        });
+        );
         assert_eq!((a.new_yaw, a.strafe, a.forward, a.jump), (b.new_yaw, b.strafe, b.forward, b.jump));
     }
 

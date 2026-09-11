@@ -20,40 +20,40 @@
 /// updates become no-ops.
 #[repr(C)]
 pub struct BlockTickWorld {
-    pub next_int: Option<extern "C" fn(bound: i32) -> i32>,
-    pub next_float01: Option<extern "C" fn() -> f32>,
-    pub next_u64: Option<extern "C" fn() -> u64>,
-    pub get_block_id: Option<extern "C" fn(x: i32, y: i32, z: i32) -> u8>,
-    pub get_block_id_nc: Option<extern "C" fn(x: i32, y: i32, z: i32) -> u8>,
-    pub get_block_meta: Option<extern "C" fn(x: i32, y: i32, z: i32) -> u8>,
-    pub set_block: Option<extern "C" fn(x: i32, y: i32, z: i32, id: u8)>,
-    pub set_block_meta: Option<extern "C" fn(x: i32, y: i32, z: i32, meta: u8)>,
-    pub set_block_notify: Option<extern "C" fn(x: i32, y: i32, z: i32, id: u8)>,
-    pub set_block_update: Option<extern "C" fn(x: i32, y: i32, z: i32, id: u8)>,
-    pub set_block_meta_notify: Option<extern "C" fn(x: i32, y: i32, z: i32, id: u8, meta: u8)>,
-    pub set_block_and_meta: Option<extern "C" fn(x: i32, y: i32, z: i32, id: u8, meta: u8)>,
-    pub get_block_light: Option<extern "C" fn(x: i32, y: i32, z: i32) -> i32>,
-    pub can_see_sky: Option<extern "C" fn(x: i32, y: i32, z: i32) -> bool>,
+    pub next_int: Option<fn(bound: i32) -> i32>,
+    pub next_float01: Option<fn() -> f32>,
+    pub next_u64: Option<fn() -> u64>,
+    pub get_block_id: Option<fn(x: i32, y: i32, z: i32) -> u8>,
+    pub get_block_id_nc: Option<fn(x: i32, y: i32, z: i32) -> u8>,
+    pub get_block_meta: Option<fn(x: i32, y: i32, z: i32) -> u8>,
+    pub set_block: Option<fn(x: i32, y: i32, z: i32, id: u8)>,
+    pub set_block_meta: Option<fn(x: i32, y: i32, z: i32, meta: u8)>,
+    pub set_block_notify: Option<fn(x: i32, y: i32, z: i32, id: u8)>,
+    pub set_block_update: Option<fn(x: i32, y: i32, z: i32, id: u8)>,
+    pub set_block_meta_notify: Option<fn(x: i32, y: i32, z: i32, id: u8, meta: u8)>,
+    pub set_block_and_meta: Option<fn(x: i32, y: i32, z: i32, id: u8, meta: u8)>,
+    pub get_block_light: Option<fn(x: i32, y: i32, z: i32) -> i32>,
+    pub can_see_sky: Option<fn(x: i32, y: i32, z: i32) -> bool>,
     /// World::doesBlockAllowAttachment (solid && blocksMovement). Used by fluids.
-    pub attach_world: Option<extern "C" fn(x: i32, y: i32, z: i32) -> bool>,
+    pub attach_world: Option<fn(x: i32, y: i32, z: i32) -> bool>,
     /// BlockTorch attachment (solid && collidable). Used by torches.
-    pub attach_torch: Option<extern "C" fn(x: i32, y: i32, z: i32) -> bool>,
-    pub is_solid: Option<extern "C" fn(x: i32, y: i32, z: i32) -> bool>,
+    pub attach_torch: Option<fn(x: i32, y: i32, z: i32) -> bool>,
+    pub is_solid: Option<fn(x: i32, y: i32, z: i32) -> bool>,
     /// NoChunkLoad solid check (leaves ground fix must not force loads).
-    pub is_solid_nc: Option<extern "C" fn(x: i32, y: i32, z: i32) -> bool>,
-    pub is_water_or_lava: Option<extern "C" fn(x: i32, y: i32, z: i32) -> bool>,
-    pub is_water: Option<extern "C" fn(x: i32, y: i32, z: i32) -> bool>,
-    pub block_registered: Option<extern "C" fn(id: u8) -> bool>,
-    pub collidable_box: Option<extern "C" fn(x: i32, y: i32, z: i32) -> bool>,
-    pub schedule_update: Option<extern "C" fn(x: i32, y: i32, z: i32, block_id: u8, delay: i32)>,
-    pub mark_update: Option<extern "C" fn(x: i32, y: i32, z: i32)>,
-    pub notify_neighbors: Option<extern "C" fn(x: i32, y: i32, z: i32, block_id: u8)>,
+    pub is_solid_nc: Option<fn(x: i32, y: i32, z: i32) -> bool>,
+    pub is_water_or_lava: Option<fn(x: i32, y: i32, z: i32) -> bool>,
+    pub is_water: Option<fn(x: i32, y: i32, z: i32) -> bool>,
+    pub block_registered: Option<fn(id: u8) -> bool>,
+    pub collidable_box: Option<fn(x: i32, y: i32, z: i32) -> bool>,
+    pub schedule_update: Option<fn(x: i32, y: i32, z: i32, block_id: u8, delay: i32)>,
+    pub mark_update: Option<fn(x: i32, y: i32, z: i32)>,
+    pub notify_neighbors: Option<fn(x: i32, y: i32, z: i32, block_id: u8)>,
     pub spawn_drop:
-        Option<extern "C" fn(item_id: i32, count: i32, damage: i32, fx: f64, fy: f64, fz: f64, spread: f64, up: f64)>,
-    pub spawn_falling: Option<extern "C" fn(block_id: u8, fx: f64, fy: f64, fz: f64)>,
+        Option<fn(item_id: i32, count: i32, damage: i32, fx: f64, fy: f64, fz: f64, spread: f64, up: f64)>,
+    pub spawn_falling: Option<fn(block_id: u8, fx: f64, fy: f64, fz: f64)>,
     /// Drop the current occupant of a cell via C++ virtual dispatch
     /// (mirrors the drop half of `flowIntoBlock`).
-    pub drop_occupant: Option<extern "C" fn(x: i32, y: i32, z: i32)>,
+    pub drop_occupant: Option<fn(x: i32, y: i32, z: i32)>,
 }
 
 pub const PLANT_GROWTH_STAGE_MAX: u8 = 15;
@@ -211,21 +211,13 @@ fn sand_schedule(w: &BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
     u_schedule(w, x, y, z, block_id, 3);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_sand_added(world: *const BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+pub fn block_sand_added(world: &BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
+    let w = world;
     sand_schedule(w, block_id, x, y, z);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_sand_neighbor(world: *const BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+pub fn block_sand_neighbor(world: &BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
+    let w = world;
     sand_schedule(w, block_id, x, y, z);
 }
 
@@ -240,12 +232,8 @@ fn sand_can_fall_below(w: &BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
     q_water_lava(w, x, y, z)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_sand_tick(world: *const BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+pub fn block_sand_tick(world: &BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
+    let w = world;
     if y >= 0 && sand_can_fall_below(w, x, y - 1, z) {
         u_set_update(w, x, y, z, 0);
         if let Some(f) = w.spawn_falling {
@@ -270,37 +258,25 @@ fn fluid_can_flow_into(w: &BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
     FLOW_PASSABLE.contains(&id)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_fluid_added(world: *const BlockTickWorld, block_id: u8, tick_rate: i32, x: i32, y: i32, z: i32) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+pub fn block_fluid_added(world: &BlockTickWorld, block_id: u8, tick_rate: i32, x: i32, y: i32, z: i32) {
+    let w = world;
     u_schedule(w, x, y, z, block_id, tick_rate);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_fluid_neighbor(world: *const BlockTickWorld, block_id: u8, tick_rate: i32, x: i32, y: i32, z: i32) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+pub fn block_fluid_neighbor(world: &BlockTickWorld, block_id: u8, tick_rate: i32, x: i32, y: i32, z: i32) {
+    let w = world;
     u_schedule(w, x, y, z, block_id, tick_rate);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_fluid_tick(
-    world: *const BlockTickWorld,
+pub fn block_fluid_tick(
+    world: &BlockTickWorld,
     block_id: u8,
     is_lava: bool,
     x: i32,
     y: i32,
     z: i32,
 ) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+    let w = world;
     // Lava creates fire on adjacent burnable blocks (Java BlockStationary).
     if is_lava && q_meta(w, x, y, z) == 0 {
         for (dx, dy, dz) in FLOW_DIRS {
@@ -347,17 +323,12 @@ fn flower_can_stay_here(w: &BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
     (q_light(w, x, y, z) >= 8 || q_sky(w, x, y, z)) && (below == 2 || below == 3 || below == 60)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_flower_can_stay(world: *const BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
-    if world.is_null() {
-        return false;
-    }
-    flower_can_stay_here(unsafe { &*world }, x, y, z)
+pub fn block_flower_can_stay(world: &BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
+    flower_can_stay_here(world, x, y, z)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_flower_neighbor(
-    world: *const BlockTickWorld,
+pub fn block_flower_neighbor(
+    world: &BlockTickWorld,
     drop_id: i32,
     drop_count: i32,
     drop_damage: i32,
@@ -365,19 +336,15 @@ pub unsafe extern "C" fn block_flower_neighbor(
     y: i32,
     z: i32,
 ) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+    let w = world;
     if !flower_can_stay_here(w, x, y, z) {
         base_drop(w, drop_id, drop_count, drop_damage, x, y, z, 1.0);
         u_set_update(w, x, y, z, 0);
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_flower_tick(
-    world: *const BlockTickWorld,
+pub fn block_flower_tick(
+    world: &BlockTickWorld,
     drop_id: i32,
     drop_count: i32,
     drop_damage: i32,
@@ -385,10 +352,7 @@ pub unsafe extern "C" fn block_flower_tick(
     y: i32,
     z: i32,
 ) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+    let w = world;
     if !flower_can_stay_here(w, x, y, z) {
         base_drop(w, drop_id, drop_count, drop_damage, x, y, z, 1.0);
         u_set_notify(w, x, y, z, 0);
@@ -397,19 +361,18 @@ pub unsafe extern "C" fn block_flower_tick(
 
 // ---- tall grass (drop only; stay logic inherited from flower) ----
 
-#[no_mangle]
-pub unsafe extern "C" fn block_tallgrass_drop(
-    world: *const BlockTickWorld,
+pub fn block_tallgrass_drop(
+    world: &BlockTickWorld,
     seeds_id: i32,
     chance: f32,
     x: i32,
     y: i32,
     z: i32,
 ) {
-    if world.is_null() || seeds_id <= 0 {
+    if seeds_id <= 0 {
         return;
     }
-    let w = unsafe { &*world };
+    let w = world;
     if rng_f01(w) > chance {
         return;
     }
@@ -426,17 +389,12 @@ fn mushroom_can_stay_here(w: &BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
     below > 0 && q_registered(w, below)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_mushroom_can_stay(world: *const BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
-    if world.is_null() {
-        return false;
-    }
-    mushroom_can_stay_here(unsafe { &*world }, x, y, z)
+pub fn block_mushroom_can_stay(world: &BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
+    mushroom_can_stay_here(world, x, y, z)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_mushroom_neighbor(
-    world: *const BlockTickWorld,
+pub fn block_mushroom_neighbor(
+    world: &BlockTickWorld,
     drop_id: i32,
     drop_count: i32,
     drop_damage: i32,
@@ -444,10 +402,7 @@ pub unsafe extern "C" fn block_mushroom_neighbor(
     y: i32,
     z: i32,
 ) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+    let w = world;
     if !mushroom_can_stay_here(w, x, y, z) {
         base_drop(w, drop_id, drop_count, drop_damage, x, y, z, 1.0);
         u_set_update(w, x, y, z, 0);
@@ -463,12 +418,8 @@ fn torch_attached(w: &BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
 /// Java BlockTorch.onBlockPlaced metadata from the clicked face.
 /// Takes the torch position; side: 1=floor(default 5),2,3,4,5 wall faces.
 
-#[no_mangle]
-pub unsafe extern "C" fn block_torch_attach_meta(world: *const BlockTickWorld, side: i32, x: i32, y: i32, z: i32) -> u8 {
-    if world.is_null() {
-        return 5;
-    }
-    let w = unsafe { &*world };
+pub fn block_torch_attach_meta(world: &BlockTickWorld, side: i32, x: i32, y: i32, z: i32) -> u8 {
+    let w = world;
     if side == 2 && torch_attached(w, x, y, z + 1) {
         4
     } else if side == 3 && torch_attached(w, x, y, z - 1) {
@@ -482,12 +433,8 @@ pub unsafe extern "C" fn block_torch_attach_meta(world: *const BlockTickWorld, s
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_torch_added(world: *const BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+pub fn block_torch_added(world: &BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
+    let w = world;
     if q_meta(w, x, y, z) != 0 {
         return;
     }
@@ -517,17 +464,12 @@ fn torch_can_stay_here(w: &BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
         || torch_attached(w, x, y - 1, z)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_torch_can_stay(world: *const BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
-    if world.is_null() {
-        return false;
-    }
-    torch_can_stay_here(unsafe { &*world }, x, y, z)
+pub fn block_torch_can_stay(world: &BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
+    torch_can_stay_here(world, x, y, z)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_torch_neighbor(
-    world: *const BlockTickWorld,
+pub fn block_torch_neighbor(
+    world: &BlockTickWorld,
     drop_id: i32,
     drop_count: i32,
     drop_damage: i32,
@@ -535,10 +477,7 @@ pub unsafe extern "C" fn block_torch_neighbor(
     y: i32,
     z: i32,
 ) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+    let w = world;
     let meta = q_meta(w, x, y, z);
     let detach = (meta == 1 && !torch_attached(w, x - 1, y, z))
         || (meta == 2 && !torch_attached(w, x + 1, y, z))
@@ -603,41 +542,24 @@ fn stalk_tick(w: &BlockTickWorld, block_id: u8, can_stay: bool, x: i32, y: i32, 
     u_schedule(w, x, y, z, block_id, 20);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_cactus_can_stay(world: *const BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
-    if world.is_null() {
-        return false;
-    }
-    cactus_can_stay_here(unsafe { &*world }, x, y, z)
+pub fn block_cactus_can_stay(world: &BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
+    cactus_can_stay_here(world, x, y, z)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_reed_can_stay(world: *const BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
-    if world.is_null() {
-        return false;
-    }
-    reed_can_stay_here(unsafe { &*world }, x, y, z)
+pub fn block_reed_can_stay(world: &BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
+    reed_can_stay_here(world, x, y, z)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_cactus_added(world: *const BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
-    if world.is_null() {
-        return;
-    }
-    u_schedule(unsafe { &*world }, x, y, z, block_id, 20);
+pub fn block_cactus_added(world: &BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
+    u_schedule(world, x, y, z, block_id, 20);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_reed_added(world: *const BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
-    if world.is_null() {
-        return;
-    }
-    u_schedule(unsafe { &*world }, x, y, z, block_id, 20);
+pub fn block_reed_added(world: &BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
+    u_schedule(world, x, y, z, block_id, 20);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_cactus_neighbor(
-    world: *const BlockTickWorld,
+pub fn block_cactus_neighbor(
+    world: &BlockTickWorld,
     block_id: u8,
     drop_id: i32,
     drop_count: i32,
@@ -646,10 +568,7 @@ pub unsafe extern "C" fn block_cactus_neighbor(
     y: i32,
     z: i32,
 ) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+    let w = world;
     if !cactus_can_stay_here(w, x, y, z) {
         base_drop(w, drop_id, drop_count, drop_damage, x, y, z, 1.0);
         u_set_notify(w, x, y, z, 0);
@@ -658,9 +577,8 @@ pub unsafe extern "C" fn block_cactus_neighbor(
     u_schedule(w, x, y, z, block_id, 20);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_reed_neighbor(
-    world: *const BlockTickWorld,
+pub fn block_reed_neighbor(
+    world: &BlockTickWorld,
     block_id: u8,
     drop_id: i32,
     drop_count: i32,
@@ -669,10 +587,7 @@ pub unsafe extern "C" fn block_reed_neighbor(
     y: i32,
     z: i32,
 ) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+    let w = world;
     if !reed_can_stay_here(w, x, y, z) {
         base_drop(w, drop_id, drop_count, drop_damage, x, y, z, 1.0);
         u_set_notify(w, x, y, z, 0);
@@ -681,9 +596,8 @@ pub unsafe extern "C" fn block_reed_neighbor(
     u_schedule(w, x, y, z, block_id, 20);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_cactus_tick(
-    world: *const BlockTickWorld,
+pub fn block_cactus_tick(
+    world: &BlockTickWorld,
     block_id: u8,
     drop_id: i32,
     drop_count: i32,
@@ -692,10 +606,7 @@ pub unsafe extern "C" fn block_cactus_tick(
     y: i32,
     z: i32,
 ) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+    let w = world;
     if !cactus_can_stay_here(w, x, y, z) {
         base_drop(w, drop_id, drop_count, drop_damage, x, y, z, 1.0);
         u_set_notify(w, x, y, z, 0);
@@ -704,9 +615,8 @@ pub unsafe extern "C" fn block_cactus_tick(
     stalk_tick(w, block_id, true, x, y, z);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_reed_tick(
-    world: *const BlockTickWorld,
+pub fn block_reed_tick(
+    world: &BlockTickWorld,
     block_id: u8,
     drop_id: i32,
     drop_count: i32,
@@ -715,10 +625,7 @@ pub unsafe extern "C" fn block_reed_tick(
     y: i32,
     z: i32,
 ) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+    let w = world;
     if !reed_can_stay_here(w, x, y, z) {
         base_drop(w, drop_id, drop_count, drop_damage, x, y, z, 1.0);
         u_set_notify(w, x, y, z, 0);
@@ -807,88 +714,61 @@ fn update_neighbor_leaf(
     }
 }
 
-fn guard_mut(ptr: *mut i32) -> Option<&'static mut i32> {
-    if ptr.is_null() {
-        None
-    } else {
-        Some(unsafe { &mut *ptr })
-    }
+pub fn block_leaves_added(world: &BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
+    u_schedule(world, x, y, z, block_id, 40);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_leaves_added(world: *const BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
-    if world.is_null() {
-        return;
-    }
-    u_schedule(unsafe { &*world }, x, y, z, block_id, 40);
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn block_leaves_neighbor(
-    world: *const BlockTickWorld,
+pub fn block_leaves_neighbor(
+    world: &BlockTickWorld,
     block_id: u8,
     leaves_id: u8,
-    guard: *mut i32,
+    guard: &mut i32,
     x: i32,
     y: i32,
     z: i32,
 ) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
-    if let Some(g) = guard_mut(guard) {
-        *g = 0;
-        update_leaf_distance(w, block_id, leaves_id, x, y, z, g);
-    }
+    let w = world;
+    *guard = 0;
+    update_leaf_distance(w, block_id, leaves_id, x, y, z, guard);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_leaves_tick(
-    world: *const BlockTickWorld,
+pub fn block_leaves_tick(
+    world: &BlockTickWorld,
     block_id: u8,
     leaves_id: u8,
     drop_id: i32,
     drop_count: i32,
     drop_damage: i32,
-    guard: *mut i32,
+    guard: &mut i32,
     x: i32,
     y: i32,
     z: i32,
 ) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+    let w = world;
     let metadata = q_meta(w, x, y, z) as i32;
     if metadata == 0 {
-        if let Some(g) = guard_mut(guard) {
-            *g = 0;
-            update_leaf_distance(w, block_id, leaves_id, x, y, z, g);
-        }
+        *guard = 0;
+        update_leaf_distance(w, block_id, leaves_id, x, y, z, guard);
     } else if metadata == 1 {
         base_drop(w, drop_id, drop_count, drop_damage, x, y, z, 1.0);
         u_set_notify(w, x, y, z, 0);
     } else if chance_one_in(w, 10) {
-        if let Some(g) = guard_mut(guard) {
-            update_leaf_distance(w, block_id, leaves_id, x, y, z, g);
-        }
+        update_leaf_distance(w, block_id, leaves_id, x, y, z, guard);
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_leaves_drop(
-    world: *const BlockTickWorld,
+pub fn block_leaves_drop(
+    world: &BlockTickWorld,
     sapling_id: i32,
     chance: f32,
     x: i32,
     y: i32,
     z: i32,
 ) {
-    if world.is_null() || sapling_id <= 0 {
+    if sapling_id <= 0 {
         return;
     }
-    let w = unsafe { &*world };
+    let w = world;
     if rng_f01(w) > chance {
         return;
     }
@@ -905,25 +785,16 @@ fn sapling_can_stay_here(w: &BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
     (q_light(w, x, y, z) >= 8 || q_sky(w, x, y, z)) && (below == 2 || below == 3 || below == 60)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_sapling_added(world: *const BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
-    if world.is_null() {
-        return;
-    }
-    u_schedule(unsafe { &*world }, x, y, z, block_id, 100);
+pub fn block_sapling_added(world: &BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
+    u_schedule(world, x, y, z, block_id, 100);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_sapling_can_stay(world: *const BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
-    if world.is_null() {
-        return false;
-    }
-    sapling_can_stay_here(unsafe { &*world }, x, y, z)
+pub fn block_sapling_can_stay(world: &BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
+    sapling_can_stay_here(world, x, y, z)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_sapling_neighbor(
-    world: *const BlockTickWorld,
+pub fn block_sapling_neighbor(
+    world: &BlockTickWorld,
     block_id: u8,
     drop_id: i32,
     drop_count: i32,
@@ -932,10 +803,7 @@ pub unsafe extern "C" fn block_sapling_neighbor(
     y: i32,
     z: i32,
 ) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+    let w = world;
     if !sapling_can_stay_here(w, x, y, z) {
         base_drop(w, drop_id, drop_count, drop_damage, x, y, z, 1.0);
         u_set_notify(w, x, y, z, 0);
@@ -946,9 +814,8 @@ pub unsafe extern "C" fn block_sapling_neighbor(
 
 /// Sapling tick. Returns GrowTree (with the rand draw) when C++ must run
 /// tree generation; C++ restores the sapling itself if generation fails.
-#[no_mangle]
-pub unsafe extern "C" fn block_sapling_tick(
-    world: *const BlockTickWorld,
+pub fn block_sapling_tick(
+    world: &BlockTickWorld,
     block_id: u8,
     drop_id: i32,
     drop_count: i32,
@@ -958,10 +825,7 @@ pub unsafe extern "C" fn block_sapling_tick(
     z: i32,
 ) -> TickAction {
     let none = TickAction { kind: SaplingAction::None as u8, seed: 0 };
-    if world.is_null() {
-        return none;
-    }
-    let w = unsafe { &*world };
+    let w = world;
     if !sapling_can_stay_here(w, x, y, z) {
         base_drop(w, drop_id, drop_count, drop_damage, x, y, z, 1.0);
         u_set_notify(w, x, y, z, 0);
@@ -1015,25 +879,16 @@ fn crops_growth_rate(w: &BlockTickWorld, crop_id: u8, x: i32, y: i32, z: i32) ->
     rate
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_crops_added(world: *const BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
-    if world.is_null() {
-        return;
-    }
-    u_schedule(unsafe { &*world }, x, y, z, block_id, 20);
+pub fn block_crops_added(world: &BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
+    u_schedule(world, x, y, z, block_id, 20);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_crops_can_stay(world: *const BlockTickWorld, crop_id: u8, x: i32, y: i32, z: i32) -> bool {
-    if world.is_null() {
-        return false;
-    }
-    crops_can_stay_here(unsafe { &*world }, crop_id, x, y, z)
+pub fn block_crops_can_stay(world: &BlockTickWorld, crop_id: u8, x: i32, y: i32, z: i32) -> bool {
+    crops_can_stay_here(world, crop_id, x, y, z)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_crops_neighbor(
-    world: *const BlockTickWorld,
+pub fn block_crops_neighbor(
+    world: &BlockTickWorld,
     block_id: u8,
     crop_id: u8,
     wheat_id: i32,
@@ -1042,10 +897,7 @@ pub unsafe extern "C" fn block_crops_neighbor(
     y: i32,
     z: i32,
 ) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+    let w = world;
     if !crops_can_stay_here(w, crop_id, x, y, z) {
         block_crops_drop(w, wheat_id, seeds_id, x, y, z, q_meta(w, x, y, z));
         u_set_notify(w, x, y, z, 0);
@@ -1068,9 +920,8 @@ fn block_crops_drop(w: &BlockTickWorld, wheat_id: i32, seeds_id: i32, x: i32, y:
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_crops_drop_ffi(
-    world: *const BlockTickWorld,
+pub fn block_crops_drop_ffi(
+    world: &BlockTickWorld,
     wheat_id: i32,
     seeds_id: i32,
     x: i32,
@@ -1079,10 +930,7 @@ pub unsafe extern "C" fn block_crops_drop_ffi(
     metadata: u8,
     chance: f32,
 ) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+    let w = world;
     if rng_f01(w) > chance {
         return;
     }
@@ -1096,9 +944,8 @@ pub unsafe extern "C" fn block_crops_drop_ffi(
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_crops_tick(
-    world: *const BlockTickWorld,
+pub fn block_crops_tick(
+    world: &BlockTickWorld,
     block_id: u8,
     crop_id: u8,
     wheat_id: i32,
@@ -1107,10 +954,7 @@ pub unsafe extern "C" fn block_crops_tick(
     y: i32,
     z: i32,
 ) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+    let w = world;
     if !crops_can_stay_here(w, crop_id, x, y, z) {
         block_crops_drop(w, wheat_id, seeds_id, x, y, z, q_meta(w, x, y, z));
         u_set_notify(w, x, y, z, 0);
@@ -1153,20 +997,12 @@ fn soil_set_moisture(w: &BlockTickWorld, x: i32, y: i32, z: i32, moisture: u8) {
     u_mark(w, x, y, z);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_soil_added(world: *const BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
-    if world.is_null() {
-        return;
-    }
-    u_schedule(unsafe { &*world }, x, y, z, block_id, 20);
+pub fn block_soil_added(world: &BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
+    u_schedule(world, x, y, z, block_id, 20);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_soil_tick(world: *const BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+pub fn block_soil_tick(world: &BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
+    let w = world;
     if chance_one_in(w, 5) {
         if soil_has_water(w, x, y, z) {
             soil_set_moisture(w, x, y, z, 7);
@@ -1183,23 +1019,15 @@ pub unsafe extern "C" fn block_soil_tick(world: *const BlockTickWorld, block_id:
     u_schedule(w, x, y, z, block_id, 20);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_soil_walking(world: *const BlockTickWorld, x: i32, y: i32, z: i32) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+pub fn block_soil_walking(world: &BlockTickWorld, x: i32, y: i32, z: i32) {
+    let w = world;
     if chance_one_in(w, 4) {
         u_set_notify(w, x, y, z, 3);
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_soil_neighbor(world: *const BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
-    if world.is_null() {
-        return;
-    }
-    let w = unsafe { &*world };
+pub fn block_soil_neighbor(world: &BlockTickWorld, block_id: u8, x: i32, y: i32, z: i32) {
+    let w = world;
     if q_collidable(w, x, y + 1, z) {
         u_set_notify(w, x, y, z, 3);
         return;
@@ -1209,9 +1037,8 @@ pub unsafe extern "C" fn block_soil_neighbor(world: *const BlockTickWorld, block
 
 // ---- base drop entry point (Block::dropBlockAsItemWithChance) ----
 
-#[no_mangle]
-pub unsafe extern "C" fn block_base_drop(
-    world: *const BlockTickWorld,
+pub fn block_base_drop(
+    world: &BlockTickWorld,
     item_id: i32,
     count: i32,
     damage: i32,
@@ -1220,10 +1047,7 @@ pub unsafe extern "C" fn block_base_drop(
     z: i32,
     chance: f32,
 ) -> bool {
-    if world.is_null() {
-        return false;
-    }
-    base_drop(unsafe { &*world }, item_id, count, damage, x, y, z, chance)
+    base_drop(world, item_id, count, damage, x, y, z, chance)
 }
 
 #[cfg(test)]
@@ -1284,7 +1108,7 @@ mod tests {
         *fake() = Some(Fake::fresh());
     }
 
-    extern "C" fn s_next_int(bound: i32) -> i32 {
+    fn s_next_int(bound: i32) -> i32 {
         let mut g = fake();
         let f = g.as_mut().unwrap_or_else(|| unreachable!());
         if f.int_pos < f.int_script.len() {
@@ -1295,108 +1119,108 @@ mod tests {
             0
         }
     }
-    extern "C" fn s_next_f01() -> f32 {
+    fn s_next_f01() -> f32 {
         fake().as_ref().map(|f| f.f01).unwrap_or(0.0)
     }
-    extern "C" fn s_next_u64() -> u64 {
+    fn s_next_u64() -> u64 {
         fake().as_ref().map(|f| f.u64_val).unwrap_or(0)
     }
-    extern "C" fn s_get_id(x: i32, y: i32, z: i32) -> u8 {
+    fn s_get_id(x: i32, y: i32, z: i32) -> u8 {
         fake().as_ref().map(|f| f.id(x, y, z)).unwrap_or(0)
     }
-    extern "C" fn s_get_id_nc(x: i32, y: i32, z: i32) -> u8 {
+    fn s_get_id_nc(x: i32, y: i32, z: i32) -> u8 {
         s_get_id(x, y, z)
     }
-    extern "C" fn s_get_meta(x: i32, y: i32, z: i32) -> u8 {
+    fn s_get_meta(x: i32, y: i32, z: i32) -> u8 {
         fake().as_ref().and_then(|f| f.blocks.get(&(x, y, z)).map(|b| b.1)).unwrap_or(0)
     }
-    extern "C" fn s_set(x: i32, y: i32, z: i32, id: u8) {
+    fn s_set(x: i32, y: i32, z: i32, id: u8) {
         if let Some(f) = fake().as_mut() {
             f.blocks.insert((x, y, z), (id, 0));
             f.log.push(format!("set {x} {y} {z} {id}"));
         }
     }
-    extern "C" fn s_set_meta(x: i32, y: i32, z: i32, meta: u8) {
+    fn s_set_meta(x: i32, y: i32, z: i32, meta: u8) {
         if let Some(f) = fake().as_mut() {
             let id = f.id(x, y, z);
             f.blocks.insert((x, y, z), (id, meta));
             f.log.push(format!("meta {x} {y} {z} {meta}"));
         }
     }
-    extern "C" fn s_set_notify(x: i32, y: i32, z: i32, id: u8) {
+    fn s_set_notify(x: i32, y: i32, z: i32, id: u8) {
         if let Some(f) = fake().as_mut() {
             f.blocks.insert((x, y, z), (id, 0));
             f.log.push(format!("notify {x} {y} {z} {id}"));
         }
     }
-    extern "C" fn s_set_update(x: i32, y: i32, z: i32, id: u8) {
+    fn s_set_update(x: i32, y: i32, z: i32, id: u8) {
         if let Some(f) = fake().as_mut() {
             f.blocks.insert((x, y, z), (id, 0));
             f.log.push(format!("update {x} {y} {z} {id}"));
         }
     }
-    extern "C" fn s_set_meta_notify(x: i32, y: i32, z: i32, id: u8, meta: u8) {
+    fn s_set_meta_notify(x: i32, y: i32, z: i32, id: u8, meta: u8) {
         if let Some(f) = fake().as_mut() {
             f.blocks.insert((x, y, z), (id, meta));
             f.log.push(format!("metanotify {x} {y} {z} {id} {meta}"));
         }
     }
-    extern "C" fn s_set_and_meta(x: i32, y: i32, z: i32, id: u8, meta: u8) {
+    fn s_set_and_meta(x: i32, y: i32, z: i32, id: u8, meta: u8) {
         if let Some(f) = fake().as_mut() {
             f.blocks.insert((x, y, z), (id, meta));
             f.log.push(format!("setmeta {x} {y} {z} {id} {meta}"));
         }
     }
-    extern "C" fn s_light(x: i32, y: i32, z: i32) -> i32 {
+    fn s_light(x: i32, y: i32, z: i32) -> i32 {
         fake().as_ref().and_then(|f| f.light.get(&(x, y, z)).copied()).unwrap_or(15)
     }
-    extern "C" fn s_sky(_x: i32, _y: i32, _z: i32) -> bool {
+    fn s_sky(_x: i32, _y: i32, _z: i32) -> bool {
         fake().as_ref().map(|f| f.sky).unwrap_or(true)
     }
-    extern "C" fn s_attach(x: i32, y: i32, z: i32) -> bool {
+    fn s_attach(x: i32, y: i32, z: i32) -> bool {
         fake().as_ref().and_then(|f| f.attach.get(&(x, y, z)).copied()).unwrap_or(false)
     }
-    extern "C" fn s_solid(x: i32, y: i32, z: i32) -> bool {
+    fn s_solid(x: i32, y: i32, z: i32) -> bool {
         fake().as_ref().and_then(|f| f.solid.get(&(x, y, z)).copied()).unwrap_or(false)
     }
-    extern "C" fn s_water_lava(x: i32, y: i32, z: i32) -> bool {
+    fn s_water_lava(x: i32, y: i32, z: i32) -> bool {
         fake().as_ref().and_then(|f| f.water_lava.get(&(x, y, z)).copied()).unwrap_or(false)
     }
-    extern "C" fn s_water(x: i32, y: i32, z: i32) -> bool {
+    fn s_water(x: i32, y: i32, z: i32) -> bool {
         fake().as_ref().and_then(|f| f.water.get(&(x, y, z)).copied()).unwrap_or(false)
     }
-    extern "C" fn s_registered(id: u8) -> bool {
+    fn s_registered(id: u8) -> bool {
         fake().as_ref().map(|f| !f.unregistered.contains(&id)).unwrap_or(true)
     }
-    extern "C" fn s_collidable(x: i32, y: i32, z: i32) -> bool {
+    fn s_collidable(x: i32, y: i32, z: i32) -> bool {
         s_solid(x, y, z)
     }
-    extern "C" fn s_schedule(x: i32, y: i32, z: i32, id: u8, delay: i32) {
+    fn s_schedule(x: i32, y: i32, z: i32, id: u8, delay: i32) {
         if let Some(f) = fake().as_mut() {
             f.log.push(format!("sched {x} {y} {z} {id} {delay}"));
         }
     }
-    extern "C" fn s_mark(x: i32, y: i32, z: i32) {
+    fn s_mark(x: i32, y: i32, z: i32) {
         if let Some(f) = fake().as_mut() {
             f.log.push(format!("mark {x} {y} {z}"));
         }
     }
-    extern "C" fn s_notify(x: i32, y: i32, z: i32, id: u8) {
+    fn s_notify(x: i32, y: i32, z: i32, id: u8) {
         if let Some(f) = fake().as_mut() {
             f.log.push(format!("neigh {x} {y} {z} {id}"));
         }
     }
-    extern "C" fn s_drop(item: i32, count: i32, damage: i32, fx: f64, fy: f64, fz: f64, _sp: f64, _up: f64) {
+    fn s_drop(item: i32, count: i32, damage: i32, fx: f64, fy: f64, fz: f64, _sp: f64, _up: f64) {
         if let Some(f) = fake().as_mut() {
             f.log.push(format!("drop {item} {count} {damage} {fx:.1} {fy:.1} {fz:.1}"));
         }
     }
-    extern "C" fn s_falling(id: u8, fx: f64, fy: f64, fz: f64) {
+    fn s_falling(id: u8, fx: f64, fy: f64, fz: f64) {
         if let Some(f) = fake().as_mut() {
             f.log.push(format!("fall {id} {fx:.1} {fy:.1} {fz:.1}"));
         }
     }
-    extern "C" fn s_drop_occ(x: i32, y: i32, z: i32) {
+    fn s_drop_occ(x: i32, y: i32, z: i32) {
         if let Some(f) = fake().as_mut() {
             f.log.push(format!("occ {x} {y} {z}"));
         }
@@ -1443,14 +1267,14 @@ mod tests {
     #[test]
     fn test_block_scenarios() {
         let t = table();
-        let tp = &t as *const BlockTickWorld;
+        let tp = &t;
 
         // 1. Sand falls into air: clears itself and spawns the entity.
         reset();
         let _ = fake().as_mut().map(|f| {
             f.blocks.insert((0, 5, 0), (12, 0));
         });
-        unsafe { block_sand_tick(tp, 12, 0, 5, 0) };
+        block_sand_tick(tp, 12, 0, 5, 0);
         let l = logs();
         assert!(l.contains(&"update 0 5 0 0".to_string()), "{l:?}");
         assert!(l.contains(&"fall 12 0.5 5.5 0.5".to_string()), "{l:?}");
@@ -1462,7 +1286,7 @@ mod tests {
             f.solid.insert((0, 4, 0), true);
             f.blocks.insert((0, 4, 0), (1, 0));
         });
-        unsafe { block_sand_tick(tp, 12, 0, 5, 0) };
+        block_sand_tick(tp, 12, 0, 5, 0);
         assert!(logs().is_empty(), "{:?}", logs());
 
         // 3. Cactus grows at age 15 with headroom: new block above, age reset.
@@ -1471,7 +1295,7 @@ mod tests {
             f.blocks.insert((0, 1, 0), (81, 15));
             f.blocks.insert((0, 0, 0), (12, 0));
         });
-        unsafe { block_cactus_tick(tp, 81, 81, 1, 0, 0, 1, 0) };
+        block_cactus_tick(tp, 81, 81, 1, 0, 0, 1, 0);
         let l = logs();
         assert!(l.contains(&"notify 0 2 0 81".to_string()), "{l:?}");
         assert!(l.contains(&"meta 0 1 0 0".to_string()), "{l:?}");
@@ -1484,7 +1308,7 @@ mod tests {
             f.blocks.insert((0, 1, 0), (81, 0));
             f.blocks.insert((0, 0, 0), (12, 0));
         });
-        unsafe { block_cactus_tick(tp, 81, 81, 1, 0, 0, 3, 0) };
+        block_cactus_tick(tp, 81, 81, 1, 0, 0, 3, 0);
         let l = logs();
         assert!(!l.iter().any(|e| e.starts_with("notify 0 4")), "{l:?}");
         assert!(l.iter().any(|e| e.starts_with("sched 0 3 0 81")), "{l:?}");
@@ -1497,7 +1321,7 @@ mod tests {
             f.light.insert((0, 5, 0), 0);
             f.sky = false;
         });
-        unsafe { block_flower_neighbor(tp, 37, 1, 0, 0, 5, 0) };
+        block_flower_neighbor(tp, 37, 1, 0, 0, 5, 0);
         let l = logs();
         assert!(l.iter().any(|e| e.starts_with("drop 37 1 0")), "{l:?}");
         assert!(l.contains(&"update 0 5 0 0".to_string()), "{l:?}");
@@ -1507,7 +1331,7 @@ mod tests {
         let _ = fake().as_mut().map(|f| {
             f.blocks.insert((0, 5, 0), (50, 1));
         });
-        unsafe { block_torch_neighbor(tp, 50, 1, 0, 0, 5, 0) };
+        block_torch_neighbor(tp, 50, 1, 0, 0, 5, 0);
         let l = logs();
         assert!(l.iter().any(|e| e.starts_with("drop 50 1 0")), "{l:?}");
         assert!(l.contains(&"notify 0 5 0 0".to_string()), "{l:?}");
@@ -1517,7 +1341,7 @@ mod tests {
         let _ = fake().as_mut().map(|f| {
             f.attach.insert((1, 5, 0), true);
         });
-        let meta = unsafe { block_torch_attach_meta(tp, 4, 0, 5, 0) };
+        let meta = block_torch_attach_meta(tp, 4, 0, 5, 0);
         assert_eq!(meta, 2);
 
         // 8. Crops grow one stage when the roll succeeds.
@@ -1527,7 +1351,7 @@ mod tests {
             f.blocks.insert((0, 4, 0), (60, 0));
             f.int_script = vec![0];
         });
-        unsafe { block_crops_tick(tp, 59, 59, 296, 295, 0, 5, 0) };
+        block_crops_tick(tp, 59, 59, 296, 295, 0, 5, 0);
         let l = logs();
         assert!(l.contains(&"meta 0 5 0 4".to_string()), "{l:?}");
 
@@ -1537,7 +1361,7 @@ mod tests {
             f.blocks.insert((0, 5, 0), (59, 7));
             f.int_script = vec![1];
         });
-        unsafe { block_crops_drop_ffi(tp, 296, 295, 0, 5, 0, 7, 1.0) };
+        block_crops_drop_ffi(tp, 296, 295, 0, 5, 0, 7, 1.0);
         let l = logs();
         assert!(l.iter().any(|e| e.starts_with("drop 296 1 0")), "{l:?}");
         assert!(l.iter().any(|e| e.starts_with("drop 295 2 0")), "{l:?}");
@@ -1548,7 +1372,7 @@ mod tests {
             f.blocks.insert((0, 4, 0), (60, 0));
             f.int_script = vec![0];
         });
-        unsafe { block_soil_tick(tp, 60, 0, 4, 0) };
+        block_soil_tick(tp, 60, 0, 4, 0);
         assert!(logs().contains(&"notify 0 4 0 3".to_string()), "{:?}", logs());
 
         // 11. Trampled soil reverts on a 1/4 roll.
@@ -1556,7 +1380,7 @@ mod tests {
         let _ = fake().as_mut().map(|f| {
             f.int_script = vec![0];
         });
-        unsafe { block_soil_walking(tp, 0, 4, 0) };
+        block_soil_walking(tp, 0, 4, 0);
         assert!(logs().contains(&"notify 0 4 0 3".to_string()), "{:?}", logs());
 
         // 12. Lava source ignites supported air neighbors on a 1/4 roll.
@@ -1566,7 +1390,7 @@ mod tests {
             f.attach.insert((1, 4, 0), true);
             f.int_script = vec![0, 1, 1, 1, 1, 1];
         });
-        unsafe { block_fluid_tick(tp, 11, true, 0, 5, 0) };
+        block_fluid_tick(tp, 11, true, 0, 5, 0);
         assert!(logs().contains(&"notify 1 5 0 51".to_string()), "{:?}", logs());
 
         // 13. Sapling at growth stage with light grows: action + seed, cleared.
@@ -1578,7 +1402,7 @@ mod tests {
             f.int_script = vec![0];
             f.u64_val = 777;
         });
-        let act = unsafe { block_sapling_tick(tp, 6, 6, 1, 0, 0, 5, 0) };
+        let act = block_sapling_tick(tp, 6, 6, 1, 0, 0, 5, 0);
         assert_eq!(act.kind, SaplingAction::GrowTree as u8);
         assert_eq!(act.seed, 777);
         assert!(logs().contains(&"notify 0 5 0 0".to_string()), "{:?}", logs());
@@ -1589,7 +1413,7 @@ mod tests {
             f.blocks.insert((0, 5, 0), (18, 1));
         });
         let mut guard = 0;
-        unsafe { block_leaves_tick(tp, 18, 18, 6, 1, 0, &mut guard, 0, 5, 0) };
+        block_leaves_tick(tp, 18, 18, 6, 1, 0, &mut guard, 0, 5, 0);
         let l = logs();
         assert!(l.iter().any(|e| e.starts_with("drop 6 1 0")), "{l:?}");
         assert!(l.contains(&"notify 0 5 0 0".to_string()), "{l:?}");
@@ -1602,15 +1426,43 @@ mod tests {
             f.blocks.insert((-1, 4, 0), (8, 0));
             f.blocks.insert((0, 6, 0), (39, 0));
         });
-        assert!(unsafe { block_reed_can_stay(tp, 0, 5, 0) });
-        assert!(!unsafe { block_mushroom_can_stay(tp, 5, 6, 0) });
+        assert!(block_reed_can_stay(tp, 0, 5, 0));
+        assert!(!block_mushroom_can_stay(tp, 5, 6, 0));
 
-        // 16. Null table is a safe no-op.
-        unsafe {
-            block_sand_tick(std::ptr::null(), 12, 0, 5, 0);
-            assert!(!block_flower_can_stay(std::ptr::null(), 0, 5, 0));
-            let act = block_sapling_tick(std::ptr::null(), 6, 6, 1, 0, 0, 5, 0);
-            assert_eq!(act.kind, SaplingAction::None as u8);
-        }
+        // 16. Missing table hooks are safe no-ops (all-None table).
+        let bare = BlockTickWorld {
+            next_int: None,
+            next_float01: None,
+            next_u64: None,
+            get_block_id: None,
+            get_block_id_nc: None,
+            get_block_meta: None,
+            set_block: None,
+            set_block_meta: None,
+            set_block_notify: None,
+            set_block_update: None,
+            set_block_meta_notify: None,
+            set_block_and_meta: None,
+            get_block_light: None,
+            can_see_sky: None,
+            attach_world: None,
+            attach_torch: None,
+            is_solid: None,
+            is_solid_nc: None,
+            is_water_or_lava: None,
+            is_water: None,
+            block_registered: None,
+            collidable_box: None,
+            schedule_update: None,
+            mark_update: None,
+            notify_neighbors: None,
+            spawn_drop: None,
+            spawn_falling: None,
+            drop_occupant: None,
+        };
+        block_sand_tick(&bare, 12, 0, 5, 0);
+        assert!(!block_flower_can_stay(&bare, 0, 5, 0));
+        let act = block_sapling_tick(&bare, 6, 6, 1, 0, 0, 5, 0);
+        assert_eq!(act.kind, SaplingAction::None as u8);
     }
 }

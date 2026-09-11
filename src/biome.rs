@@ -1,7 +1,4 @@
 use std::sync::OnceLock;
-use libc::{c_int, size_t};
-use std::slice;
-use crate::noise::NoiseGeneratorOctaves2;
 
 #[repr(i32)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

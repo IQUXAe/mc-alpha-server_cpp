@@ -39,8 +39,7 @@ fn get_smelting_result(item_id: i32) -> i32 {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn furnace_create() -> FfiFurnaceState {
+pub fn furnace_create() -> FfiFurnaceState {
     FfiFurnaceState {
         slots: [FfiItemStack { stack_size: 0, animations_to_go: 0, item_id: -1, item_damage: 0 }; FURNACE_SIZE],
         burn_time: 0,
@@ -69,12 +68,10 @@ pub fn fuel_burn_time(item_id: i32) -> i32 {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn furnace_tick(
-    state: *mut FfiFurnaceState,
+pub fn furnace_tick(
+    state: &mut FfiFurnaceState,
     fuel_burn_time_from_cpp: i32,
 ) -> FurnaceTickResult {
-    let state = unsafe { &mut *state };
     tick_core(state, fuel_burn_time_from_cpp)
 }
 

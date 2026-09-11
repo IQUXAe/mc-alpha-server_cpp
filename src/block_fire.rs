@@ -89,7 +89,7 @@ fn neighbors_encourage(w: &BlockTickWorld, x: i32, y: i32, z: i32) -> i32 {
 fn try_catch_fire(
     w: &BlockTickWorld,
     fire_id: u8,
-    detonate_tnt: Option<extern "C" fn(x: i32, y: i32, z: i32)>,
+    detonate_tnt: Option<fn(x: i32, y: i32, z: i32)>,
     x: i32,
     y: i32,
     z: i32,
@@ -111,38 +111,22 @@ fn try_catch_fire(
     }
 }
 
-/// Extra C++ hook for fire: TNT detonation (virtual dispatch on another
-/// block, stays in C++).
-#[repr(C)]
-pub struct FireWorld {
-    pub base: *const BlockTickWorld,
-    pub detonate_tnt: Option<extern "C" fn(x: i32, y: i32, z: i32)>,
+/// Extra hook for fire: TNT detonation through the driver table.
+pub struct FireWorld<'a> {
+    pub base: &'a BlockTickWorld,
+    pub detonate_tnt: Option<fn(x: i32, y: i32, z: i32)>,
 }
 
-fn base(world: *const FireWorld) -> Option<&'static BlockTickWorld> {
-    if world.is_null() {
-        return None;
-    }
-    let fw = unsafe { &*world };
-    if fw.base.is_null() {
-        return None;
-    }
-    Some(unsafe { &*fw.base })
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn block_fire_tick(
-    world: *const FireWorld,
+pub fn block_fire_tick(
+    world: &FireWorld,
     fire_id: u8,
     tick_rate: i32,
     x: i32,
     y: i32,
     z: i32,
 ) {
-    let Some(w) = base(world) else {
-        return;
-    };
-    let fw = unsafe { &*world };
+    let w = world.base;
+    let fw = world;
     let on_netherrack = q_id(w, x, y - 1, z) == 87;
     let meta = q_meta(w, x, y, z);
 
@@ -189,29 +173,20 @@ pub unsafe extern "C" fn block_fire_tick(
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_fire_can_place(world: *const FireWorld, x: i32, y: i32, z: i32) -> bool {
-    let Some(w) = base(world) else {
-        return false;
-    };
+pub fn block_fire_can_place(world: &FireWorld, x: i32, y: i32, z: i32) -> bool {
+    let w = world.base;
     q_attach(w, x, y - 1, z) || has_burnable_neighbor(w, x, y, z)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_fire_neighbor(world: *const FireWorld, x: i32, y: i32, z: i32) {
-    let Some(w) = base(world) else {
-        return;
-    };
+pub fn block_fire_neighbor(world: &FireWorld, x: i32, y: i32, z: i32) {
+    let w = world.base;
     if !q_attach(w, x, y - 1, z) && !has_burnable_neighbor(w, x, y, z) {
         u_set_notify(w, x, y, z, 0);
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn block_fire_added(world: *const FireWorld, fire_id: u8, tick_rate: i32, x: i32, y: i32, z: i32) {
-    let Some(w) = base(world) else {
-        return;
-    };
+pub fn block_fire_added(world: &FireWorld, fire_id: u8, tick_rate: i32, x: i32, y: i32, z: i32) {
+    let w = world.base;
     if !q_attach(w, x, y - 1, z) && !has_burnable_neighbor(w, x, y, z) {
         u_set_notify(w, x, y, z, 0);
     } else {
@@ -253,7 +228,7 @@ mod tests {
         });
     }
 
-    extern "C" fn s_next_int(bound: i32) -> i32 {
+    fn s_next_int(bound: i32) -> i32 {
         let mut g = fake();
         let f = g.as_mut().unwrap_or_else(|| unreachable!());
         if f.int_pos < f.int_script.len() {
@@ -264,43 +239,43 @@ mod tests {
             bound - 1 // default: rolls fail
         }
     }
-    extern "C" fn s_get_id(x: i32, y: i32, z: i32) -> u8 {
+    fn s_get_id(x: i32, y: i32, z: i32) -> u8 {
         fake().as_ref().and_then(|f| f.blocks.get(&(x, y, z)).map(|b| b.0)).unwrap_or(0)
     }
-    extern "C" fn s_get_meta(x: i32, y: i32, z: i32) -> u8 {
+    fn s_get_meta(x: i32, y: i32, z: i32) -> u8 {
         fake().as_ref().and_then(|f| f.blocks.get(&(x, y, z)).map(|b| b.1)).unwrap_or(0)
     }
-    extern "C" fn s_set_meta(x: i32, y: i32, z: i32, meta: u8) {
+    fn s_set_meta(x: i32, y: i32, z: i32, meta: u8) {
         if let Some(f) = fake().as_mut() {
             let id = f.blocks.get(&(x, y, z)).map(|b| b.0).unwrap_or(0);
             f.blocks.insert((x, y, z), (id, meta));
             f.log.push(format!("meta {x} {y} {z} {meta}"));
         }
     }
-    extern "C" fn s_set_notify(x: i32, y: i32, z: i32, id: u8) {
+    fn s_set_notify(x: i32, y: i32, z: i32, id: u8) {
         if let Some(f) = fake().as_mut() {
             f.blocks.insert((x, y, z), (id, 0));
             f.log.push(format!("notify {x} {y} {z} {id}"));
         }
     }
-    extern "C" fn s_attach(x: i32, y: i32, z: i32) -> bool {
+    fn s_attach(x: i32, y: i32, z: i32) -> bool {
         fake().as_ref().and_then(|f| f.attach.get(&(x, y, z)).copied()).unwrap_or(false)
     }
-    extern "C" fn s_schedule(x: i32, y: i32, z: i32, id: u8, delay: i32) {
+    fn s_schedule(x: i32, y: i32, z: i32, id: u8, delay: i32) {
         if let Some(f) = fake().as_mut() {
             f.log.push(format!("sched {x} {y} {z} {id} {delay}"));
         }
     }
-    extern "C" fn s_detonate(x: i32, y: i32, z: i32) {
+    fn s_detonate(x: i32, y: i32, z: i32) {
         if let Some(f) = fake().as_mut() {
             f.log.push(format!("boom {x} {y} {z}"));
         }
     }
     // Unused table slots: null (treated as missing).
-    extern "C" fn s_f01() -> f32 {
+    fn s_f01() -> f32 {
         0.0
     }
-    extern "C" fn s_u64() -> u64 {
+    fn s_u64() -> u64 {
         0
     }
 
@@ -346,7 +321,6 @@ mod tests {
         // FireWorld borrows the table; keep both alive together.
         let base = base_table();
         let fw = FireWorld { base: &base, detonate_tnt: Some(s_detonate) };
-        let fp = &fw as *const FireWorld;
 
         // 1. Young fire on attached stone ages and reschedules.
         reset();
@@ -357,7 +331,7 @@ mod tests {
             f.blocks.insert((0, 4, 0), (1, 0));
             f.attach.insert((0, 4, 0), true);
         }
-        unsafe { block_fire_tick(fp, 51, 10, 0, 5, 0) };
+        block_fire_tick(&fw, 51, 10, 0, 5, 0);
         let l = logs();
         assert!(l.contains(&"meta 0 5 0 3".to_string()), "{l:?}");
         assert!(l.iter().any(|e| e.starts_with("sched 0 5 0 51 10")), "{l:?}");
@@ -371,7 +345,7 @@ mod tests {
             f.blocks.insert((0, 4, 0), (1, 0));
             f.attach.insert((0, 4, 0), true);
         }
-        unsafe { block_fire_tick(fp, 51, 10, 0, 5, 0) };
+        block_fire_tick(&fw, 51, 10, 0, 5, 0);
         assert!(logs().contains(&"notify 0 5 0 0".to_string()), "{:?}", logs());
 
         // 3. Fire on netherrack never starves.
@@ -382,7 +356,7 @@ mod tests {
             f.blocks.insert((0, 5, 0), (51, 15));
             f.blocks.insert((0, 4, 0), (87, 0));
         }
-        unsafe { block_fire_tick(fp, 51, 10, 0, 5, 0) };
+        block_fire_tick(&fw, 51, 10, 0, 5, 0);
         assert!(!logs().iter().any(|e| e == "notify 0 5 0 0"), "{:?}", logs());
 
         // 4. Adjacent planks catch fire on a lucky roll.
@@ -395,7 +369,7 @@ mod tests {
             f.blocks.insert((1, 5, 0), (5, 0));
             f.int_script = vec![0, 0];
         }
-        unsafe { block_fire_tick(fp, 51, 10, 0, 5, 0) };
+        block_fire_tick(&fw, 51, 10, 0, 5, 0);
         assert!(logs().contains(&"notify 1 5 0 51".to_string()), "{:?}", logs());
 
         // 5. TNT catches, clears, and detonates.
@@ -408,7 +382,7 @@ mod tests {
             f.blocks.insert((1, 5, 0), (46, 0));
             f.int_script = vec![0, 1];
         }
-        unsafe { block_fire_tick(fp, 51, 10, 0, 5, 0) };
+        block_fire_tick(&fw, 51, 10, 0, 5, 0);
         let l = logs();
         assert!(l.contains(&"notify 1 5 0 0".to_string()), "{l:?}");
         assert!(l.contains(&"boom 1 5 0".to_string()), "{l:?}");
@@ -424,18 +398,18 @@ mod tests {
             f.blocks.insert((2, 5, 0), (5, 0));
             f.int_script = vec![0];
         }
-        unsafe { block_fire_tick(fp, 51, 10, 0, 5, 0) };
+        block_fire_tick(&fw, 51, 10, 0, 5, 0);
         assert!(logs().contains(&"notify 1 5 0 51".to_string()), "{:?}", logs());
 
         // 7. Placement needs support or fuel; dead fire clears on touch.
         reset();
-        assert!(!unsafe { block_fire_can_place(fp, 0, 5, 0) });
+        assert!(!block_fire_can_place(&fw, 0, 5, 0));
         {
             let mut g = fake();
             let f = g.as_mut().unwrap_or_else(|| unreachable!());
             f.blocks.insert((0, 5, 0), (51, 0));
         }
-        unsafe { block_fire_neighbor(fp, 0, 5, 0) };
+        block_fire_neighbor(&fw, 0, 5, 0);
         assert!(logs().contains(&"notify 0 5 0 0".to_string()), "{:?}", logs());
         reset();
         {
@@ -443,13 +417,42 @@ mod tests {
             let f = g.as_mut().unwrap_or_else(|| unreachable!());
             f.attach.insert((0, 4, 0), true);
         }
-        unsafe { block_fire_added(fp, 51, 10, 0, 5, 0) };
+        block_fire_added(&fw, 51, 10, 0, 5, 0);
         assert!(logs().iter().any(|e| e.starts_with("sched 0 5 0 51")), "{:?}", logs());
 
-        // 8. Null table is a safe no-op.
-        unsafe {
-            block_fire_tick(std::ptr::null(), 51, 10, 0, 5, 0);
-            assert!(!block_fire_can_place(std::ptr::null(), 0, 5, 0));
-        }
+        // 8. Missing table hooks are safe no-ops (all-None table).
+        let bare = BlockTickWorld {
+            next_int: None,
+            next_float01: None,
+            next_u64: None,
+            get_block_id: None,
+            get_block_id_nc: None,
+            get_block_meta: None,
+            set_block: None,
+            set_block_meta: None,
+            set_block_notify: None,
+            set_block_update: None,
+            set_block_meta_notify: None,
+            set_block_and_meta: None,
+            get_block_light: None,
+            can_see_sky: None,
+            attach_world: None,
+            attach_torch: None,
+            is_solid: None,
+            is_solid_nc: None,
+            is_water_or_lava: None,
+            is_water: None,
+            block_registered: None,
+            collidable_box: None,
+            schedule_update: None,
+            mark_update: None,
+            notify_neighbors: None,
+            spawn_drop: None,
+            spawn_falling: None,
+            drop_occupant: None,
+        };
+        let bare_fw = FireWorld { base: &bare, detonate_tnt: None };
+        block_fire_tick(&bare_fw, 51, 10, 0, 5, 0);
+        assert!(!block_fire_can_place(&bare_fw, 0, 5, 0));
     }
 }

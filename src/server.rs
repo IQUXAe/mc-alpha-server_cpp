@@ -1412,12 +1412,13 @@ fn parse_console(line: &str) -> (ConsoleCommandTag, String, String, i32) {
         if f.ptr.is_null() || f.len == 0 {
             return String::new();
         }
+        // SAFETY: `FfiString` borrows from `line`, which outlives `parsed`
+        // below; `take` copies out before `line` is dropped.
         let bytes =
             unsafe { std::slice::from_raw_parts(f.ptr as *const u8, f.len as usize) };
         String::from_utf8_lossy(bytes).into_owned()
     }
-    let parsed =
-        unsafe { rust_parse_console_command(line.as_ptr() as *const libc::c_char, line.len()) };
+    let parsed = rust_parse_console_command(line);
     (parsed.tag, take(parsed.arg1), take(parsed.arg2), parsed.count)
 }
 

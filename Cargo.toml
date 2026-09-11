@@ -14,3 +14,16 @@ flate2 = "1"
 zstd = "0.13"
 ureq = "2"
 rusty-leveldb = "4"
+
+# Replaces the removed `.clang-tidy`: Clippy is the native lint gate.
+# Levels stay at `warn` so pre-existing findings don't break the build;
+# new bridge-era code must be warning-clean.
+[lints.clippy]
+all = "warn"
+
+[lints.rust]
+# `forbid` can't hold: the thread-local world shims (TICK_WORLD/SPAWN_* in
+# world.rs, USE_CTX in session.rs, the generator canvas) still deref raw
+# pointers behind documented guards. Warn keeps every `unsafe` visible in
+# review until those shims are dissolved too.
+unsafe_code = "warn"

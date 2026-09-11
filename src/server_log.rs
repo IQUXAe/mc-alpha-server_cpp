@@ -98,6 +98,7 @@ fn current_console_line() -> Option<String> {
 }
 
 fn stdout_is_tty() -> bool {
+    // SAFETY: `isatty` takes only an fd and touches no Rust state.
     (unsafe { libc::isatty(libc::STDOUT_FILENO) }) != 0
 }
 
@@ -125,10 +126,13 @@ fn current_timestamp() -> String {
     let secs: libc::time_t = since_epoch.as_secs() as libc::time_t;
     let millis = since_epoch.subsec_millis();
     let mut broken = std::mem::MaybeUninit::<libc::tm>::uninit();
+    // SAFETY: `localtime_r` writes exactly one `tm` through the out-pointer
+    // on success; the null check below restricts `assume_init` to that path.
     let filled = unsafe { libc::localtime_r(&secs, broken.as_mut_ptr()) };
     if filled.is_null() {
         return format!("1970-01-01 00:00:00.{millis:03} ");
     }
+    // SAFETY: non-null `filled` means the `tm` above was fully written.
     let tm = unsafe { broken.assume_init() };
     format!(
         "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{millis:03} ",

@@ -1,6 +1,4 @@
 use libc::{c_char, size_t};
-use std::slice;
-use std::str;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -75,12 +73,8 @@ fn arg_of(sv: &str, prefix_len: usize) -> &str {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn rust_parse_console_command(
-    cmd_ptr: *const c_char,
-    cmd_len: size_t,
-) -> RustParsedCommand {
-    if cmd_ptr.is_null() || cmd_len == 0 {
+pub fn rust_parse_console_command(cmd: &str) -> RustParsedCommand {
+    if cmd.is_empty() {
         return RustParsedCommand {
             tag: ConsoleCommandTag::Unknown,
             arg1: FfiString::from_str(""),
@@ -89,8 +83,6 @@ pub unsafe extern "C" fn rust_parse_console_command(
         };
     }
 
-    let bytes = slice::from_raw_parts(cmd_ptr as *const u8, cmd_len as usize);
-    let cmd = str::from_utf8(bytes).unwrap_or("");
     let lower = cmd.to_lowercase();
 
     let mut tag = ConsoleCommandTag::Unknown;

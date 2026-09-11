@@ -27,8 +27,7 @@
 /// `World::spawnPassiveMobs` (`20 * n / 256`), which mirror Java
 /// `var29.field_4220_d * field_4311_a.size() / 256` per creature type.
 /// Multiplication first, then truncating division, exactly like C++ `int`.
-#[no_mangle]
-pub extern "C" fn alpha_spawn_max_count(num_eligible_chunks: i32, budget_per_256: i32) -> i32 {
+pub fn alpha_spawn_max_count(num_eligible_chunks: i32, budget_per_256: i32) -> i32 {
     budget_per_256.wrapping_mul(num_eligible_chunks).wrapping_div(256)
 }
 
@@ -38,8 +37,7 @@ pub extern "C" fn alpha_spawn_max_count(num_eligible_chunks: i32, budget_per_256
 /// `var15 += rand.nextInt(6) - rand.nextInt(6)`). Each draw is uniform in
 /// `[0, 6)`, so the step is triangular in `[-5, 5]`. The two draws are
 /// passed in (C++ owns the RNG stream); this function only owns the shape.
-#[no_mangle]
-pub extern "C" fn alpha_spawn_pack_offset(first: i32, second: i32) -> i32 {
+pub fn alpha_spawn_pack_offset(first: i32, second: i32) -> i32 {
     first.wrapping_sub(second)
 }
 
@@ -49,8 +47,7 @@ pub extern "C" fn alpha_spawn_pack_offset(first: i32, second: i32) -> i32 {
 /// Mirrors the `dsx*dsx + dsy*dsy + dsz*dsz < 576.0f` check in both spawn
 /// functions (Java `var26 >= 576.0F` gate). `f32` arithmetic matches the
 /// C++ `float` computation bit-for-bit for the same inputs.
-#[no_mangle]
-pub extern "C" fn alpha_spawn_too_close_to_spawn(
+pub fn alpha_spawn_too_close_to_spawn(
     fx: f32,
     fy: f32,
     fz: f32,
@@ -74,18 +71,17 @@ pub extern "C" fn alpha_spawn_too_close_to_spawn(
 /// `out_max_in_chunk`, and return the entity id (or negative on failure).
 /// Kinds are 0=spider,1=zombie,2=skeleton,3=creeper for the hostile driver
 /// and 0=sheep,1=pig,2=chicken,3=cow for the passive driver.
-#[repr(C)]
 pub struct SpawnerWorld {
-    pub next_int: Option<extern "C" fn(bound: i32) -> i32>,
-    pub next_uniform_float: Option<extern "C" fn(lo: f32, hi: f32) -> f32>,
-    pub chunk_exists: Option<extern "C" fn(x: i32, z: i32) -> bool>,
-    pub is_solid: Option<extern "C" fn(x: i32, y: i32, z: i32) -> bool>,
-    pub is_air: Option<extern "C" fn(x: i32, y: i32, z: i32) -> bool>,
-    pub is_liquid: Option<extern "C" fn(x: i32, y: i32, z: i32) -> bool>,
+    pub next_int: Option<fn(bound: i32) -> i32>,
+    pub next_uniform_float: Option<fn(lo: f32, hi: f32) -> f32>,
+    pub chunk_exists: Option<fn(x: i32, z: i32) -> bool>,
+    pub is_solid: Option<fn(x: i32, y: i32, z: i32) -> bool>,
+    pub is_air: Option<fn(x: i32, y: i32, z: i32) -> bool>,
+    pub is_liquid: Option<fn(x: i32, y: i32, z: i32) -> bool>,
     pub try_spawn:
-        Option<extern "C" fn(kind: u8, fx: f32, fy: f32, fz: f32, yaw: f32, out_max_in_chunk: *mut i32) -> i32>,
+        Option<fn(kind: u8, fx: f32, fy: f32, fz: f32, yaw: f32, out_max_in_chunk: &mut i32) -> i32>,
     pub spawn_jockey:
-        Option<extern "C" fn(fx: f32, fy: f32, fz: f32, yaw: f32, host_id: i32) -> bool>,
+        Option<fn(fx: f32, fy: f32, fz: f32, yaw: f32, host_id: i32) -> bool>,
 }
 
 const CHUNK_RADIUS: i32 = 8;
@@ -232,81 +228,36 @@ fn spawn_pass(
     spawned
 }
 
-/// Batch driver for `World::spawnHostileMobs`. Player positions are parallel
-/// `f64` slices of length `num_players` (null with nonzero length aborts to 0).
-/// Returns the primary spawn count.
-#[no_mangle]
-pub unsafe extern "C" fn rust_world_spawn_hostile(
-    world: *const SpawnerWorld,
-    player_x: *const f64,
-    player_y: *const f64,
-    player_z: *const f64,
-    num_players: usize,
+/// Batch driver for `World::spawnHostileMobs`: parallel player-position
+/// slices. Returns the primary spawn count.
+pub fn rust_world_spawn_hostile(
+    world: &SpawnerWorld,
+    players_x: &[f64],
+    players_y: &[f64],
+    players_z: &[f64],
     current_count: i32,
     spawn_x: i32,
     spawn_y: i32,
     spawn_z: i32,
     world_height: i32,
 ) -> i32 {
-    if world.is_null() {
-        return 0;
-    }
-    // NOTE: slice::from_raw_parts requires non-null even for len 0,
-    // so empty player lists use a static empty slice instead.
-    let empty: &[f64] = &[];
-    let (px, py, pz) = if num_players == 0 {
-        (empty, empty, empty)
-    } else {
-        if player_x.is_null() || player_y.is_null() || player_z.is_null() {
-            return 0;
-        }
-        unsafe {
-            (
-                std::slice::from_raw_parts(player_x, num_players),
-                std::slice::from_raw_parts(player_y, num_players),
-                std::slice::from_raw_parts(player_z, num_players),
-            )
-        }
-    };
-    spawn_pass(unsafe { &*world }, px, py, pz, true, current_count, spawn_x, spawn_y, spawn_z, world_height)
+    spawn_pass(world, players_x, players_y, players_z, true, current_count, spawn_x, spawn_y, spawn_z, world_height)
 }
 
 /// Batch driver for `World::spawnPassiveMobs`. Same contract as hostile;
 /// spider-jockey logic is skipped.
-#[no_mangle]
-pub unsafe extern "C" fn rust_world_spawn_passive(
-    world: *const SpawnerWorld,
-    player_x: *const f64,
-    player_y: *const f64,
-    player_z: *const f64,
-    num_players: usize,
+pub fn rust_world_spawn_passive(
+    world: &SpawnerWorld,
+    players_x: &[f64],
+    players_y: &[f64],
+    players_z: &[f64],
     current_count: i32,
     spawn_x: i32,
     spawn_y: i32,
     spawn_z: i32,
     world_height: i32,
 ) -> i32 {
-    if world.is_null() {
-        return 0;
-    }
-    // NOTE: slice::from_raw_parts requires non-null even for len 0,
-    // so empty player lists use a static empty slice instead.
-    let empty: &[f64] = &[];
-    let (px, py, pz) = if num_players == 0 {
-        (empty, empty, empty)
-    } else {
-        if player_x.is_null() || player_y.is_null() || player_z.is_null() {
-            return 0;
-        }
-        unsafe {
-            (
-                std::slice::from_raw_parts(player_x, num_players),
-                std::slice::from_raw_parts(player_y, num_players),
-                std::slice::from_raw_parts(player_z, num_players),
-            )
-        }
-    };
-    spawn_pass(unsafe { &*world }, px, py, pz, false, current_count, spawn_x, spawn_y, spawn_z, world_height)
+    spawn_pass(world, players_x, players_y, players_z, false, current_count, spawn_x, spawn_y, spawn_z, world_height)
 }
 
 #[cfg(test)]
@@ -375,43 +326,39 @@ mod tests {
         }
 
         // All RNG draws return 0: every 1/N roll succeeds, kinds/origins are 0.
-        extern "C" fn stub_next_int(bound: i32) -> i32 {
+        fn stub_next_int(bound: i32) -> i32 {
             assert!(bound > 0);
             0
         }
-        extern "C" fn stub_next_float(_lo: f32, _hi: f32) -> f32 {
+        fn stub_next_float(_lo: f32, _hi: f32) -> f32 {
             0.0
         }
-        extern "C" fn stub_chunk_exists(_x: i32, _z: i32) -> bool {
+        fn stub_chunk_exists(_x: i32, _z: i32) -> bool {
             true
         }
         // Solid ground only at y == -1, air everywhere, no liquid.
-        extern "C" fn stub_is_solid(_x: i32, y: i32, _z: i32) -> bool {
+        fn stub_is_solid(_x: i32, y: i32, _z: i32) -> bool {
             y == -1
         }
-        extern "C" fn stub_is_air(_x: i32, _y: i32, _z: i32) -> bool {
+        fn stub_is_air(_x: i32, _y: i32, _z: i32) -> bool {
             true
         }
-        extern "C" fn stub_is_liquid(_x: i32, _y: i32, _z: i32) -> bool {
+        fn stub_is_liquid(_x: i32, _y: i32, _z: i32) -> bool {
             false
         }
-        extern "C" fn stub_try_spawn(
+        fn stub_try_spawn(
             _kind: u8,
             _fx: f32,
             _fy: f32,
             _fz: f32,
             _yaw: f32,
-            out_max: *mut i32,
+            out_max: &mut i32,
         ) -> i32 {
             TRY_SPAWN_CALLS.fetch_add(1, Ordering::SeqCst);
-            if !out_max.is_null() {
-                unsafe {
-                    *out_max = 4;
-                }
-            }
+            *out_max = 4;
             NEXT_ID.fetch_add(1, Ordering::SeqCst)
         }
-        extern "C" fn stub_spawn_jockey(_fx: f32, _fy: f32, _fz: f32, _yaw: f32, _host: i32) -> bool {
+        fn stub_spawn_jockey(_fx: f32, _fy: f32, _fz: f32, _yaw: f32, _host: i32) -> bool {
             JOCKEY_CALLS.fetch_add(1, Ordering::SeqCst);
             true
         }
@@ -437,15 +384,10 @@ mod tests {
             let py = [64.0f64];
             let pz = [0.5f64];
 
-            // Null table aborts to 0.
-            assert_eq!(
-                unsafe { rust_world_spawn_hostile(std::ptr::null(), px.as_ptr(), py.as_ptr(), pz.as_ptr(), 1, 0, 1000, 64, 1000, 128) },
-                0
-            );
             // No players, no chunks, no spawns.
             reset();
             assert_eq!(
-                unsafe { rust_world_spawn_hostile(&world, std::ptr::null(), std::ptr::null(), std::ptr::null(), 0, 0, 1000, 64, 1000, 128) },
+                rust_world_spawn_hostile(&world, &[], &[], &[], 0, 1000, 64, 1000, 128),
                 0
             );
             assert_eq!(TRY_SPAWN_CALLS.load(Ordering::SeqCst), 0);
@@ -453,7 +395,7 @@ mod tests {
             // Cap gate: 1 player -> 289 chunks -> max 112 hostile; 113 blocks everything.
             reset();
             assert_eq!(
-                unsafe { rust_world_spawn_hostile(&world, px.as_ptr(), py.as_ptr(), pz.as_ptr(), 1, 113, 1000, 64, 1000, 128) },
+                rust_world_spawn_hostile(&world, &px, &py, &pz, 113, 1000, 64, 1000, 128),
                 0
             );
             assert_eq!(TRY_SPAWN_CALLS.load(Ordering::SeqCst), 0);
@@ -463,14 +405,14 @@ mod tests {
             // triggers the per-spawn jockey roll (always 0).
             // 17x17 = 289 chunks -> 289*4 primary + 289*4 jockeys.
             reset();
-            let n = unsafe { rust_world_spawn_hostile(&world, px.as_ptr(), py.as_ptr(), pz.as_ptr(), 1, 0, 1000, 64, 1000, 128) };
+            let n = rust_world_spawn_hostile(&world, &px, &py, &pz, 0, 1000, 64, 1000, 128);
             assert_eq!(n, 289 * 4);
             assert_eq!(TRY_SPAWN_CALLS.load(Ordering::SeqCst), 289 * 4);
             assert_eq!(JOCKEY_CALLS.load(Ordering::SeqCst), 289 * 4);
 
             // Happy passive path: same totals, no jockeys.
             reset();
-            let n = unsafe { rust_world_spawn_passive(&world, px.as_ptr(), py.as_ptr(), pz.as_ptr(), 1, 0, 1000, 64, 1000, 128) };
+            let n = rust_world_spawn_passive(&world, &px, &py, &pz, 0, 1000, 64, 1000, 128);
             assert_eq!(n, 289 * 4);
             assert_eq!(TRY_SPAWN_CALLS.load(Ordering::SeqCst), 289 * 4);
             assert_eq!(JOCKEY_CALLS.load(Ordering::SeqCst), 0);
@@ -478,7 +420,7 @@ mod tests {
             // World-spawn exclusion: spawn at y=0 inside the eligible area
             // removes candidates (strictly fewer spawns than the happy path).
             reset();
-            let n_excl = unsafe { rust_world_spawn_hostile(&world, px.as_ptr(), py.as_ptr(), pz.as_ptr(), 1, 0, 8, 0, 8, 128) };
+            let n_excl = rust_world_spawn_hostile(&world, &px, &py, &pz, 0, 8, 0, 8, 128);
             assert!(n_excl < 289 * 4);
             assert_eq!(TRY_SPAWN_CALLS.load(Ordering::SeqCst), n_excl);
         }

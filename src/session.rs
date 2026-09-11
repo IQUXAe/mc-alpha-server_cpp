@@ -1032,7 +1032,7 @@ impl PlaySession {
             is_in_water: in_water,
             fall_distance: fall,
         };
-        let res = unsafe { alpha_movement_validate(&input) };
+        let res = alpha_movement_validate(&input);
         match res.status {
             1 => return self.kick("Illegal stance"),
             2 => return self.kick("Illegal position"),
@@ -1070,7 +1070,7 @@ impl PlaySession {
             is_in_water: in_water,
             fall_distance: fall2,
         };
-        let fall_res = unsafe { alpha_movement_validate(&fall_input) };
+        let fall_res = alpha_movement_validate(&fall_input);
         if fall_res.fall_damage > 0 {
             ctx.world.attack_living(me, fall_res.fall_damage, None);
         }
@@ -1410,6 +1410,9 @@ thread_local! {
 }
 
 fn with_use_ctx<T>(f: impl FnOnce(&mut World, EntityId, &mut PlaySession, &HashSet<String>) -> T, dflt: T) -> T {
+    // SAFETY: `UseGuard` installs the pointers from live `&mut` borrows and
+    // clears them on drop; the guard outlives every shim call, so the refs
+    // below are valid and unaliased for the closure body.
     USE_CTX.with(|c| unsafe {
         let ctx = c.get();
         if ctx.world.is_null() || ctx.session.is_null() || ctx.ops.is_null() {
@@ -1441,43 +1444,43 @@ impl Drop for UseGuard {
     }
 }
 
-extern "C" fn use_next_int(bound: i32) -> i32 {
+fn use_next_int(bound: i32) -> i32 {
     if bound <= 0 {
         return 0;
     }
     with_use_ctx(|w, _, _, _| w.rng_next_int(bound), 0)
 }
 
-extern "C" fn use_next_f64() -> f64 {
+fn use_next_f64() -> f64 {
     with_use_ctx(|w, _, _, _| w.rng_next_f64(), 0.0)
 }
 
-extern "C" fn use_get_id(x: i32, y: i32, z: i32) -> u8 {
+fn use_get_id(x: i32, y: i32, z: i32) -> u8 {
     with_use_ctx(|w, _, _, _| w.get_block_id(x, y, z), 0)
 }
 
-extern "C" fn use_set_notify(x: i32, y: i32, z: i32, id: u8) -> bool {
+fn use_set_notify(x: i32, y: i32, z: i32, id: u8) -> bool {
     with_use_ctx(|w, _, _, _| w.apply_set_notify(x, y, z, id), false)
 }
 
-extern "C" fn use_set_meta_notify(x: i32, y: i32, z: i32, id: u8, meta: u8) -> bool {
+fn use_set_meta_notify(x: i32, y: i32, z: i32, id: u8, meta: u8) -> bool {
     with_use_ctx(|w, _, _, _| w.apply_set_meta_notify(x, y, z, id, meta), false)
 }
 
-extern "C" fn use_set_quiet(x: i32, y: i32, z: i32, id: u8) -> bool {
+fn use_set_quiet(x: i32, y: i32, z: i32, id: u8) -> bool {
     // setBlockWithNotifyNoClientUpdate == notify path natively (mark is a no-op).
     with_use_ctx(|w, _, _, _| w.apply_set_notify(x, y, z, id), false)
 }
 
-extern "C" fn use_set_meta(x: i32, y: i32, z: i32, meta: u8) {
+fn use_set_meta(x: i32, y: i32, z: i32, meta: u8) {
     with_use_ctx(|w, _, _, _| w.set_block_meta(x, y, z, meta), false);
 }
 
-extern "C" fn use_does_attach(x: i32, y: i32, z: i32) -> bool {
+fn use_does_attach(x: i32, y: i32, z: i32) -> bool {
     with_use_ctx(|w, _, _, _| w.block_allows_attachment(x, y, z), false)
 }
 
-extern "C" fn use_mat_burning(x: i32, y: i32, z: i32) -> bool {
+fn use_mat_burning(x: i32, y: i32, z: i32) -> bool {
     with_use_ctx(
         |w, _, _, _| {
             crate::world::material_of(crate::block::alpha_block_properties_get(
@@ -1489,11 +1492,11 @@ extern "C" fn use_mat_burning(x: i32, y: i32, z: i32) -> bool {
     )
 }
 
-extern "C" fn use_mat_solid(x: i32, y: i32, z: i32) -> bool {
+fn use_mat_solid(x: i32, y: i32, z: i32) -> bool {
     with_use_ctx(|w, _, _, _| w.material_at(x, y, z).is_solid(), false)
 }
 
-extern "C" fn use_collidable(x: i32, y: i32, z: i32) -> bool {
+fn use_collidable(x: i32, y: i32, z: i32) -> bool {
     with_use_ctx(
         |w, _, _, _| {
             let bid = w.get_block_id(x, y, z);
@@ -1506,11 +1509,11 @@ extern "C" fn use_collidable(x: i32, y: i32, z: i32) -> bool {
     )
 }
 
-extern "C" fn use_can_stay(id: u8, x: i32, y: i32, z: i32) -> bool {
+fn use_can_stay(id: u8, x: i32, y: i32, z: i32) -> bool {
     // canBlockStay drivers under the tick table (base rule is true).
     with_use_ctx(
         |w, _, _, _| {
-            crate::world::with_tick_bridge(w as *mut World, || unsafe {
+            crate::world::with_tick_bridge(w as *mut World, || {
                 let t = crate::world::tick_table_ref();
                 match id {
                     37 | 38 | 31 => crate::block_ticks::block_flower_can_stay(t, x, y, z),
@@ -1528,7 +1531,7 @@ extern "C" fn use_can_stay(id: u8, x: i32, y: i32, z: i32) -> bool {
     )
 }
 
-extern "C" fn use_placement_clear(id: u8, x: i32, y: i32, z: i32) -> bool {
+fn use_placement_clear(id: u8, x: i32, y: i32, z: i32) -> bool {
     // mirrors isPlacementVolumeClear: no live boat/living intersecting.
     with_use_ctx(
         |w, _, _, _| {
@@ -1564,14 +1567,14 @@ extern "C" fn use_placement_clear(id: u8, x: i32, y: i32, z: i32) -> bool {
     )
 }
 
-extern "C" fn use_block_placed(id: u8, x: i32, y: i32, z: i32, side: i32) {
+fn use_block_placed(id: u8, x: i32, y: i32, z: i32, side: i32) {
     // Torch facing like onBlockPlaced (tiles already exist via added).
     if id != 50 {
         return;
     }
     with_use_ctx(
         |w, _, _, _| {
-            crate::world::with_tick_bridge(w as *mut World, || unsafe {
+            crate::world::with_tick_bridge(w as *mut World, || {
                 let meta = crate::block_ticks::block_torch_attach_meta(
                     crate::world::tick_table_ref(),
                     side,
@@ -1587,11 +1590,11 @@ extern "C" fn use_block_placed(id: u8, x: i32, y: i32, z: i32, side: i32) {
     );
 }
 
-extern "C" fn use_have_block(id: u8) -> bool {
+fn use_have_block(id: u8) -> bool {
     with_use_ctx(|_, _, _, _| crate::world::World::native_registered(id), false)
 }
 
-extern "C" fn use_spawn_item(
+fn use_spawn_item(
     item_id: i32,
     count: i32,
     damage: i32,
@@ -1613,7 +1616,7 @@ extern "C" fn use_spawn_item(
     );
 }
 
-extern "C" fn use_send_te(x: i32, y: i32, z: i32) {
+fn use_send_te(x: i32, y: i32, z: i32) {
     with_use_ctx(
         |w, _, sess, _| {
             if let Some(tile) = w.tiles.get(&(x, y, z)) {
@@ -1624,28 +1627,25 @@ extern "C" fn use_send_te(x: i32, y: i32, z: i32) {
     );
 }
 
-extern "C" fn use_ray_trace(
+fn use_ray_trace(
     sx: f64,
     sy: f64,
     sz: f64,
     ex: f64,
     ey: f64,
     ez: f64,
-    out_x: *mut i32,
-    out_y: *mut i32,
-    out_z: *mut i32,
+    out_x: &mut i32,
+    out_y: &mut i32,
+    out_z: &mut i32,
 ) -> bool {
-    if out_x.is_null() || out_y.is_null() || out_z.is_null() {
-        return false;
-    }
     with_use_ctx(
         |w, _, _, _| match w.ray_trace_hit_liquids([sx, sy, sz], [ex, ey, ez]) {
-            Some([x, y, z]) => unsafe {
+            Some([x, y, z]) => {
                 *out_x = x;
                 *out_y = y;
                 *out_z = z;
                 true
-            },
+            }
             None => false,
         },
         false,
@@ -2353,66 +2353,64 @@ impl PlaySession {
             self as *mut PlaySession,
             ctx.ops as *const HashSet<String>,
         );
-        let used = unsafe {
-            match s.item_id {
-                290..=294 => {
-                    if !item_hoe_use(&USE_TABLE, 295, x, y, z) {
-                        false
-                    } else {
-                        let max = alpha_item_max_damage(s.item_id);
-                        crate::inventory::item_stack_damage(&mut *s, 1, max);
-                        true
-                    }
-                }
-                295 => {
-                    if side != 1 {
-                        false
-                    } else if !item_seeds_use(&USE_TABLE, x, y, z, side) {
-                        false
-                    } else {
-                        if s.stack_size > 0 {
-                            s.stack_size -= 1;
-                        }
-                        true
-                    }
-                }
-                259 => {
+        let used = match s.item_id {
+            290..=294 => {
+                if !item_hoe_use(&USE_TABLE, 295, x, y, z) {
+                    false
+                } else {
                     let max = alpha_item_max_damage(s.item_id);
-                    let mut out = FlintOut { placed: false, new_damage: 0, broke: false };
-                    if !item_flint_use(&USE_TABLE, s.item_damage, max, x, y, z, side, &mut out) {
-                        false
-                    } else {
-                        s.item_damage = out.new_damage;
-                        if out.broke {
-                            s.stack_size = 0;
-                        }
-                        true
-                    }
+                    crate::inventory::item_stack_damage(&mut *s, 1, max);
+                    true
                 }
-                323 => {
-                    if !item_sign_use(&USE_TABLE, x, y, z, side, yaw) {
-                        false
-                    } else {
-                        if s.stack_size > 0 {
-                            s.stack_size -= 1;
-                        }
-                        true
-                    }
-                }
-                333 => false,
-                1..=255 => {
-                    if !item_block_use(&USE_TABLE, s.item_id as u8, s.stack_size, x, y, z, side, yaw)
-                    {
-                        false
-                    } else {
-                        if s.stack_size > 0 {
-                            s.stack_size -= 1;
-                        }
-                        true
-                    }
-                }
-                _ => false,
             }
+            295 => {
+                if side != 1 {
+                    false
+                } else if !item_seeds_use(&USE_TABLE, x, y, z, side) {
+                    false
+                } else {
+                    if s.stack_size > 0 {
+                        s.stack_size -= 1;
+                    }
+                    true
+                }
+            }
+            259 => {
+                let max = alpha_item_max_damage(s.item_id);
+                let mut out = FlintOut { placed: false, new_damage: 0, broke: false };
+                if !item_flint_use(&USE_TABLE, s.item_damage, max, x, y, z, side, &mut out) {
+                    false
+                } else {
+                    s.item_damage = out.new_damage;
+                    if out.broke {
+                        s.stack_size = 0;
+                    }
+                    true
+                }
+            }
+            323 => {
+                if !item_sign_use(&USE_TABLE, x, y, z, side, yaw) {
+                    false
+                } else {
+                    if s.stack_size > 0 {
+                        s.stack_size -= 1;
+                    }
+                    true
+                }
+            }
+            333 => false,
+            1..=255 => {
+                if !item_block_use(&USE_TABLE, s.item_id as u8, s.stack_size, x, y, z, side, yaw)
+                {
+                    false
+                } else {
+                    if s.stack_size > 0 {
+                        s.stack_size -= 1;
+                    }
+                    true
+                }
+            }
+            _ => false,
         };
         drop(_guard);
         used
@@ -2462,12 +2460,10 @@ impl PlaySession {
             let mut aim = BoatThrow {
                 lx: 0.0, ly: 0.0, lz: 0.0, sx: 0.0, sy: 0.0, sz: 0.0, ex: 0.0, ey: 0.0, ez: 0.0,
             };
-            if !unsafe {
-                item_boat_aim(
-                    prev_yaw, pyaw, prev_pitch, ppitch, prev_pos[0], ppos[0], prev_pos[1], ppos[1],
-                    prev_pos[2], ppos[2], pyoff, &mut aim,
-                )
-            } {
+            if !item_boat_aim(
+                prev_yaw, pyaw, prev_pitch, ppitch, prev_pos[0], ppos[0], prev_pos[1], ppos[1],
+                prev_pos[2], ppos[2], pyoff, &mut aim,
+            ) {
                 return false;
             }
             let _guard = UseGuard::enter(
@@ -2477,9 +2473,8 @@ impl PlaySession {
                 ctx.ops as *const HashSet<String>,
             );
             let (mut hx, mut hy, mut hz) = (0, 0, 0);
-            let ok = unsafe {
-                item_boat_throw(&USE_TABLE, aim.sx, aim.sy, aim.sz, aim.ex, aim.ey, aim.ez, &mut hx, &mut hy, &mut hz)
-            };
+            let ok =
+                item_boat_throw(&USE_TABLE, aim.sx, aim.sy, aim.sz, aim.ex, aim.ey, aim.ez, &mut hx, &mut hy, &mut hz);
             drop(_guard);
             if !ok {
                 return false;

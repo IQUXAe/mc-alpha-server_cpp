@@ -89,6 +89,8 @@ fn main() {
     log::info(&format!("Starting Minecraft server on {display}:{port}"));
     log::info("Done! For help, type \"help\" or \"?\"");
 
+    // SAFETY: `signal_handler` is a capture-free `extern "C"` fn, so its
+    // address is a valid `sighandler_t` for `libc::signal` to store.
     unsafe {
         let handler = signal_handler as *const () as libc::sighandler_t;
         libc::signal(libc::SIGINT, handler);

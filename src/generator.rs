@@ -31,6 +31,8 @@ struct DecoratorWorldState {
 }
 
 fn local_get_block_id(x: i32, y: i32, z: i32) -> u8 {
+    // SAFETY: set from the live stack `DecoratorWorldState` for the decorate
+    // call below and cleared right after; null (no decoration) is checked next.
     unsafe {
         let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
         if state_ptr.is_null() {
@@ -54,6 +56,8 @@ fn local_get_block_id(x: i32, y: i32, z: i32) -> u8 {
 }
 
 fn local_set_block_id(x: i32, y: i32, z: i32, id: u8) {
+    // SAFETY: set from the live stack `DecoratorWorldState` for the decorate
+    // call below and cleared right after; null (no decoration) is checked next.
     unsafe {
         let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
         if state_ptr.is_null() {
@@ -84,6 +88,8 @@ fn local_set_block_id(x: i32, y: i32, z: i32, id: u8) {
 }
 
 fn local_get_block_meta(x: i32, y: i32, z: i32) -> u8 {
+    // SAFETY: set from the live stack `DecoratorWorldState` for the decorate
+    // call below and cleared right after; null (no decoration) is checked next.
     unsafe {
         let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
         if state_ptr.is_null() {
@@ -113,6 +119,8 @@ fn local_get_block_meta(x: i32, y: i32, z: i32) -> u8 {
 }
 
 fn local_set_block_meta(x: i32, y: i32, z: i32, meta: u8) {
+    // SAFETY: set from the live stack `DecoratorWorldState` for the decorate
+    // call below and cleared right after; null (no decoration) is checked next.
     unsafe {
         let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
         if state_ptr.is_null() {
@@ -144,6 +152,8 @@ fn local_set_block_meta(x: i32, y: i32, z: i32, meta: u8) {
 }
 
 fn local_allows_attachment(x: i32, y: i32, z: i32) -> bool {
+    // SAFETY: set from the live stack `DecoratorWorldState` for the decorate
+    // call below and cleared right after; null (no decoration) is checked next.
     unsafe {
         let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
         if state_ptr.is_null() {
@@ -154,6 +164,8 @@ fn local_allows_attachment(x: i32, y: i32, z: i32) -> bool {
 }
 
 fn local_is_block_solid(x: i32, y: i32, z: i32) -> bool {
+    // SAFETY: set from the live stack `DecoratorWorldState` for the decorate
+    // call below and cleared right after; null (no decoration) is checked next.
     unsafe {
         let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
         if state_ptr.is_null() {
@@ -164,6 +176,8 @@ fn local_is_block_solid(x: i32, y: i32, z: i32) -> bool {
 }
 
 fn local_get_height_value(x: i32, z: i32) -> i32 {
+    // SAFETY: set from the live stack `DecoratorWorldState` for the decorate
+    // call below and cleared right after; null (no decoration) is checked next.
     unsafe {
         let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
         if state_ptr.is_null() {

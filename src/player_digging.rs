@@ -178,11 +178,11 @@ mod tests {
         // First tick latches the target, then 6 progress ticks.
         let mut s = alpha_dig_state_new();
         let inp = input(1, 278);
-        assert!(!unsafe { alpha_dig_on_tick(&mut s, 10, 64, 10, inp) }); // latch
+        assert!(!alpha_dig_on_tick(&mut s, 10, 64, 10, inp)); // latch
         for _ in 0..5 {
-            assert!(!unsafe { alpha_dig_on_tick(&mut s, 10, 64, 10, inp) });
+            assert!(!alpha_dig_on_tick(&mut s, 10, 64, 10, inp));
         }
-        assert!(unsafe { alpha_dig_on_tick(&mut s, 10, 64, 10, inp) }); // broke
+        assert!(alpha_dig_on_tick(&mut s, 10, 64, 10, inp)); // broke
         assert_eq!(s.initial_cooldown, 5);
         assert_eq!(s.cur_damage, 0.0);
     }
@@ -196,9 +196,9 @@ mod tests {
         s.target_x = 1;
         s.target_y = 2;
         s.target_z = 3;
-        assert!(!unsafe { alpha_dig_on_tick(&mut s, 1, 2, 3, inp) });
+        assert!(!alpha_dig_on_tick(&mut s, 1, 2, 3, inp));
         assert_eq!(s.initial_cooldown, 1);
-        assert!(!unsafe { alpha_dig_on_tick(&mut s, 1, 2, 3, inp) });
+        assert!(!alpha_dig_on_tick(&mut s, 1, 2, 3, inp));
         assert_eq!(s.initial_cooldown, 0);
     }
 
@@ -206,11 +206,11 @@ mod tests {
     fn test_tick_target_switch_resets() {
         let mut s = alpha_dig_state_new();
         let inp = input(1, 278);
-        assert!(!unsafe { alpha_dig_on_tick(&mut s, 0, 64, 0, inp) });
-        assert!(!unsafe { alpha_dig_on_tick(&mut s, 0, 64, 0, inp) });
+        assert!(!alpha_dig_on_tick(&mut s, 0, 64, 0, inp));
+        assert!(!alpha_dig_on_tick(&mut s, 0, 64, 0, inp));
         assert!(s.cur_damage > 0.0);
         // Different block: reset, no progress, new target latched.
-        assert!(!unsafe { alpha_dig_on_tick(&mut s, 5, 64, 5, inp) });
+        assert!(!alpha_dig_on_tick(&mut s, 5, 64, 5, inp));
         assert_eq!(s.cur_damage, 0.0);
         assert_eq!((s.target_x, s.target_y, s.target_z), (5, 64, 5));
     }
@@ -219,9 +219,9 @@ mod tests {
     fn test_tick_bedrock_never_breaks() {
         let mut s = alpha_dig_state_new();
         let inp = input(7, 278);
-        assert!(!unsafe { alpha_dig_on_tick(&mut s, 0, 1, 0, inp) }); // latch
+        assert!(!alpha_dig_on_tick(&mut s, 0, 1, 0, inp)); // latch
         for _ in 0..50 {
-            assert!(!unsafe { alpha_dig_on_tick(&mut s, 0, 1, 0, inp) });
+            assert!(!alpha_dig_on_tick(&mut s, 0, 1, 0, inp));
         }
     }
 
@@ -230,7 +230,7 @@ mod tests {
         let mut s = alpha_dig_state_new();
         s.cur_damage = 0.5;
         s.initial_cooldown = 3;
-        unsafe { alpha_dig_cancel(&mut s) };
+        alpha_dig_cancel(&mut s);
         assert_eq!(s.cur_damage, 0.0);
         assert_eq!(s.initial_cooldown, 0);
     }

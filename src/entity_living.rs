@@ -31,8 +31,7 @@ pub struct AttackResult {
 }
 
 /// Pure heal (mirrors `EntityLiving::heal`).
-#[no_mangle]
-pub extern "C" fn alpha_living_heal(health: i16, max_health: i16, amount: i32, dead: bool) -> i16 {
+pub fn alpha_living_heal(health: i16, max_health: i16, amount: i32, dead: bool) -> i16 {
     if amount <= 0 || dead || health <= 0 {
         return health;
     }
@@ -137,10 +136,9 @@ pub fn living_attack_run(input: &AttackInput, next_f01: &mut dyn FnMut() -> f64)
     Some(r)
 }
 
-#[no_mangle]
 #[allow(clippy::too_many_arguments)]
-pub unsafe extern "C" fn alpha_living_attack(
-    next_f01: Option<extern "C" fn() -> f64>,
+pub fn alpha_living_attack(
+    next_f01: Option<fn() -> f64>,
     health: i16,
     hurt_resist: i32,
     max_hurt_resist: i32,
@@ -157,11 +155,8 @@ pub unsafe extern "C" fn alpha_living_attack(
     motion_x: f64,
     motion_y: f64,
     motion_z: f64,
-    out: *mut AttackResult,
+    out: &mut AttackResult,
 ) -> bool {
-    if out.is_null() {
-        return false;
-    }
     let input = AttackInput {
         health,
         hurt_resist,
@@ -183,9 +178,7 @@ pub unsafe extern "C" fn alpha_living_attack(
     let mut cb = || next_f01.map(|f| f()).unwrap_or(0.0);
     match living_attack_run(&input, &mut cb) {
         Some(r) => {
-            unsafe {
-                *out = r;
-            }
+            *out = r;
             true
         }
         None => false,
@@ -205,8 +198,7 @@ pub struct LivingTick {
     pub drown: bool,
 }
 
-#[no_mangle]
-pub extern "C" fn alpha_living_tick(
+pub fn alpha_living_tick(
     alive: bool,
     inside_opaque: bool,
     in_water: bool,
@@ -244,8 +236,7 @@ pub extern "C" fn alpha_living_tick(
 
 /// Fall-damage amount for living entities (mirrors `EntityLiving::onFall`;
 // the `ceil(distance - 3)` Java formula). Zero means no damage.
-#[no_mangle]
-pub extern "C" fn alpha_living_fall_damage(distance: f32) -> i32 {
+pub fn alpha_living_fall_damage(distance: f32) -> i32 {
     let damage = (distance - 3.0f32).ceil() as i32;
     if damage > 0 {
         damage
@@ -272,9 +263,9 @@ pub struct MoveFeedback {
 
 #[repr(C)]
 pub struct HeadingWorld {
-    pub touching_liquid: Option<extern "C" fn() -> bool>,
-    pub on_ladder: Option<extern "C" fn() -> bool>,
-    pub do_move: Option<extern "C" fn(dx: f64, dy: f64, dz: f64, out: *mut MoveFeedback) -> bool>,
+    pub touching_liquid: Option<fn() -> bool>,
+    pub on_ladder: Option<fn() -> bool>,
+    pub do_move: Option<fn(dx: f64, dy: f64, dz: f64, out: &mut MoveFeedback) -> bool>,
 }
 
 /// Full heading integration (mirrors `EntityLiving::moveEntityWithHeading`).
@@ -363,21 +354,16 @@ pub fn living_heading_run(
     true
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn alpha_living_heading(
-    world: *const HeadingWorld,
+pub fn alpha_living_heading(
+    world: &HeadingWorld,
     strafe: f32,
     forward: f32,
     jumping: bool,
     on_ground: bool,
     yaw: f32,
-    io: *mut HeadingIo,
+    io: &mut HeadingIo,
 ) -> bool {
-    if world.is_null() || io.is_null() {
-        return false;
-    }
-    let w = unsafe { &*world };
-    let io = unsafe { &mut *io };
+    let w = world;
     let liquid = w.touching_liquid.map(|f| f()).unwrap_or(false);
     let mut ladder = || w.on_ladder.map(|f| f()).unwrap_or(false);
 
@@ -433,28 +419,26 @@ mod tests {
             send_status: false,
             died: false,
         };
-        let ok = unsafe {
-            alpha_living_attack(
-                None,
-                health,
-                resist,
-                max_resist,
-                last,
-                0,
-                0,
-                false,
-                amount,
-                attacker.is_some(),
-                me.0,
-                me.1,
-                attacker.map(|a| a.0).unwrap_or(0.0),
-                attacker.map(|a| a.1).unwrap_or(0.0),
-                motion.0,
-                motion.1,
-                motion.2,
-                &mut out,
-            )
-        };
+        let ok = alpha_living_attack(
+            None,
+            health,
+            resist,
+            max_resist,
+            last,
+            0,
+            0,
+            false,
+            amount,
+            attacker.is_some(),
+            me.0,
+            me.1,
+            attacker.map(|a| a.0).unwrap_or(0.0),
+            attacker.map(|a| a.1).unwrap_or(0.0),
+            motion.0,
+            motion.1,
+            motion.2,
+            &mut out,
+        );
         ok.then_some(out)
     }
 

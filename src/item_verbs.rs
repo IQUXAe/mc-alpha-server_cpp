@@ -12,30 +12,30 @@
 use crate::item_use::{alpha_item_furnace_facing, alpha_item_sign_yaw_meta};
 use crate::math_helper::{cos, sin};
 
-/// World access for item verbs. All function pointers must be non-null;
-/// a null table (or null entry) fails the verb safely.
+/// World access for item verbs. Missing hooks fail the verb safely
+/// (an all-None table refuses every verb).
 #[repr(C)]
 pub struct ItemUseWorld {
-    pub next_int: Option<extern "C" fn(bound: i32) -> i32>,
-    pub next_f64_01: Option<extern "C" fn() -> f64>,
-    pub get_block_id: Option<extern "C" fn(x: i32, y: i32, z: i32) -> u8>,
-    pub set_block_notify: Option<extern "C" fn(x: i32, y: i32, z: i32, id: u8) -> bool>,
-    pub set_block_meta_notify: Option<extern "C" fn(x: i32, y: i32, z: i32, id: u8, meta: u8) -> bool>,
-    pub set_block_quiet: Option<extern "C" fn(x: i32, y: i32, z: i32, id: u8) -> bool>,
-    pub set_block_meta: Option<extern "C" fn(x: i32, y: i32, z: i32, meta: u8)>,
-    pub does_attach: Option<extern "C" fn(x: i32, y: i32, z: i32) -> bool>,
-    pub material_burning: Option<extern "C" fn(x: i32, y: i32, z: i32) -> bool>,
-    pub material_solid: Option<extern "C" fn(x: i32, y: i32, z: i32) -> bool>,
-    pub collidable_box: Option<extern "C" fn(x: i32, y: i32, z: i32) -> bool>,
-    pub block_can_stay: Option<extern "C" fn(id: u8, x: i32, y: i32, z: i32) -> bool>,
-    pub placement_clear: Option<extern "C" fn(id: u8, x: i32, y: i32, z: i32) -> bool>,
-    pub block_placed: Option<extern "C" fn(id: u8, x: i32, y: i32, z: i32, side: i32)>,
-    pub have_block: Option<extern "C" fn(id: u8) -> bool>,
+    pub next_int: Option<fn(bound: i32) -> i32>,
+    pub next_f64_01: Option<fn() -> f64>,
+    pub get_block_id: Option<fn(x: i32, y: i32, z: i32) -> u8>,
+    pub set_block_notify: Option<fn(x: i32, y: i32, z: i32, id: u8) -> bool>,
+    pub set_block_meta_notify: Option<fn(x: i32, y: i32, z: i32, id: u8, meta: u8) -> bool>,
+    pub set_block_quiet: Option<fn(x: i32, y: i32, z: i32, id: u8) -> bool>,
+    pub set_block_meta: Option<fn(x: i32, y: i32, z: i32, meta: u8)>,
+    pub does_attach: Option<fn(x: i32, y: i32, z: i32) -> bool>,
+    pub material_burning: Option<fn(x: i32, y: i32, z: i32) -> bool>,
+    pub material_solid: Option<fn(x: i32, y: i32, z: i32) -> bool>,
+    pub collidable_box: Option<fn(x: i32, y: i32, z: i32) -> bool>,
+    pub block_can_stay: Option<fn(id: u8, x: i32, y: i32, z: i32) -> bool>,
+    pub placement_clear: Option<fn(id: u8, x: i32, y: i32, z: i32) -> bool>,
+    pub block_placed: Option<fn(id: u8, x: i32, y: i32, z: i32, side: i32)>,
+    pub have_block: Option<fn(id: u8) -> bool>,
     pub spawn_item:
-        Option<extern "C" fn(item_id: i32, count: i32, damage: i32, fx: f64, fy: f64, fz: f64, mx: f64, my: f64, mz: f64)>,
-    pub send_te_packet: Option<extern "C" fn(x: i32, y: i32, z: i32)>,
+        Option<fn(item_id: i32, count: i32, damage: i32, fx: f64, fy: f64, fz: f64, mx: f64, my: f64, mz: f64)>,
+    pub send_te_packet: Option<fn(x: i32, y: i32, z: i32)>,
     pub ray_trace:
-        Option<extern "C" fn(sx: f64, sy: f64, sz: f64, ex: f64, ey: f64, ez: f64, out_x: *mut i32, out_y: *mut i32, out_z: *mut i32) -> bool>,
+        Option<fn(sx: f64, sy: f64, sz: f64, ex: f64, ey: f64, ez: f64, out_x: &mut i32, out_y: &mut i32, out_z: &mut i32) -> bool>,
 }
 
 const FACE_DX: [i32; 6] = [1, -1, 0, 0, 0, 0];
@@ -77,18 +77,14 @@ fn rng_f64(w: &ItemUseWorld) -> f64 {
 /// Hoe tilling (mirrors `ItemHoe::onItemUse`): grass/dirt to soil, plus a
 /// 1/8 seed drop on grass. Returns true when C++ must damage the stack
 /// (and possibly destroy it when depleted).
-#[no_mangle]
-pub unsafe extern "C" fn item_hoe_use(
-    world: *const ItemUseWorld,
+pub fn item_hoe_use(
+    world: &ItemUseWorld,
     seeds_id: i32,
     x: i32,
     y: i32,
     z: i32,
 ) -> bool {
-    if world.is_null() {
-        return false;
-    }
-    let w = unsafe { &*world };
+    let w = world;
     let Some(set_notify) = w.set_block_notify else {
         return false;
     };
@@ -120,12 +116,11 @@ pub unsafe extern "C" fn item_hoe_use(
 
 /// Seed planting (mirrors `ItemSeeds::onItemUse`). True means C++ must
 /// decrement the stack.
-#[no_mangle]
-pub unsafe extern "C" fn item_seeds_use(world: *const ItemUseWorld, x: i32, y: i32, z: i32, side: i32) -> bool {
-    if world.is_null() || side != 1 {
+pub fn item_seeds_use(world: &ItemUseWorld, x: i32, y: i32, z: i32, side: i32) -> bool {
+    if side != 1 {
         return false;
     }
-    let w = unsafe { &*world };
+    let w = world;
     let Some(set_meta) = w.set_block_meta_notify else {
         return false;
     };
@@ -145,33 +140,25 @@ pub struct FlintOut {
     pub broke: bool,
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn item_flint_use(
-    world: *const ItemUseWorld,
+pub fn item_flint_use(
+    world: &ItemUseWorld,
     damage_in: i32,
     max_damage: i32,
     x: i32,
     y: i32,
     z: i32,
     side: i32,
-    out: *mut FlintOut,
+    out: &mut FlintOut,
 ) -> bool {
-    if world.is_null() || out.is_null() {
-        return false;
-    }
-    let w = unsafe { &*world };
+    let w = world;
     let fail = FlintOut { placed: false, new_damage: damage_in, broke: false };
     let Some((dx, dy, dz)) = face_offset(side) else {
-        unsafe {
-            *out = fail;
-        }
+        *out = fail;
         return false;
     };
     let (fx, fy, fz) = (x + dx, y + dy, z + dz);
     if q_id(w, fx, fy, fz) != 0 {
-        unsafe {
-            *out = fail;
-        }
+        *out = fail;
         return false;
     }
     let supported = w.does_attach.map(|f| f(fx, fy - 1, fz)).unwrap_or(false);
@@ -184,41 +171,34 @@ pub unsafe extern "C" fn item_flint_use(
             }
         }
         if !fuel {
-            unsafe {
-                *out = fail;
-            }
+            *out = fail;
             return false;
         }
     }
     let placed = w.set_block_notify.map(|f| f(fx, fy, fz, 51)).unwrap_or(false);
     if !placed {
-        unsafe {
-            *out = fail;
-        }
+        *out = fail;
         return false;
     }
     let new_damage = damage_in + 1;
-    unsafe {
-        *out = FlintOut { placed: true, new_damage, broke: new_damage >= max_damage };
-    }
+    *out = FlintOut { placed: true, new_damage, broke: new_damage >= max_damage };
     true
 }
 
 /// Sign placement (mirrors `ItemSign::onItemUse`). True means C++ must
 /// send the edit packet and decrement the stack.
-#[no_mangle]
-pub unsafe extern "C" fn item_sign_use(
-    world: *const ItemUseWorld,
+pub fn item_sign_use(
+    world: &ItemUseWorld,
     x: i32,
     y: i32,
     z: i32,
     side: i32,
     yaw: f32,
 ) -> bool {
-    if world.is_null() || side == 0 {
+    if side == 0 {
         return false;
     }
-    let w = unsafe { &*world };
+    let w = world;
     let solid = w.material_solid.map(|f| f(x, y, z)).unwrap_or(false);
     if !solid {
         return false;
@@ -252,10 +232,9 @@ pub unsafe extern "C" fn item_sign_use(
 
 /// Block placement (mirrors `ItemBlock::onItemUse`). True means C++ must
 /// decrement the stack.
-#[no_mangle]
 #[allow(clippy::too_many_arguments)]
-pub unsafe extern "C" fn item_block_use(
-    world: *const ItemUseWorld,
+pub fn item_block_use(
+    world: &ItemUseWorld,
     block_id: u8,
     stack_count: i32,
     x: i32,
@@ -264,10 +243,7 @@ pub unsafe extern "C" fn item_block_use(
     side: i32,
     yaw: f32,
 ) -> bool {
-    if world.is_null() {
-        return false;
-    }
-    let w = unsafe { &*world };
+    let w = world;
     let (mut tx, mut ty, mut tz) = (x, y, z);
     // Snow layers are replaced instead of offset.
     if q_id(w, x, y, z) != 78 {
@@ -325,8 +301,7 @@ pub struct BoatThrow {
     pub ez: f64,
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn item_boat_aim(
+pub fn item_boat_aim(
     prev_yaw: f32,
     yaw: f32,
     prev_pitch: f32,
@@ -338,11 +313,8 @@ pub unsafe extern "C" fn item_boat_aim(
     prev_z: f64,
     z: f64,
     y_offset: f64,
-    out: *mut BoatThrow,
+    out: &mut BoatThrow,
 ) -> bool {
-    if out.is_null() {
-        return false;
-    }
     // partialTick is constant 1.0: prev + (cur - prev) * 1.0, in f32/f64
     // exactly like C++.
     let iyaw = prev_yaw + (yaw - prev_yaw) * 1.0f32;
@@ -358,42 +330,36 @@ pub unsafe extern "C" fn item_boat_aim(
     let look_y = sin(-ipitch * half_pi);
     let (lx, lz) = (sin_yaw * look_h, cos_yaw * look_h);
     let (lx, ly, lz) = (lx as f64, look_y as f64, lz as f64);
-    unsafe {
-        *out = BoatThrow {
-            lx,
-            ly,
-            lz,
-            sx,
-            sy,
-            sz,
-            ex: sx + lx * 5.0,
-            ey: sy + ly * 5.0,
-            ez: sz + lz * 5.0,
-        };
-    }
+    *out = BoatThrow {
+        lx,
+        ly,
+        lz,
+        sx,
+        sy,
+        sz,
+        ex: sx + lx * 5.0,
+        ey: sy + ly * 5.0,
+        ez: sz + lz * 5.0,
+    };
     true
 }
 
 /// Boat raycast resolution (mirrors the tail of `ItemBoat::onItemRightClick`).
 /// Writes the hit cell and returns true when C++ must spawn the boat and
 /// decrement the stack.
-#[no_mangle]
-pub unsafe extern "C" fn item_boat_throw(
-    world: *const ItemUseWorld,
+pub fn item_boat_throw(
+    world: &ItemUseWorld,
     sx: f64,
     sy: f64,
     sz: f64,
     ex: f64,
     ey: f64,
     ez: f64,
-    out_x: *mut i32,
-    out_y: *mut i32,
-    out_z: *mut i32,
+    out_x: &mut i32,
+    out_y: &mut i32,
+    out_z: &mut i32,
 ) -> bool {
-    if world.is_null() || out_x.is_null() || out_y.is_null() || out_z.is_null() {
-        return false;
-    }
-    let w = unsafe { &*world };
+    let w = world;
     let Some(ray) = w.ray_trace else {
         return false;
     };
@@ -401,11 +367,9 @@ pub unsafe extern "C" fn item_boat_throw(
     if !ray(sx, sy, sz, ex, ey, ez, &mut hx, &mut hy, &mut hz) {
         return false;
     }
-    unsafe {
-        *out_x = hx;
-        *out_y = hy;
-        *out_z = hz;
-    }
+    *out_x = hx;
+    *out_y = hy;
+    *out_z = hz;
     true
 }
 
@@ -446,7 +410,7 @@ mod tests {
         });
     }
 
-    extern "C" fn s_next_int(bound: i32) -> i32 {
+    fn s_next_int(bound: i32) -> i32 {
         let mut g = fake();
         let f = g.as_mut().unwrap_or_else(|| unreachable!());
         if f.int_pos < f.int_script.len() {
@@ -457,89 +421,83 @@ mod tests {
             0
         }
     }
-    extern "C" fn s_next_f64() -> f64 {
+    fn s_next_f64() -> f64 {
         0.25
     }
-    extern "C" fn s_get_id(x: i32, y: i32, z: i32) -> u8 {
+    fn s_get_id(x: i32, y: i32, z: i32) -> u8 {
         fake().as_ref().and_then(|f| f.blocks.get(&(x, y, z)).map(|b| b.0)).unwrap_or(0)
     }
-    extern "C" fn s_set_notify(x: i32, y: i32, z: i32, id: u8) -> bool {
+    fn s_set_notify(x: i32, y: i32, z: i32, id: u8) -> bool {
         if let Some(f) = fake().as_mut() {
             f.blocks.insert((x, y, z), (id, 0));
             f.log.push(format!("notify {x} {y} {z} {id}"));
         }
         true
     }
-    extern "C" fn s_set_meta_notify(x: i32, y: i32, z: i32, id: u8, meta: u8) -> bool {
+    fn s_set_meta_notify(x: i32, y: i32, z: i32, id: u8, meta: u8) -> bool {
         if let Some(f) = fake().as_mut() {
             f.blocks.insert((x, y, z), (id, meta));
             f.log.push(format!("metanotify {x} {y} {z} {id} {meta}"));
         }
         true
     }
-    extern "C" fn s_set_quiet(x: i32, y: i32, z: i32, id: u8) -> bool {
+    fn s_set_quiet(x: i32, y: i32, z: i32, id: u8) -> bool {
         if let Some(f) = fake().as_mut() {
             f.blocks.insert((x, y, z), (id, 0));
             f.log.push(format!("quiet {x} {y} {z} {id}"));
         }
         true
     }
-    extern "C" fn s_set_meta(x: i32, y: i32, z: i32, meta: u8) {
+    fn s_set_meta(x: i32, y: i32, z: i32, meta: u8) {
         if let Some(f) = fake().as_mut() {
             let id = f.blocks.get(&(x, y, z)).map(|b| b.0).unwrap_or(0);
             f.blocks.insert((x, y, z), (id, meta));
             f.log.push(format!("meta {x} {y} {z} {meta}"));
         }
     }
-    extern "C" fn s_attach(x: i32, y: i32, z: i32) -> bool {
+    fn s_attach(x: i32, y: i32, z: i32) -> bool {
         fake().as_ref().and_then(|f| f.solid.get(&(x, y, z)).copied()).unwrap_or(false)
     }
-    extern "C" fn s_burning(x: i32, y: i32, z: i32) -> bool {
+    fn s_burning(x: i32, y: i32, z: i32) -> bool {
         fake().as_ref().and_then(|f| f.burning.get(&(x, y, z)).copied()).unwrap_or(false)
     }
-    extern "C" fn s_solid(x: i32, y: i32, z: i32) -> bool {
+    fn s_solid(x: i32, y: i32, z: i32) -> bool {
         s_attach(x, y, z)
     }
-    extern "C" fn s_collidable(x: i32, y: i32, z: i32) -> bool {
+    fn s_collidable(x: i32, y: i32, z: i32) -> bool {
         s_attach(x, y, z)
     }
-    extern "C" fn s_can_stay(_id: u8, _x: i32, _y: i32, _z: i32) -> bool {
+    fn s_can_stay(_id: u8, _x: i32, _y: i32, _z: i32) -> bool {
         true
     }
-    extern "C" fn s_clear(_id: u8, _x: i32, _y: i32, _z: i32) -> bool {
+    fn s_clear(_id: u8, _x: i32, _y: i32, _z: i32) -> bool {
         true
     }
-    extern "C" fn s_placed(_id: u8, _x: i32, _y: i32, _z: i32, _side: i32) {}
-    extern "C" fn s_have_block(_id: u8) -> bool {
+    fn s_placed(_id: u8, _x: i32, _y: i32, _z: i32, _side: i32) {}
+    fn s_have_block(_id: u8) -> bool {
         true
     }
-    extern "C" fn s_spawn(item: i32, count: i32, damage: i32, fx: f64, fy: f64, fz: f64, _mx: f64, _my: f64, _mz: f64) {
+    fn s_spawn(item: i32, count: i32, damage: i32, fx: f64, fy: f64, fz: f64, _mx: f64, _my: f64, _mz: f64) {
         if let Some(f) = fake().as_mut() {
             f.log.push(format!("spawn {item} {count} {damage} {fx:.1} {fy:.1} {fz:.1}"));
         }
     }
-    extern "C" fn s_te(x: i32, y: i32, z: i32) {
+    fn s_te(x: i32, y: i32, z: i32) {
         if let Some(f) = fake().as_mut() {
             f.log.push(format!("te {x} {y} {z}"));
         }
     }
-    extern "C" fn s_ray(
+    fn s_ray(
         _sx: f64, _sy: f64, _sz: f64, _ex: f64, _ey: f64, _ez: f64,
-        out_x: *mut i32, out_y: *mut i32, out_z: *mut i32,
+        out_x: &mut i32, out_y: &mut i32, out_z: &mut i32,
     ) -> bool {
         let hit = fake().as_ref().and_then(|f| f.hit);
         match hit {
             Some((hx, hy, hz)) => {
-                if !out_x.is_null() && !out_y.is_null() && !out_z.is_null() {
-                    unsafe {
-                        *out_x = hx;
-                        *out_y = hy;
-                        *out_z = hz;
-                    }
-                    true
-                } else {
-                    false
-                }
+                *out_x = hx;
+                *out_y = hy;
+                *out_z = hz;
+                true
             }
             None => false,
         }
@@ -575,14 +533,14 @@ mod tests {
     #[test]
     fn test_verb_scenarios() {
         let t = table();
-        let tp = &t as *const ItemUseWorld;
+        let tp = &t;
 
         // 1. Hoe tills grass to soil, drops a seed on a 1/8 roll.
         reset();
         let _ = fake().as_mut().map(|f| {
             let _ = f.blocks.insert((0, 64, 0), (2, 0));
         });
-        assert!(unsafe { item_hoe_use(tp, 295, 0, 64, 0) });
+        assert!(item_hoe_use(tp, 295, 0, 64, 0));
         let l = logs();
         assert!(l.contains(&"notify 0 64 0 60".to_string()), "{l:?}");
         assert!(l.iter().any(|e| e.starts_with("spawn 295 1 0")), "{l:?}");
@@ -593,21 +551,21 @@ mod tests {
             let _ = f.blocks.insert((0, 64, 0), (2, 0));
             let _ = f.solid.insert((0, 65, 0), true);
         });
-        assert!(!unsafe { item_hoe_use(tp, 295, 0, 64, 0) });
+        assert!(!item_hoe_use(tp, 295, 0, 64, 0));
         reset();
         let _ = fake().as_mut().map(|f| {
             let _ = f.blocks.insert((0, 64, 0), (1, 0));
         });
-        assert!(!unsafe { item_hoe_use(tp, 295, 0, 64, 0) });
+        assert!(!item_hoe_use(tp, 295, 0, 64, 0));
 
         // 3. Seeds plant on soil with air above, only from the top face.
         reset();
         let _ = fake().as_mut().map(|f| {
             let _ = f.blocks.insert((0, 64, 0), (60, 0));
         });
-        assert!(unsafe { item_seeds_use(tp, 0, 64, 0, 1) });
+        assert!(item_seeds_use(tp, 0, 64, 0, 1));
         assert!(logs().contains(&"metanotify 0 65 0 59 0".to_string()), "{:?}", logs());
-        assert!(!unsafe { item_seeds_use(tp, 0, 64, 0, 2) });
+        assert!(!item_seeds_use(tp, 0, 64, 0, 2));
 
         // 4. Flint lights supported air (side 4 faces +z); refuses fuel-less voids.
         reset();
@@ -615,7 +573,7 @@ mod tests {
             let _ = f.solid.insert((0, 63, 1), true);
         });
         let mut out = FlintOut { placed: false, new_damage: 0, broke: false };
-        assert!(unsafe { item_flint_use(tp, 3, 64, 0, 64, 0, 4, &mut out) });
+        assert!(item_flint_use(tp, 3, 64, 0, 64, 0, 4, &mut out));
         assert!(out.placed && out.new_damage == 4 && !out.broke);
         assert!(logs().contains(&"notify 0 64 1 51".to_string()), "{:?}", logs());
         // Breaks at max damage (fresh cell: the first call lit this one).
@@ -624,34 +582,34 @@ mod tests {
             let _ = f.solid.insert((0, 63, 1), true);
         });
         let mut out = FlintOut { placed: false, new_damage: 0, broke: false };
-        assert!(unsafe { item_flint_use(tp, 63, 64, 0, 64, 0, 4, &mut out) });
+        assert!(item_flint_use(tp, 63, 64, 0, 64, 0, 4, &mut out));
         assert!(out.broke);
         // No support, no fuel: fail.
         reset();
         let mut out = FlintOut { placed: false, new_damage: 0, broke: false };
-        assert!(!unsafe { item_flint_use(tp, 0, 64, 0, 64, 0, 4, &mut out) });
+        assert!(!item_flint_use(tp, 0, 64, 0, 64, 0, 4, &mut out));
 
         // 5. Sign post on solid ground takes yaw metadata; wall sign takes side.
         reset();
         let _ = fake().as_mut().map(|f| {
             let _ = f.solid.insert((0, 64, 0), true);
         });
-        assert!(unsafe { item_sign_use(tp, 0, 64, 0, 1, 0.0) });
+        assert!(item_sign_use(tp, 0, 64, 0, 1, 0.0));
         assert!(logs().contains(&"metanotify 0 65 0 63 8".to_string()), "{:?}", logs());
         reset();
         let _ = fake().as_mut().map(|f| {
             let _ = f.solid.insert((0, 64, 0), true);
         });
-        assert!(unsafe { item_sign_use(tp, 0, 64, 0, 4, 0.0) });
+        assert!(item_sign_use(tp, 0, 64, 0, 4, 0.0));
         assert!(logs().contains(&"metanotify -1 64 0 68 4".to_string()), "{:?}", logs());
-        assert!(!unsafe { item_sign_use(tp, 0, 64, 0, 0, 0.0) });
+        assert!(!item_sign_use(tp, 0, 64, 0, 0, 0.0));
 
         // 6. Block placement offsets by face, replaces snow, sets furnace facing.
         reset();
         let _ = fake().as_mut().map(|f| {
             let _ = f.blocks.insert((0, 64, 0), (1, 0));
         });
-        assert!(unsafe { item_block_use(tp, 5, 1, 0, 64, 0, 1, 0.0) });
+        assert!(item_block_use(tp, 5, 1, 0, 64, 0, 1, 0.0));
         assert!(logs().contains(&"quiet 0 65 0 5".to_string()), "{:?}", logs());
         // Occupied by stone: refused.
         reset();
@@ -659,36 +617,52 @@ mod tests {
             let _ = f.blocks.insert((0, 64, 0), (1, 0));
             let _ = f.blocks.insert((0, 65, 0), (1, 0));
         });
-        assert!(!unsafe { item_block_use(tp, 5, 1, 0, 64, 0, 1, 0.0) });
+        assert!(!item_block_use(tp, 5, 1, 0, 64, 0, 1, 0.0));
         // Furnace gets yaw facing metadata.
         reset();
         let _ = fake().as_mut().map(|f| {
             let _ = f.blocks.insert((0, 64, 0), (1, 0));
         });
-        assert!(unsafe { item_block_use(tp, 61, 1, 0, 64, 0, 1, 90.0) });
+        assert!(item_block_use(tp, 61, 1, 0, 64, 0, 1, 90.0));
         assert!(logs().contains(&"meta 0 65 0 5".to_string()), "{:?}", logs());
 
         // 7. Boat aim + throw: miss keeps the stack, hit places.
         let mut aim = BoatThrow { lx: 0.0, ly: 0.0, lz: 0.0, sx: 0.0, sy: 0.0, sz: 0.0, ex: 0.0, ey: 0.0, ez: 0.0 };
-        assert!(unsafe {
-            item_boat_aim(0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 64.0, 64.0, 0.5, 0.5, 0.0, &mut aim)
-        });
+        assert!(item_boat_aim(0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 64.0, 64.0, 0.5, 0.5, 0.0, &mut aim));
         assert!((aim.sy - 65.62).abs() < 1e-9);
         reset();
         let (mut hx, mut hy, mut hz) = (0, 0, 0);
-        assert!(!unsafe { item_boat_throw(tp, aim.sx, aim.sy, aim.sz, aim.ex, aim.ey, aim.ez, &mut hx, &mut hy, &mut hz) });
+        assert!(!item_boat_throw(tp, aim.sx, aim.sy, aim.sz, aim.ex, aim.ey, aim.ez, &mut hx, &mut hy, &mut hz));
         let _ = fake().as_mut().map(|f| {
             f.hit = Some((3, 63, 7));
         });
-        assert!(unsafe { item_boat_throw(tp, aim.sx, aim.sy, aim.sz, aim.ex, aim.ey, aim.ez, &mut hx, &mut hy, &mut hz) });
+        assert!(item_boat_throw(tp, aim.sx, aim.sy, aim.sz, aim.ex, aim.ey, aim.ez, &mut hx, &mut hy, &mut hz));
         assert_eq!((hx, hy, hz), (3, 63, 7));
 
-        // 8. Null table fails everything safely.
-        unsafe {
-            assert!(!item_hoe_use(std::ptr::null(), 295, 0, 64, 0));
-            assert!(!item_seeds_use(std::ptr::null(), 0, 64, 0, 1));
-            assert!(!item_sign_use(std::ptr::null(), 0, 64, 0, 1, 0.0));
-            assert!(!item_block_use(std::ptr::null(), 5, 1, 0, 64, 0, 1, 0.0));
-        }
+        // 8. Missing table hooks fail everything safely (all-None table).
+        let bare = ItemUseWorld {
+            next_int: None,
+            next_f64_01: None,
+            get_block_id: None,
+            set_block_notify: None,
+            set_block_meta_notify: None,
+            set_block_quiet: None,
+            set_block_meta: None,
+            does_attach: None,
+            material_burning: None,
+            material_solid: None,
+            collidable_box: None,
+            block_can_stay: None,
+            placement_clear: None,
+            block_placed: None,
+            have_block: None,
+            spawn_item: None,
+            send_te_packet: None,
+            ray_trace: None,
+        };
+        assert!(!item_hoe_use(&bare, 295, 0, 64, 0));
+        assert!(!item_seeds_use(&bare, 0, 64, 0, 1));
+        assert!(!item_sign_use(&bare, 0, 64, 0, 1, 0.0));
+        assert!(!item_block_use(&bare, 5, 1, 0, 64, 0, 1, 0.0));
     }
 }
