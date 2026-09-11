@@ -1,0 +1,565 @@
+//! Native entity table: the Rust-owned replacement for the C++ `Entity*`
+//! hierarchy (mirrors Java `Entity` identity and mount semantics).
+//!
+//! Design: one `Body` with every base-`Entity` field, plus per-kind payloads
+//! in the `Entity` enum. `dynamic_cast` becomes `match`; the mount graph
+//! (`ridingEntityId` / `riddenByEntityId`) is manipulated through table
+//! methods that tolerate missing rows exactly like the C++ null checks.
+//!
+//! Physics, damage, and steering keep living in `entity_physics`,
+//! `entity_living`, and `entity_ai`; this module owns identity, mounting,
+//! per-tick previous-state sync, and rider placement. World-dependent
+//! scans (environment, collisions) arrive with the native world.
+
+use crate::aabb::AxisAlignedBB;
+
+pub type EntityId = i32;
+pub const NO_ENTITY: EntityId = -1;
+
+fn next_id(counter: &mut EntityId) -> EntityId {
+    let id = *counter;
+    *counter = counter.wrapping_add(1);
+    id
+}
+
+/// Every base-`Entity` field (positions, motion, box, flags, links).
+#[derive(Clone, Debug)]
+pub struct Body {
+    pub id: EntityId,
+    pub pos: [f64; 3],
+    pub prev_pos: [f64; 3],
+    pub track_pos: [f64; 3],
+    pub motion: [f64; 3],
+    pub yaw: f32,
+    pub pitch: f32,
+    pub prev_yaw: f32,
+    pub prev_pitch: f32,
+    pub track_yaw: f32,
+    pub track_pitch: f32,
+    pub bounding_box: AxisAlignedBB,
+    pub on_ground: bool,
+    pub collided_horiz: bool,
+    pub collided_vert: bool,
+    pub dead: bool,
+    pub width: f32,
+    pub height: f32,
+    pub y_offset: f32,
+    pub step_height: f32,
+    pub no_clip: bool,
+    pub fall_distance: f32,
+    pub fire: i32,
+    pub air: i32,
+    pub in_water: bool,
+    pub dimension: i32,
+    pub fire_resistance: i32,
+    pub riding: EntityId,
+    pub ridden_by: EntityId,
+}
+
+impl Body {
+    pub fn new(id: EntityId, width: f32, height: f32, y_offset: f32) -> Self {
+        Self {
+            id,
+            pos: [0.0; 3],
+            prev_pos: [0.0; 3],
+            track_pos: [0.0; 3],
+            motion: [0.0; 3],
+            yaw: 0.0,
+            pitch: 0.0,
+            prev_yaw: 0.0,
+            prev_pitch: 0.0,
+            track_yaw: 0.0,
+            track_pitch: 0.0,
+            bounding_box: AxisAlignedBB::get_bounding_box(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+            on_ground: false,
+            collided_horiz: false,
+            collided_vert: false,
+            dead: false,
+            width,
+            height,
+            y_offset,
+            step_height: 0.0,
+            no_clip: false,
+            fall_distance: 0.0,
+            fire: 0,
+            air: 300,
+            in_water: false,
+            dimension: 0,
+            fire_resistance: 1,
+            riding: NO_ENTITY,
+            ridden_by: NO_ENTITY,
+        }
+    }
+
+    /// Mirrors `Entity::setPosition` (same formula as the C++ inline).
+    pub fn set_position(&mut self, x: f64, y: f64, z: f64) {
+        self.pos = [x, y, z];
+        let hw = self.width as f64 / 2.0;
+        let yo = self.y_offset as f64;
+        self.bounding_box = AxisAlignedBB::get_bounding_box(
+            x - hw,
+            y - yo,
+            z - hw,
+            x + hw,
+            y - yo + self.height as f64,
+            z + hw,
+        );
+    }
+
+    pub fn distance_sq(&self, x: f64, y: f64, z: f64) -> f64 {
+        let dx = self.pos[0] - x;
+        let dy = self.pos[1] - y;
+        let dz = self.pos[2] - z;
+        dx * dx + dy * dy + dz * dz
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MobKind {
+    Spider,
+    Zombie,
+    Skeleton,
+    Creeper,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AnimalKind {
+    Sheep,
+    Pig,
+    Chicken,
+    Cow,
+}
+
+/// Mob network type ids (mirrors `getMobTypeId`).
+pub fn mob_type_id(kind: MobKind) -> u8 {
+    match kind {
+        MobKind::Spider => 52,
+        MobKind::Zombie => 54,
+        MobKind::Skeleton => 51,
+        MobKind::Creeper => 50,
+    }
+}
+
+/// Animal network type ids (mirrors the pig-90/sheep-91/cow-92/chicken-93 ids).
+pub fn animal_type_id(kind: AnimalKind) -> u8 {
+    match kind {
+        AnimalKind::Pig => 90,
+        AnimalKind::Sheep => 91,
+        AnimalKind::Cow => 92,
+        AnimalKind::Chicken => 93,
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct LivingBody {
+    pub body: Body,
+    pub health: i16,
+    pub max_health: i16,
+    pub hurt_time: i32,
+    pub death_time: i32,
+    pub attack_time: i32,
+    pub hurt_resist: i32,
+    pub max_hurt_resist: i32,
+    pub last_damage: i32,
+    pub move_speed: f32,
+    pub sneaking: bool,
+    pub jumping: bool,
+}
+
+impl LivingBody {
+    pub fn new(id: EntityId, width: f32, height: f32, y_offset: f32) -> Self {
+        Self {
+            body: Body::new(id, width, height, y_offset),
+            health: 20,
+            max_health: 20,
+            hurt_time: 0,
+            death_time: 0,
+            attack_time: 0,
+            hurt_resist: 0,
+            max_hurt_resist: 20,
+            last_damage: 0,
+            move_speed: 0.7,
+            sneaking: false,
+            jumping: false,
+        }
+    }
+
+    pub fn alive(&self) -> bool {
+        !self.body.dead
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ItemEnt {
+    pub body: Body,
+    pub item_id: i32,
+    pub count: i32,
+    pub damage: i32,
+    pub age: i32,
+    pub pickup_delay: i32,
+}
+
+#[derive(Clone, Debug)]
+pub struct ArrowEnt {
+    pub body: Body,
+    pub in_ground: bool,
+    pub shake: i32,
+    pub ticks_in_ground: i32,
+    pub ticks_in_air: i32,
+    pub shooter_id: EntityId,
+}
+
+#[derive(Clone, Debug)]
+pub struct BoatEnt {
+    pub body: Body,
+    pub time_since_hit: i32,
+    pub damage_taken: i32,
+    pub forward_dir: i32,
+}
+
+#[derive(Clone, Debug)]
+pub struct FallingEnt {
+    pub body: Body,
+    pub block_id: i32,
+    pub fall_time: i32,
+}
+
+#[derive(Clone, Debug)]
+pub struct MobEnt {
+    pub living: LivingBody,
+    pub kind: MobKind,
+    pub target: Option<EntityId>,
+    pub attack_cooldown: i32,
+}
+
+#[derive(Clone, Debug)]
+pub struct AnimalEnt {
+    pub living: LivingBody,
+    pub kind: AnimalKind,
+}
+
+#[derive(Clone, Debug)]
+pub struct PlayerEnt {
+    pub living: LivingBody,
+    pub username: String,
+    pub score: i32,
+}
+
+#[derive(Clone, Debug)]
+pub enum Entity {
+    Item(ItemEnt),
+    Arrow(ArrowEnt),
+    Boat(BoatEnt),
+    Falling(FallingEnt),
+    Mob(MobEnt),
+    Animal(AnimalEnt),
+    Player(PlayerEnt),
+}
+
+impl Entity {
+    pub fn body(&self) -> &Body {
+        match self {
+            Entity::Item(e) => &e.body,
+            Entity::Arrow(e) => &e.body,
+            Entity::Boat(e) => &e.body,
+            Entity::Falling(e) => &e.body,
+            Entity::Mob(e) => &e.living.body,
+            Entity::Animal(e) => &e.living.body,
+            Entity::Player(e) => &e.living.body,
+        }
+    }
+
+    pub fn body_mut(&mut self) -> &mut Body {
+        match self {
+            Entity::Item(e) => &mut e.body,
+            Entity::Arrow(e) => &mut e.body,
+            Entity::Boat(e) => &mut e.body,
+            Entity::Falling(e) => &mut e.body,
+            Entity::Mob(e) => &mut e.living.body,
+            Entity::Animal(e) => &mut e.living.body,
+            Entity::Player(e) => &mut e.living.body,
+        }
+    }
+
+    pub fn id(&self) -> EntityId {
+        self.body().id
+    }
+
+    pub fn is_living(&self) -> bool {
+        matches!(self, Entity::Mob(_) | Entity::Animal(_) | Entity::Player(_))
+    }
+
+    /// Mounted-vehicle eye height for riders (mirrors `getMountedYOffset`;
+    /// boats override to -0.3).
+    pub fn mounted_y_offset(&self) -> f64 {
+        match self {
+            Entity::Boat(_) => -0.3,
+            _ => self.body().height as f64 * 0.75,
+        }
+    }
+}
+
+/// Entity table keyed by id (mirrors the C++ `entities_` list +
+/// `getEntityById`, without pointer invalidation).
+#[derive(Clone, Debug, Default)]
+pub struct EntityTable {
+    rows: std::collections::HashMap<EntityId, Entity>,
+    next_id: EntityId,
+}
+
+impl EntityTable {
+    pub fn new() -> Self {
+        Self { rows: std::collections::HashMap::new(), next_id: 1 }
+    }
+
+    pub fn alloc_id(&mut self) -> EntityId {
+        next_id(&mut self.next_id)
+    }
+
+    pub fn insert(&mut self, entity: Entity) -> EntityId {
+        let id = entity.id();
+        self.rows.insert(id, entity);
+        id
+    }
+
+    pub fn get(&self, id: EntityId) -> Option<&Entity> {
+        self.rows.get(&id)
+    }
+
+    pub fn get_mut(&mut self, id: EntityId) -> Option<&mut Entity> {
+        self.rows.get_mut(&id)
+    }
+
+    pub fn remove(&mut self, id: EntityId) -> Option<Entity> {
+        self.rows.remove(&id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.rows.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    pub fn alive_ids(&self) -> Vec<EntityId> {
+        self.rows.iter().filter(|(_, e)| !e.body().dead).map(|(id, _)| *id).collect()
+    }
+
+    pub fn count_mobs(&self) -> usize {
+        self.rows.values().filter(|e| matches!(e, Entity::Mob(m) if !m.living.body.dead)).count()
+    }
+
+    pub fn count_animals(&self) -> usize {
+        self.rows.values().filter(|e| matches!(e, Entity::Animal(a) if !a.living.body.dead)).count()
+    }
+
+    /// Mount `rider` onto `vehicle` (`None` dismounts), mirroring
+    /// `Entity::mountEntity` exactly: re-mounting the same vehicle
+    /// dismounts, stale reverse links are cleared, and a vehicle with a
+    /// different live rider evicts it first. Dangling ids count as null
+    /// (like the C++ failed lookups). One deliberate hardening: mounting a
+    /// missing vehicle sets the rider link but skips the vehicle side
+    /// instead of crashing on a null dereference.
+    pub fn mount(&mut self, rider_id: EntityId, vehicle: Option<EntityId>) {
+        // Resolve current (dangling counts as none, like C++ nullptr).
+        let raw = self.get(rider_id).map(|e| e.body().riding);
+        let current = raw.filter(|id| *id == NO_ENTITY || self.rows.contains_key(id));
+        if current == vehicle {
+            if let Some(vid) = current {
+                if self.get(vid).map(|e| e.body().ridden_by) == Some(rider_id) {
+                    if let Some(v) = self.get_mut(vid) {
+                        v.body_mut().ridden_by = NO_ENTITY;
+                    }
+                }
+            }
+            if let Some(r) = self.get_mut(rider_id) {
+                r.body_mut().riding = NO_ENTITY;
+            }
+            return;
+        }
+        if let Some(cur) = current {
+            if self.get(cur).map(|e| e.body().ridden_by) == Some(rider_id) {
+                if let Some(v) = self.get_mut(cur) {
+                    v.body_mut().ridden_by = NO_ENTITY;
+                }
+            }
+        }
+        if let Some(vid) = vehicle {
+            let occupant = self.get(vid).map(|e| e.body().ridden_by).unwrap_or(NO_ENTITY);
+            if occupant >= 0 && occupant != rider_id {
+                if let Some(o) = self.get_mut(occupant) {
+                    o.body_mut().riding = NO_ENTITY;
+                }
+            }
+            if let Some(r) = self.get_mut(rider_id) {
+                r.body_mut().riding = vid;
+            }
+            if let Some(v) = self.get_mut(vid) {
+                v.body_mut().ridden_by = rider_id;
+            }
+        } else if let Some(r) = self.get_mut(rider_id) {
+            r.body_mut().riding = NO_ENTITY;
+        }
+    }
+
+    /// Base tick for one row (mirrors `Entity::tick`): drop links to dead
+    /// partners and sync previous/tracker state. Environmental scans and
+    /// kind ticks arrive with the native world.
+    pub fn tick_base(&mut self, id: EntityId) {
+        let (riding_dead, ridden_dead) = match self.get(id) {
+            Some(e) => {
+                let b = e.body();
+                let rd = b.riding >= 0
+                    && self.get(b.riding).map(|v| v.body().dead).unwrap_or(true);
+                let rb = b.ridden_by >= 0
+                    && self.get(b.ridden_by).map(|v| v.body().dead).unwrap_or(true);
+                (rd, rb)
+            }
+            None => return,
+        };
+        if let Some(e) = self.get_mut(id) {
+            let b = e.body_mut();
+            if riding_dead {
+                b.riding = NO_ENTITY;
+            }
+            if ridden_dead {
+                b.ridden_by = NO_ENTITY;
+            }
+            b.prev_pos = b.pos;
+            b.prev_yaw = b.yaw;
+            b.prev_pitch = b.pitch;
+            b.track_pos = b.pos;
+            b.track_yaw = b.yaw;
+            b.track_pitch = b.pitch;
+        }
+    }
+
+    /// Rider placement (mirrors `Entity::updateRiderPosition`).
+    pub fn update_rider_position(&mut self, id: EntityId) {
+        let rider = match self.get(id) {
+            Some(e) => e.body().ridden_by,
+            None => return,
+        };
+        if rider < 0 {
+            return;
+        }
+        let (px, py, pz, off) = match self.get(id) {
+            Some(e) => (e.body().pos[0], e.body().pos[1], e.body().pos[2], e.mounted_y_offset()),
+            None => return,
+        };
+        if let Some(r) = self.get_mut(rider) {
+            r.body_mut().set_position(px, py + off, pz);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn boat(table: &mut EntityTable) -> EntityId {
+        let id = table.alloc_id();
+        let mut b = Body::new(id, 1.5, 0.6, 0.3);
+        b.set_position(10.0, 64.0, 10.0);
+        table.insert(Entity::Boat(BoatEnt { body: b, time_since_hit: 0, damage_taken: 0, forward_dir: 1 }));
+        id
+    }
+
+    fn player(table: &mut EntityTable, name: &str) -> EntityId {
+        let id = table.alloc_id();
+        let mut l = LivingBody::new(id, 0.6, 1.8, 0.0);
+        l.body.set_position(11.0, 64.0, 10.0);
+        table.insert(Entity::Player(PlayerEnt { living: l, username: name.to_string(), score: 0 }));
+        id
+    }
+
+    #[test]
+    fn test_ids_unique_and_lookup() {
+        let mut t = EntityTable::new();
+        let a = boat(&mut t);
+        let b = player(&mut t, "steve");
+        assert_ne!(a, b);
+        assert_eq!(t.len(), 2);
+        assert!(t.get(9999).is_none());
+        assert_eq!(t.get(b).unwrap().id(), b);
+    }
+
+    #[test]
+    fn test_mount_and_dismount() {
+        let mut t = EntityTable::new();
+        let b = boat(&mut t);
+        let p = player(&mut t, "steve");
+        t.mount(p, Some(b));
+        assert_eq!(t.get(p).unwrap().body().riding, b);
+        assert_eq!(t.get(b).unwrap().body().ridden_by, p);
+        // Same vehicle again dismounts both sides.
+        t.mount(p, Some(b));
+        assert_eq!(t.get(p).unwrap().body().riding, NO_ENTITY);
+        assert_eq!(t.get(b).unwrap().body().ridden_by, NO_ENTITY);
+        // Explicit dismount of a free rider is a no-op.
+        t.mount(p, None);
+        assert_eq!(t.get(p).unwrap().body().riding, NO_ENTITY);
+    }
+
+    #[test]
+    fn test_mount_evicts_previous_rider() {
+        let mut t = EntityTable::new();
+        let b = boat(&mut t);
+        let p1 = player(&mut t, "a");
+        let p2 = player(&mut t, "b");
+        t.mount(p1, Some(b));
+        t.mount(p2, Some(b));
+        assert_eq!(t.get(b).unwrap().body().ridden_by, p2);
+        assert_eq!(t.get(p1).unwrap().body().riding, NO_ENTITY);
+        assert_eq!(t.get(p2).unwrap().body().riding, b);
+    }
+
+    #[test]
+    fn test_mount_missing_rows_safe() {
+        let mut t = EntityTable::new();
+        let p = player(&mut t, "steve");
+        t.mount(p, Some(4242)); // no such vehicle: rider link set, nothing else
+        assert_eq!(t.get(p).unwrap().body().riding, 4242);
+        t.mount(4243, Some(p)); // no such rider: no crash
+        t.mount(4243, None);
+    }
+
+    #[test]
+    fn test_tick_base_clears_dead_links_and_syncs() {
+        let mut t = EntityTable::new();
+        let b = boat(&mut t);
+        let p = player(&mut t, "steve");
+        t.mount(p, Some(b));
+        // Kill the boat: the rider link must drop on tick.
+        t.get_mut(b).unwrap().body_mut().dead = true;
+        t.tick_base(p);
+        assert_eq!(t.get(p).unwrap().body().riding, NO_ENTITY);
+        let b = t.get(p).unwrap().body().clone();
+        assert_eq!((b.prev_pos, b.track_pos), (b.pos, b.pos));
+    }
+
+    #[test]
+    fn test_rider_position_boat_offset() {
+        let mut t = EntityTable::new();
+        let b = boat(&mut t);
+        let p = player(&mut t, "steve");
+        t.mount(p, Some(b));
+        t.update_rider_position(b);
+        let rp = t.get(p).unwrap().body().pos;
+        assert!((rp[0] - 10.0).abs() < 1e-9);
+        assert!((rp[1] - (64.0 - 0.3)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_type_ids_match_java() {
+        assert_eq!(mob_type_id(MobKind::Spider), 52);
+        assert_eq!(mob_type_id(MobKind::Zombie), 54);
+        assert_eq!(mob_type_id(MobKind::Skeleton), 51);
+        assert_eq!(mob_type_id(MobKind::Creeper), 50);
+        assert_eq!(animal_type_id(AnimalKind::Pig), 90);
+        assert_eq!(animal_type_id(AnimalKind::Sheep), 91);
+        assert_eq!(animal_type_id(AnimalKind::Cow), 92);
+        assert_eq!(animal_type_id(AnimalKind::Chicken), 93);
+    }
+}
