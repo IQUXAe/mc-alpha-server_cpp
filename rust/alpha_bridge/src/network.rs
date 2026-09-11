@@ -541,7 +541,7 @@ fn read_bool(stream: &mut TcpStream) -> std::io::Result<bool> {
     Ok(val != 0)
 }
 
-fn read_packet_payload(stream: &mut TcpStream, packet_id: u8) -> std::io::Result<PacketData> {
+pub(crate) fn read_packet_payload(stream: &mut TcpStream, packet_id: u8) -> std::io::Result<PacketData> {
     match packet_id {
         0 => Ok(PacketData::KeepAlive),
         1 => {
@@ -983,14 +983,14 @@ pub unsafe extern "C" fn rust_network_manager_send(
     cv.notify_one();
 }
 
-fn put_u8(buf: &mut Vec<u8>, v: u8) { buf.push(v); }
-fn put_i8(buf: &mut Vec<u8>, v: i8) { buf.push(v as u8); }
-fn put_i16(buf: &mut Vec<u8>, v: i16) { buf.extend_from_slice(&v.to_be_bytes()); }
-fn put_i32(buf: &mut Vec<u8>, v: i32) { buf.extend_from_slice(&v.to_be_bytes()); }
-fn put_i64(buf: &mut Vec<u8>, v: i64) { buf.extend_from_slice(&v.to_be_bytes()); }
-fn put_f32(buf: &mut Vec<u8>, v: f32) { buf.extend_from_slice(&v.to_bits().to_be_bytes()); }
-fn put_f64(buf: &mut Vec<u8>, v: f64) { buf.extend_from_slice(&v.to_bits().to_be_bytes()); }
-fn put_str(buf: &mut Vec<u8>, s: &str) {
+pub(crate) fn put_u8(buf: &mut Vec<u8>, v: u8) { buf.push(v); }
+pub(crate) fn put_i8(buf: &mut Vec<u8>, v: i8) { buf.push(v as u8); }
+pub(crate) fn put_i16(buf: &mut Vec<u8>, v: i16) { buf.extend_from_slice(&v.to_be_bytes()); }
+pub(crate) fn put_i32(buf: &mut Vec<u8>, v: i32) { buf.extend_from_slice(&v.to_be_bytes()); }
+pub(crate) fn put_i64(buf: &mut Vec<u8>, v: i64) { buf.extend_from_slice(&v.to_be_bytes()); }
+pub(crate) fn put_f32(buf: &mut Vec<u8>, v: f32) { buf.extend_from_slice(&v.to_bits().to_be_bytes()); }
+pub(crate) fn put_f64(buf: &mut Vec<u8>, v: f64) { buf.extend_from_slice(&v.to_bits().to_be_bytes()); }
+pub(crate) fn put_str(buf: &mut Vec<u8>, s: &str) {
     let bytes = s.as_bytes();
     put_i16(buf, bytes.len() as i16);
     buf.extend_from_slice(bytes);

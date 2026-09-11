@@ -430,6 +430,7 @@ pub mod mob_spawning;
 pub mod server_admin;
 pub mod tile_inventory;
 pub mod tracker;
+pub mod session;
 pub mod world;
 pub mod material;
 pub mod nibble;
