@@ -12,24 +12,23 @@ use misc::{WorldGenLakes, WorldGenFlowers, WorldGenReed, WorldGenCactus, WorldGe
 
 #[repr(C)]
 pub struct WorldAccessor {
-    pub get_block_id: extern "C" fn(x: i32, y: i32, z: i32) -> u8,
-    pub set_block_id: extern "C" fn(x: i32, y: i32, z: i32, id: u8),
-    pub get_block_meta: extern "C" fn(x: i32, y: i32, z: i32) -> u8,
-    pub set_block_meta: extern "C" fn(x: i32, y: i32, z: i32, meta: u8),
-    pub allows_attachment: extern "C" fn(x: i32, y: i32, z: i32) -> bool,
-    pub is_block_solid: extern "C" fn(x: i32, y: i32, z: i32) -> bool,
-    pub get_height_value: extern "C" fn(x: i32, z: i32) -> i32,
+    pub get_block_id: fn(x: i32, y: i32, z: i32) -> u8,
+    pub set_block_id: fn(x: i32, y: i32, z: i32, id: u8),
+    pub get_block_meta: fn(x: i32, y: i32, z: i32) -> u8,
+    pub set_block_meta: fn(x: i32, y: i32, z: i32, meta: u8),
+    pub allows_attachment: fn(x: i32, y: i32, z: i32) -> bool,
+    pub is_block_solid: fn(x: i32, y: i32, z: i32) -> bool,
+    pub get_height_value: fn(x: i32, z: i32) -> i32,
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn alpha_decorate_chunk(
-    accessor: WorldAccessor,
+pub fn alpha_decorate_chunk(
+    accessor: &WorldAccessor,
     seed: i64,
     chunk_x: i32,
     chunk_z: i32,
     biome_type_raw: i32,
-    noise_gen_713: *mut NoiseGeneratorOctaves,
-    temperatures: *const f64,
+    noise_gen_713: &mut NoiseGeneratorOctaves,
+    temperatures: &[f64],
 ) {
     let var4 = chunk_x * 16;
     let var5 = chunk_z * 16;
@@ -148,11 +147,7 @@ pub unsafe extern "C" fn alpha_decorate_chunk(
 
     // --- Trees ---
     let var11d = 0.5;
-    let noise_val = if !noise_gen_713.is_null() {
-        (*noise_gen_713).func_647_a((var4 as f64) * var11d, (var5 as f64) * var11d)
-    } else {
-        0.0
-    };
+    let noise_val = noise_gen_713.func_647_a((var4 as f64) * var11d, (var5 as f64) * var11d);
 
     let var13t = ((noise_val / 8.0 + rand.next_double() * 4.0 + 4.0) / 3.0) as i32;
     let mut var14t = 0;
@@ -287,8 +282,8 @@ pub unsafe extern "C" fn alpha_decorate_chunk(
     }
 
     // --- Snow ---
-    if !temperatures.is_null() {
-        let temps_slice = std::slice::from_raw_parts(temperatures, 256);
+    {
+        let temps_slice = temperatures;
         for var17 in (var4 + 8)..(var4 + 8 + 16) {
             for var18 in (var5 + 8)..(var5 + 8 + 16) {
                 let var19 = var17 - (var4 + 8);

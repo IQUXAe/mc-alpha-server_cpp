@@ -5054,24 +5054,24 @@ extern "C" fn tick_detonate(_x: i32, _y: i32, _z: i32) {
 }
 
 // Tree-generation accessor over the same bridge pointer.
-extern "C" fn tree_get_id(x: i32, y: i32, z: i32) -> u8 {
+fn tree_get_id(x: i32, y: i32, z: i32) -> u8 {
     with_tick_world(|w| w.get_block_id(x, y, z), 0)
 }
 
-extern "C" fn tree_set_id(x: i32, y: i32, z: i32, id: u8) {
+fn tree_set_id(x: i32, y: i32, z: i32, id: u8) {
     // C++ tree gen uses the plain (non-notify) setBlock.
     with_tick_world(|w| w.set_block_id(x, y, z, id), false);
 }
 
-extern "C" fn tree_get_meta(x: i32, y: i32, z: i32) -> u8 {
+fn tree_get_meta(x: i32, y: i32, z: i32) -> u8 {
     with_tick_world(|w| w.get_block_meta(x, y, z), 0)
 }
 
-extern "C" fn tree_set_meta(x: i32, y: i32, z: i32, meta: u8) {
+fn tree_set_meta(x: i32, y: i32, z: i32, meta: u8) {
     with_tick_world(|w| w.set_block_meta(x, y, z, meta), false);
 }
 
-extern "C" fn tree_attach(x: i32, y: i32, z: i32) -> bool {
+fn tree_attach(x: i32, y: i32, z: i32) -> bool {
     // Block::allowsAttachmentArr: registered plus the allowsAttachment flag.
     with_tick_world(
         |w| {
@@ -5084,11 +5084,11 @@ extern "C" fn tree_attach(x: i32, y: i32, z: i32) -> bool {
     )
 }
 
-extern "C" fn tree_solid(x: i32, y: i32, z: i32) -> bool {
+fn tree_solid(x: i32, y: i32, z: i32) -> bool {
     with_tick_world(|w| w.is_solid(x, y, z), false)
 }
 
-extern "C" fn tree_height(x: i32, z: i32) -> i32 {
+fn tree_height(x: i32, z: i32) -> i32 {
     with_tick_world(|w| w.get_height_value(x, z), 0)
 }
 
@@ -5505,13 +5505,11 @@ impl World {
         let big = self.rng.next_int_bound(10) == 0;
         let _guard = TickGuard::enter(self as *mut World);
         let acc = tree_accessor();
-        let ok = unsafe {
-            if big {
-                crate::alpha_generate_big_tree(acc, seed as i64, x, y, z)
+            let ok = if big {
+                crate::generate_big_tree(&acc, seed as i64, x, y, z)
             } else {
-                crate::alpha_generate_tree(acc, seed as i64, x, y, z)
-            }
-        };
+                crate::generate_tree(&acc, seed as i64, x, y, z)
+            };
         drop(_guard);
         if !ok {
             self.apply_set_notify(x, y, z, bid);
@@ -5897,17 +5895,15 @@ impl World {
                     let mut biomes = [MobSpawnerBase::DEFAULT; 256];
                     let mut temps = [0.0f64; 256];
                     let mut humids = [0.0f64; 256];
-                    unsafe {
-                        rust_chunk_provider_generate_chunk(
-                            gen as *mut _,
-                            nx,
-                            nz,
-                            blocks.as_mut_ptr(),
-                            biomes.as_mut_ptr(),
-                            temps.as_mut_ptr(),
-                            humids.as_mut_ptr(),
-                        );
-                    }
+                    rust_chunk_provider_generate_chunk(
+                        gen,
+                        nx,
+                        nz,
+                        &mut blocks,
+                        &mut biomes,
+                        &mut temps,
+                        &mut humids,
+                    );
                     stage_blocks[dx][dz] = blocks;
                     if dx == 0 && dz == 0 {
                         center_biome = biomes[8 * 16 + 8];
@@ -5951,17 +5947,15 @@ impl World {
             // isPopulating); the write-back below regenerates instead.
             self.populating = true;
             let gen = self.generator();
-            unsafe {
-                rust_chunk_provider_populate_batch(
-                    gen as *mut _,
-                    &batch,
-                    tree_accessor(),
-                    cx,
-                    cz,
-                    center_biome.biome_type as i32,
-                    center_temps.as_ptr(),
-                );
-            }
+            rust_chunk_provider_populate_batch(
+                gen,
+                &batch,
+                tree_accessor(),
+                cx,
+                cz,
+                center_biome.biome_type as i32,
+                &center_temps,
+            );
             self.populating = false;
         }
         // 3. Write back: insert missing, refresh present (tree spillover);

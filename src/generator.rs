@@ -30,7 +30,7 @@ struct DecoratorWorldState {
     fallback_accessor: WorldAccessor,
 }
 
-extern "C" fn local_get_block_id(x: i32, y: i32, z: i32) -> u8 {
+fn local_get_block_id(x: i32, y: i32, z: i32) -> u8 {
     unsafe {
         let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
         if state_ptr.is_null() {
@@ -53,7 +53,7 @@ extern "C" fn local_get_block_id(x: i32, y: i32, z: i32) -> u8 {
     }
 }
 
-extern "C" fn local_set_block_id(x: i32, y: i32, z: i32, id: u8) {
+fn local_set_block_id(x: i32, y: i32, z: i32, id: u8) {
     unsafe {
         let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
         if state_ptr.is_null() {
@@ -83,7 +83,7 @@ extern "C" fn local_set_block_id(x: i32, y: i32, z: i32, id: u8) {
     }
 }
 
-extern "C" fn local_get_block_meta(x: i32, y: i32, z: i32) -> u8 {
+fn local_get_block_meta(x: i32, y: i32, z: i32) -> u8 {
     unsafe {
         let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
         if state_ptr.is_null() {
@@ -112,7 +112,7 @@ extern "C" fn local_get_block_meta(x: i32, y: i32, z: i32) -> u8 {
     }
 }
 
-extern "C" fn local_set_block_meta(x: i32, y: i32, z: i32, meta: u8) {
+fn local_set_block_meta(x: i32, y: i32, z: i32, meta: u8) {
     unsafe {
         let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
         if state_ptr.is_null() {
@@ -143,7 +143,7 @@ extern "C" fn local_set_block_meta(x: i32, y: i32, z: i32, meta: u8) {
     }
 }
 
-extern "C" fn local_allows_attachment(x: i32, y: i32, z: i32) -> bool {
+fn local_allows_attachment(x: i32, y: i32, z: i32) -> bool {
     unsafe {
         let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
         if state_ptr.is_null() {
@@ -153,7 +153,7 @@ extern "C" fn local_allows_attachment(x: i32, y: i32, z: i32) -> bool {
     }
 }
 
-extern "C" fn local_is_block_solid(x: i32, y: i32, z: i32) -> bool {
+fn local_is_block_solid(x: i32, y: i32, z: i32) -> bool {
     unsafe {
         let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
         if state_ptr.is_null() {
@@ -163,7 +163,7 @@ extern "C" fn local_is_block_solid(x: i32, y: i32, z: i32) -> bool {
     }
 }
 
-extern "C" fn local_get_height_value(x: i32, z: i32) -> i32 {
+fn local_get_height_value(x: i32, z: i32) -> i32 {
     unsafe {
         let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
         if state_ptr.is_null() {
@@ -242,38 +242,15 @@ impl RustChunkProviderGenerate {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn rust_chunk_provider_generate_create(seed: i64) -> *mut RustChunkProviderGenerate {
-    Box::into_raw(Box::new(RustChunkProviderGenerate::new(seed)))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn rust_chunk_provider_generate_destroy(ptr: *mut RustChunkProviderGenerate) {
-    if !ptr.is_null() {
-        let _ = Box::from_raw(ptr);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn rust_chunk_provider_generate_chunk(
-    ptr: *mut RustChunkProviderGenerate,
+pub fn rust_chunk_provider_generate_chunk(
+    gen: &mut RustChunkProviderGenerate,
     chunk_x: i32,
     chunk_z: i32,
-    out_blocks: *mut u8,
-    out_biomes: *mut MobSpawnerBase,
-    out_temps: *mut f64,
-    out_humids: *mut f64,
+    blocks: &mut [u8; 32768],
+    biomes: &mut [MobSpawnerBase; 256],
+    temperatures: &mut [f64; 256],
+    humidities: &mut [f64; 256],
 ) {
-    if ptr.is_null() || out_blocks.is_null() || out_biomes.is_null()
-        || out_temps.is_null() || out_humids.is_null()
-    {
-        return;
-    }
-    let gen = &mut *ptr;
-    let blocks = std::slice::from_raw_parts_mut(out_blocks, 32768);
-    let biomes = std::slice::from_raw_parts_mut(out_biomes, 256);
-    let temperatures = std::slice::from_raw_parts_mut(out_temps, 256);
-    let humidities = std::slice::from_raw_parts_mut(out_humids, 256);
 
     let mut rand = JavaRandom::new(
         (chunk_x as i64)
@@ -319,21 +296,20 @@ pub unsafe extern "C" fn rust_chunk_provider_generate_chunk(
 
     let mut density_field = vec![0.0; (var8 * var9 * var10) as usize];
     crate::density::alpha_density_generate_field(
-        density_field.as_mut_ptr(),
-        density_field.len(),
+        &mut density_field,
         chunk_x * var6,
         0,
         chunk_z * var6,
         var8,
         var9,
         var10,
-        temperatures.as_ptr(),
-        humidities.as_ptr(),
-        gen.field_715_a.as_mut() as *mut NoiseGeneratorOctaves,
-        gen.field_714_b.as_mut() as *mut NoiseGeneratorOctaves,
-        gen.field_703_m.as_mut() as *mut NoiseGeneratorOctaves,
-        gen.field_705_k.as_mut() as *mut NoiseGeneratorOctaves,
-        gen.field_704_l.as_mut() as *mut NoiseGeneratorOctaves,
+        temperatures,
+        humidities,
+        &gen.field_715_a,
+        &gen.field_714_b,
+        &gen.field_703_m,
+        &gen.field_705_k,
+        &gen.field_704_l,
     );
 
     for var11 in 0..var6 {
@@ -466,31 +442,27 @@ pub unsafe extern "C" fn rust_chunk_provider_generate_chunk(
     gen_caves.generate(gen.world_seed, chunk_x, chunk_z, blocks);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn rust_chunk_provider_populate_batch(
-    generator: *mut RustChunkProviderGenerate,
-    batch: *const RustChunkDataBatch,
+pub fn rust_chunk_provider_populate_batch(
+    generator: &mut RustChunkProviderGenerate,
+    batch: &RustChunkDataBatch,
     accessor: WorldAccessor,
     chunk_x: i32,
     chunk_z: i32,
     biome_type_raw: i32,
-    temperatures: *const f64,
+    temperatures: &[f64],
 ) {
-    if generator.is_null() || batch.is_null() || temperatures.is_null() {
-        return;
-    }
     let mut state = DecoratorWorldState {
         blocks: [
-            (*batch).chunks[0].blocks,
-            (*batch).chunks[1].blocks,
-            (*batch).chunks[2].blocks,
-            (*batch).chunks[3].blocks,
+            batch.chunks[0].blocks,
+            batch.chunks[1].blocks,
+            batch.chunks[2].blocks,
+            batch.chunks[3].blocks,
         ],
         metadata: [
-            (*batch).chunks[0].metadata,
-            (*batch).chunks[1].metadata,
-            (*batch).chunks[2].metadata,
-            (*batch).chunks[3].metadata,
+            batch.chunks[0].metadata,
+            batch.chunks[1].metadata,
+            batch.chunks[2].metadata,
+            batch.chunks[3].metadata,
         ],
         chunk_x,
         chunk_z,
@@ -513,12 +485,12 @@ pub unsafe extern "C" fn rust_chunk_provider_populate_batch(
 
     // Call the existing decorator logic
     alpha_decorate_chunk(
-        local_accessor,
-        (*generator).world_seed,
+        &local_accessor,
+        generator.world_seed,
         chunk_x,
         chunk_z,
         biome_type_raw,
-        (*generator).field_713_c.as_mut() as *mut NoiseGeneratorOctaves,
+        &mut generator.field_713_c,
         temperatures,
     );
 

@@ -204,19 +204,45 @@ pub fn bind_listener(addr: &str) -> std::io::Result<TcpListener> {
 pub type VerifyFn = Box<dyn Fn(&str, &str) -> Result<String, String> + Send>;
 
 /// Default verifier (mirrors `performSessionCheck`).
+///
+/// NOTE: Mojang's legacy session.minecraft.net endpoint has been shut down
+/// since 2020, so online-mode authentication is non-functional by default.
+/// Operators in 2026+ should either run `online-mode=false` (recommended
+/// for offline LAN setups) or point the URL below at a custom backend
+/// (e.g. a Yggdrasil-compatible proxy).
 pub fn default_verify(username: &str, server_id: &str) -> Result<String, String> {
-    use std::ffi::{CStr, CString};
-    let u = CString::new(username).map_err(|e| e.to_string())?;
-    let s = CString::new(server_id).map_err(|e| e.to_string())?;
-    let mut buf = [0 as std::ffi::c_char; 128];
-    let ok = unsafe { crate::rust_session_check(u.as_ptr(), s.as_ptr(), buf.as_mut_ptr(), buf.len()) };
-    if !ok {
-        return Err("Session verification failed".to_string());
+    let url = format!(
+        "https://session.minecraft.net/game/checkserver.jsp?user={}&serverId={}",
+        urlencoding(username),
+        urlencoding(server_id)
+    );
+    let body = ureq::get(&url)
+        .timeout(std::time::Duration::from_secs(5))
+        .call()
+        .map_err(|e| e.to_string())?
+        .into_string()
+        .map_err(|e| e.to_string())?;
+    let reply = body.trim().to_string();
+    if reply == "YES" {
+        Ok(reply)
+    } else {
+        Err("Session verification failed".to_string())
     }
-    unsafe { CStr::from_ptr(buf.as_ptr()) }
-        .to_str()
-        .map(|s| s.to_string())
-        .map_err(|e| e.to_string())
+}
+
+fn urlencoding(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    for byte in s.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                result.push(byte as char);
+            }
+            _ => {
+                result.push_str(&format!("%{:02X}", byte));
+            }
+        }
+    }
+    result
 }
 
 /// Terminal login outcome for the server tick.

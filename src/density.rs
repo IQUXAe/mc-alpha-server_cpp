@@ -1,40 +1,21 @@
-use libc::{c_int, size_t};
-use std::slice;
 use crate::noise::NoiseGeneratorOctaves;
 
-#[no_mangle]
-pub unsafe extern "C" fn alpha_density_generate_field(
-    out_field: *mut f64,
-    out_len: size_t,
-    var2: c_int,
-    var3: c_int,
-    var4: c_int,
-    var5: c_int,
-    var6: c_int,
-    var7: c_int,
-    temperatures: *const f64,
-    humidities: *const f64,
-    field_715_a: *mut NoiseGeneratorOctaves,
-    field_714_b: *mut NoiseGeneratorOctaves,
-    field_703_m: *mut NoiseGeneratorOctaves,
-    field_705_k: *mut NoiseGeneratorOctaves,
-    field_704_l: *mut NoiseGeneratorOctaves,
+pub fn alpha_density_generate_field(
+    field: &mut [f64],
+    var2: i32,
+    var3: i32,
+    var4: i32,
+    var5: i32,
+    var6: i32,
+    var7: i32,
+    temperatures: &[f64],
+    humidities: &[f64],
+    gen_715: &NoiseGeneratorOctaves,
+    gen_714: &NoiseGeneratorOctaves,
+    gen_703: &NoiseGeneratorOctaves,
+    gen_705: &NoiseGeneratorOctaves,
+    gen_704: &NoiseGeneratorOctaves,
 ) {
-    if out_field.is_null() || temperatures.is_null() || humidities.is_null()
-        || field_715_a.is_null() || field_714_b.is_null() || field_703_m.is_null()
-        || field_705_k.is_null() || field_704_l.is_null()
-    {
-        return;
-    }
-    let field = slice::from_raw_parts_mut(out_field, out_len);
-    let temperatures = slice::from_raw_parts(temperatures, 256);
-    let humidities = slice::from_raw_parts(humidities, 256);
-
-    let gen_715 = &*field_715_a;
-    let gen_714 = &*field_714_b;
-    let gen_703 = &*field_703_m;
-    let gen_705 = &*field_705_k;
-    let gen_704 = &*field_704_l;
 
     let var8 = 684.412;
     let var10 = 684.412;
