@@ -1806,6 +1806,15 @@ impl PlaySession {
                     }
                 }
             }
+            // Saddled-pig mount (mirrors Java EntityPig.interact: riding
+            // pigs board on right-click; unsaddled pigs ignore it).
+            if let Some(Entity::Animal(a)) = ctx.world.entities.get(target) {
+                if a.kind == AnimalKind::Pig && a.saddled {
+                    ctx.world.entities.mount(me, Some(target));
+                    ctx.world.entities.update_rider_position(target);
+                    return None;
+                }
+            }
             // Boat mount toggle with rider rules.
             if matches!(ctx.world.entities.get(target), Some(Entity::Boat(_))) {
                 let rider =
@@ -2845,6 +2854,43 @@ mod play_tests {
             },
         );
         assert_eq!(w.entities.get(player).unwrap().body().riding, -1);
+    }
+
+    #[test]
+    fn test_saddled_pig_mounts_on_interact() {
+        use crate::entity_table::{AnimalEnt, AnimalKind};
+        let mut w = floor_world();
+        let ops = no_ops();
+        let player = spawn_player(&mut w, "Steve", 3.5, 64.0, 4.5);
+        let pid = w.entities.alloc_id();
+        let mut pig = AnimalEnt::new(pid, AnimalKind::Pig);
+        pig.living.body.set_position(4.5, 64.0, 4.5);
+        pig.saddled = true;
+        w.entities.insert(Entity::Animal(pig));
+        let mut sess = PlaySession::new(player);
+        let mut bc = Vec::new();
+        sess.pump(
+            &mut ctx(&mut w, &ops, &mut bc),
+            PacketData::UseEntity {
+                player_entity_id: player, target_entity_id: pid, is_left_click: false,
+            },
+        );
+        // Java EntityPig.interact boards the rider; the pig keeps the
+        // saddle row and the rider position follows.
+        assert_eq!(w.entities.get(player).unwrap().body().riding, pid);
+        assert_eq!(w.entities.get(pid).unwrap().body().ridden_by, player);
+        // Unsaddled pigs ignore the right-click.
+        let qid = w.entities.alloc_id();
+        let mut plain = AnimalEnt::new(qid, AnimalKind::Pig);
+        plain.living.body.set_position(6.5, 64.0, 4.5);
+        w.entities.insert(Entity::Animal(plain));
+        sess.pump(
+            &mut ctx(&mut w, &ops, &mut bc),
+            PacketData::UseEntity {
+                player_entity_id: player, target_entity_id: qid, is_left_click: false,
+            },
+        );
+        assert_eq!(w.entities.get(player).unwrap().body().riding, pid);
     }
 
     #[test]
