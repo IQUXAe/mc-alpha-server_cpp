@@ -45,7 +45,6 @@ pub extern "C" fn alpha_item_push_side(
         best_side = 4;
     }
     if free_s && 1.0 - lz < best {
-        best = 1.0 - lz;
         best_side = 5;
     }
     best_side
