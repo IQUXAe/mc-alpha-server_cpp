@@ -163,6 +163,12 @@ double boatWaterFraction(double minX, double minY, double minZ,
 bool boatSteer(double deltaX, double deltaZ, float curYaw, float* outYaw);
 bool boatRiderOffset(float yaw, double* outX, double* outZ);
 bool arrowFaceVelocity(double mx, double my, double mz, float* outYaw, float* outPitch);
+
+// Player helpers (formatting stays in C++)
+uint8_t playerDeathCause(bool hasAttacker, uint8_t attackerKind, float fallDistance,
+                         bool onCactus, bool drowning, bool inLava, bool onFire);
+using DropVelocity = ::DropVelocity;
+DropVelocity playerDropVelocity(double ra, double rb, double rc);
 void blockSandAdded(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
 void blockSandNeighbor(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);
 void blockSandTick(const BlockTickWorld* w, uint8_t id, int32_t x, int32_t y, int32_t z);

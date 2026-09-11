@@ -398,6 +398,7 @@ pub mod entity_ai;
 pub mod entity_living;
 pub mod entity_misc;
 pub mod entity_physics;
+pub mod entity_player;
 pub mod byte_buffer;
 pub mod inventory;
 pub mod tile_entity_furnace;

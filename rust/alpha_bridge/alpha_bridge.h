@@ -1159,6 +1159,18 @@ bool alpha_boat_steer(double delta_x, double delta_z, float cur_yaw, float* out_
 bool alpha_boat_rider_offset(float yaw, double* out_x, double* out_z);
 bool alpha_arrow_face_velocity(double mx, double my, double mz, float* out_yaw, float* out_pitch);
 
+// Player helpers (entity_player.rs). Name formatting stays in C++.
+uint8_t alpha_player_death_cause(bool has_attacker, uint8_t attacker_kind, float fall_distance,
+                                 bool on_cactus, bool drowning, bool in_lava, bool on_fire);
+
+typedef struct DropVelocity {
+    double mx;
+    double my;
+    double mz;
+} DropVelocity;
+
+DropVelocity alpha_player_drop_velocity(double ra, double rb, double rc);
+
 // Entity physics kernel (entity_physics.rs). Pure collision/fall/push math;
 // the world-dependent half (box gathering, onFall, velocity) stays in C++.
 typedef struct FfiAabb {

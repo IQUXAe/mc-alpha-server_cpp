@@ -479,6 +479,16 @@ bool arrowFaceVelocity(double mx, double my, double mz, float* outYaw, float* ou
     return ::alpha_arrow_face_velocity(mx, my, mz, outYaw, outPitch);
 }
 
+uint8_t playerDeathCause(bool hasAttacker, uint8_t attackerKind, float fallDistance,
+                         bool onCactus, bool drowning, bool inLava, bool onFire) {
+    return ::alpha_player_death_cause(hasAttacker, attackerKind, fallDistance,
+                                      onCactus, drowning, inLava, onFire);
+}
+
+DropVelocity playerDropVelocity(double ra, double rb, double rc) {
+    return ::alpha_player_drop_velocity(ra, rb, rc);
+}
+
 bool entityResolveMove(const FfiAabb& box, double dx, double dy, double dz,
                        const FfiAabb* boxes, size_t numBoxes, ResolvedMove* out) {
     return ::alpha_entity_resolve_move(&box, dx, dy, dz, boxes, numBoxes, out);

@@ -16,10 +16,6 @@ namespace {
 constexpr int kRespawnInvulnerabilityTicks = 60;
 constexpr int kSwingAnimationTicks = 7;
 
-double randomDropVelocity() {
-    return (RustBridge::rngNextDouble() - 0.5) * 0.2;
-}
-
 } // namespace
 
 void EntityPlayerMP::tick() {
@@ -48,9 +44,11 @@ void EntityPlayerMP::onDeath() {
 
         auto entity = std::make_unique<EntityItem>(stack->itemID, stack->stackSize, stack->itemDamage);
         entity->setPosition(posX, posY + 0.5, posZ);
-        entity->motionX = randomDropVelocity();
-        entity->motionY = 0.2 + RustBridge::rngNextDouble() * 0.1;
-        entity->motionZ = randomDropVelocity();
+        const RustBridge::DropVelocity vel = RustBridge::playerDropVelocity(
+            RustBridge::rngNextDouble(), RustBridge::rngNextDouble(), RustBridge::rngNextDouble());
+        entity->motionX = vel.mx;
+        entity->motionY = vel.my;
+        entity->motionZ = vel.mz;
         entity->pickupDelay = 40;
         worldObj->spawnEntityInWorld(std::move(entity));
         stack.reset();
@@ -116,51 +114,59 @@ void EntityPlayerMP::attackEntityFrom(Entity* attacker, int amount) {
 }
 
 void EntityPlayerMP::updateDeathMessage(Entity* attacker) {
+    uint8_t attackerKind = 255;
+    std::string attackerName;
     if (auto* playerAttacker = dynamic_cast<EntityPlayerMP*>(attacker)) {
-        lastDeathMessage_ = username + " was slain by " + playerAttacker->username;
-        return;
+        attackerKind = 0;
+        attackerName = playerAttacker->username;
+    } else if (auto* mobAttacker = dynamic_cast<EntityMob*>(attacker)) {
+        attackerKind = 1;
+        attackerName = mobAttacker->getEntityStringId();
+        if (attackerName.empty()) {
+            attackerName = "mob";
+        }
+    } else if (auto* animalAttacker = dynamic_cast<EntityAnimals*>(attacker)) {
+        attackerKind = 2;
+        attackerName = animalAttacker->getEntityStringId();
+        if (attackerName.empty()) {
+            attackerName = "animal";
+        }
     }
 
-    if (auto* mobAttacker = dynamic_cast<EntityMob*>(attacker)) {
-        const std::string mobName = mobAttacker->getEntityStringId().empty() ? "mob" : mobAttacker->getEntityStringId();
-        lastDeathMessage_ = username + " was slain by " + mobName;
-        return;
-    }
+    const bool onCactus = worldObj
+        && worldObj->getBlockIdNoChunkLoad(static_cast<int>(std::floor(posX)),
+                                           static_cast<int>(std::floor(boundingBox.minY + 0.001)),
+                                           static_cast<int>(std::floor(posZ))) == 81;
+    const bool drowning = isInsideMaterial(&Material::water) && air <= 0;
+    const uint8_t cause = RustBridge::playerDeathCause(
+        attacker != nullptr, attackerKind, fallDistance,
+        onCactus, drowning, isInLava(), fire > 0);
 
-    if (auto* animalAttacker = dynamic_cast<EntityAnimals*>(attacker)) {
-        const std::string animalName = animalAttacker->getEntityStringId().empty() ? "animal" : animalAttacker->getEntityStringId();
-        lastDeathMessage_ = username + " was slain by " + animalName;
-        return;
+    switch (cause) {
+        case 0:
+        case 1:
+        case 2:
+            lastDeathMessage_ = username + " was slain by " + attackerName;
+            break;
+        case 3:
+            lastDeathMessage_ = username + " hit the ground too hard";
+            break;
+        case 4:
+            lastDeathMessage_ = username + " was pricked to death";
+            break;
+        case 5:
+            lastDeathMessage_ = username + " drowned";
+            break;
+        case 6:
+            lastDeathMessage_ = username + " tried to swim in lava";
+            break;
+        case 7:
+            lastDeathMessage_ = username + " went up in flames";
+            break;
+        default:
+            lastDeathMessage_ = username + " died";
+            break;
     }
-
-    if (fallDistance > 3.0f) {
-        lastDeathMessage_ = username + " hit the ground too hard";
-        return;
-    }
-
-    if (worldObj && worldObj->getBlockIdNoChunkLoad(static_cast<int>(std::floor(posX)),
-                                                    static_cast<int>(std::floor(boundingBox.minY + 0.001)),
-                                                    static_cast<int>(std::floor(posZ))) == 81) {
-        lastDeathMessage_ = username + " was pricked to death";
-        return;
-    }
-
-    if (isInsideMaterial(&Material::water) && air <= 0) {
-        lastDeathMessage_ = username + " drowned";
-        return;
-    }
-
-    if (isInLava()) {
-        lastDeathMessage_ = username + " tried to swim in lava";
-        return;
-    }
-
-    if (fire > 0) {
-        lastDeathMessage_ = username + " went up in flames";
-        return;
-    }
-
-    lastDeathMessage_ = username + " died";
 }
 
 void EntityPlayerMP::swingItem() {

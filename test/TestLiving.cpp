@@ -48,3 +48,21 @@ TEST(LivingTest, FallDamageTable) {
     EXPECT_EQ(RustBridge::livingFallDamage(3.5f), 1);
     EXPECT_EQ(RustBridge::livingFallDamage(10.0f), 7);
 }
+
+TEST(LivingTest, PlayerDeathCausePriority) {
+    EXPECT_EQ(RustBridge::playerDeathCause(true, 0, 99.0f, true, true, true, true), 0);
+    EXPECT_EQ(RustBridge::playerDeathCause(true, 1, 99.0f, true, true, true, true), 1);
+    EXPECT_EQ(RustBridge::playerDeathCause(true, 9, 99.0f, false, false, false, false), 3);
+    EXPECT_EQ(RustBridge::playerDeathCause(false, 0, 2.0f, true, false, false, false), 4);
+    EXPECT_EQ(RustBridge::playerDeathCause(false, 0, 2.0f, false, true, false, false), 5);
+    EXPECT_EQ(RustBridge::playerDeathCause(false, 0, 2.0f, false, false, true, false), 6);
+    EXPECT_EQ(RustBridge::playerDeathCause(false, 0, 2.0f, false, false, false, true), 7);
+    EXPECT_EQ(RustBridge::playerDeathCause(false, 0, 2.0f, false, false, false, false), 8);
+}
+
+TEST(LivingTest, PlayerDropVelocityShape) {
+    const RustBridge::DropVelocity v = RustBridge::playerDropVelocity(0.5, 0.5, 0.5);
+    EXPECT_DOUBLE_EQ(v.mx, 0.0);
+    EXPECT_DOUBLE_EQ(v.my, 0.25);
+    EXPECT_DOUBLE_EQ(v.mz, 0.0);
+}
