@@ -3,6 +3,7 @@ use std::ffi::CStr;
 pub const SIGN_LINES: usize = 4;
 
 #[repr(C)]
+#[derive(Clone, Copy, Debug)]
 pub struct FfiSignState {
     pub lines: [[u8; 16]; SIGN_LINES],
 }

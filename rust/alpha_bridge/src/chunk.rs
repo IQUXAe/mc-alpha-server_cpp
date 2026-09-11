@@ -309,6 +309,57 @@ impl Chunk {
         self.is_modified = true;
     }
 
+    /// Bulk light/height import from blob layout (packed nibbles like the
+    /// NBT arrays; even cell index is the low nibble). Length-checked.
+    pub fn load_light_maps(&mut self, sky: &[u8], block: &[u8], height: &[u8]) -> bool {
+        if sky.len() != CHUNK_NIBBLE_BYTES
+            || block.len() != CHUNK_NIBBLE_BYTES
+            || height.len() != CHUNK_AREA
+        {
+            return false;
+        }
+        for x in 0..CHUNK_SIZE_X {
+            for z in 0..CHUNK_SIZE_Z {
+                for y in 0..CHUNK_SIZE_Y {
+                    let idx = Self::index(x, y, z);
+                    self.skylight.set_nibble(x, y, z, (sky[idx / 2] >> (4 * (idx % 2))) & 0xF);
+                    self.blocklight.set_nibble(x, y, z, (block[idx / 2] >> (4 * (idx % 2))) & 0xF);
+                }
+                if let Some(slot) = self.height_map.get_mut((x * 16 + z) as usize) {
+                    *slot = height[(x * 16 + z) as usize];
+                }
+            }
+        }
+        self.is_modified = true;
+        true
+    }
+
+    /// Bulk export into blob layout (packed nibbles + height map).
+    pub fn export_light_maps(
+        &self,
+        sky: &mut [u8; CHUNK_NIBBLE_BYTES],
+        block: &mut [u8; CHUNK_NIBBLE_BYTES],
+        height: &mut [u8; CHUNK_AREA],
+    ) {
+        for x in 0..CHUNK_SIZE_X {
+            for z in 0..CHUNK_SIZE_Z {
+                for y in 0..CHUNK_SIZE_Y {
+                    let idx = Self::index(x, y, z);
+                    let s = self.skylight.get_nibble(x, y, z) & 0xF;
+                    let b = self.blocklight.get_nibble(x, y, z) & 0xF;
+                    if idx % 2 == 0 {
+                        sky[idx / 2] = s;
+                        block[idx / 2] = b;
+                    } else {
+                        sky[idx / 2] |= s << 4;
+                        block[idx / 2] |= b << 4;
+                    }
+                }
+                height[(x * 16 + z) as usize] = self.height_map[(x * 16 + z) as usize];
+            }
+        }
+    }
+
     /// Mirrors `getSavedLightValue`: `0` = sky, anything else = block.
     pub fn get_saved_light_value(&self, light_type: i32, x: i32, y: i32, z: i32) -> u8 {
         if light_type == SKY_LIGHT {

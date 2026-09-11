@@ -6,6 +6,7 @@ pub const SLOT_OUTPUT: usize = 2;
 pub const FURNACE_SIZE: usize = 3;
 
 #[repr(C)]
+#[derive(Clone, Copy, Debug)]
 pub struct FfiFurnaceState {
     pub slots: [FfiItemStack; FURNACE_SIZE],
     pub burn_time: i16,

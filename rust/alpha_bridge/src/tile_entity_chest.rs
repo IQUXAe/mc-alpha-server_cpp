@@ -3,6 +3,7 @@ use crate::inventory::FfiItemStack;
 pub const CHEST_SIZE: usize = 27;
 
 #[repr(C)]
+#[derive(Clone, Copy, Debug)]
 pub struct FfiChestState {
     pub slots: [FfiItemStack; CHEST_SIZE],
 }

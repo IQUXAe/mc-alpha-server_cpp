@@ -32,6 +32,9 @@ use crate::entity_table::{
     AnimalKind, Body, Entity, EntityId, EntityTable, LivingBody, MobKind, mob_attack_reach,
     mob_burns_in_daylight,
 };
+use crate::tile_entity_chest::FfiChestState;
+use crate::tile_entity_furnace::FfiFurnaceState;
+use crate::tile_entity_sign::FfiSignState;
 use crate::material::Material;
 use crate::math_helper::{floor_double, sqrt_float};
 use crate::pathfinder::find_path_native;
@@ -116,6 +119,9 @@ pub struct World {
     /// round-trip: evicted here, thawed back on recall; disk eviction
     /// arrives with the persistence slice).
     unloaded: HashMap<(i32, i32), Chunk>,
+    /// Block-entity storage by cell (mirrors the chunk `TileEntity` map;
+    /// ticking arrives with the furnace slice, NBT here).
+    pub tiles: HashMap<(i32, i32, i32), TileData>,
     /// Terrain generator, built lazily (eleven octave tables; tests that
     /// never generate pay nothing; skipped in `Debug` dumps).
     generator: Option<crate::generator::RustChunkProviderGenerate>,
@@ -158,6 +164,7 @@ impl World {
             leaves_guard: 0,
             unload_radius: 10,
             unloaded: HashMap::new(),
+            tiles: HashMap::new(),
             generator: None,
             chunks: HashMap::new(),
             entities: EntityTable::new(),
@@ -172,6 +179,11 @@ impl World {
 
     pub fn chunk_count(&self) -> usize {
         self.chunks.len()
+    }
+
+    /// Crate-visible chunk lookup for persistence.
+    pub(crate) fn chunk_ref(&self, cx: i32, cz: i32) -> Option<&Chunk> {
+        self.chunks.get(&(cx, cz))
     }
 
     pub fn has_chunk(&self, cx: i32, cz: i32) -> bool {
@@ -5183,8 +5195,17 @@ impl World {
     }
 }
 
+/// Block-entity data by cell (mirrors the C++ per-chunk `TileEntity`
+/// objects, stored flat until the tile tick slice needs behavior).
+#[derive(Clone, Copy, Debug)]
+pub enum TileData {
+    Furnace(FfiFurnaceState),
+    Chest(FfiChestState),
+    Sign(FfiSignState),
+}
+
 /// String id for spill/restore (mirrors `getEntityStringId`).
-fn mob_string_id(kind: MobKind) -> String {
+pub(crate) fn mob_string_id(kind: MobKind) -> String {
     match kind {
         MobKind::Spider => "Spider",
         MobKind::Zombie => "Zombie",
@@ -5195,7 +5216,7 @@ fn mob_string_id(kind: MobKind) -> String {
 }
 
 /// String id for spill/restore (mirrors `getEntityStringId`).
-fn animal_string_id(kind: AnimalKind) -> String {
+pub(crate) fn animal_string_id(kind: AnimalKind) -> String {
     match kind {
         AnimalKind::Sheep => "Sheep",
         AnimalKind::Pig => "Pig",

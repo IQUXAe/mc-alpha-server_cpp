@@ -417,6 +417,7 @@ pub mod chunk;
 pub mod network;
 pub mod generator;
 pub mod pathfinder;
+pub mod persist;
 pub mod commands;
 pub mod player_storage;
 pub mod player_inventory;
