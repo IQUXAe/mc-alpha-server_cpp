@@ -82,7 +82,7 @@ struct LightNode {
 }
 
 /// Owned chunk data + lighting (no `World`, no entities, no I/O).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Chunk {
     /// Chunk X position (mirrors C++ `xPosition`).
     pub x_position: i32,

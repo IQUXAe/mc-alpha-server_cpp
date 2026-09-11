@@ -1,0 +1,349 @@
+//! Native world state: the Rust-owned replacement for the C++ `World`
+//! block storage, clock, and spawn point (mirrors Java `World` storage
+//! semantics). Chunks reuse the `chunk` module, block facts come from the
+//! `block` table, and materials from `material`.
+//!
+//! v1 scope: chunk map, block access, material/light/height queries,
+//! collision-box gathering for physics, plus the entity table and tracker
+//! for tick integration. Generation, persistence, lighting updates, and
+//! networking arrive in later slices.
+
+use std::collections::HashMap;
+
+use crate::aabb::AxisAlignedBB;
+use crate::block::{BlockMaterial, BlockType, alpha_block_properties_get};
+use crate::chunk::Chunk;
+use crate::entity_table::{EntityId, EntityTable};
+use crate::material::Material;
+use crate::tracker::Tracker;
+
+pub const WORLD_HEIGHT: i32 = 128;
+
+/// Block types with no collision box (mirrors the C++ `nullopt`
+/// `getCollisionBoundingBoxFromPool` overrides: fluids, plants, torches,
+/// saplings, crops, fire).
+fn has_collision_box(block_type: u8) -> bool {
+    !matches!(
+        block_type,
+        x if x == BlockType::Fluid as u8
+            || x == BlockType::Flower as u8
+            || x == BlockType::TallGrass as u8
+            || x == BlockType::Mushroom as u8
+            || x == BlockType::Torch as u8
+            || x == BlockType::Sapling as u8
+            || x == BlockType::Crops as u8
+            || x == BlockType::Fire as u8
+    )
+}
+
+/// Material for a block-table material id (mirrors `materialFromId`).
+pub fn material_of(material_id: u8) -> Material {
+    match material_id {
+        x if x == BlockMaterial::Air as u8 => Material::AIR,
+        x if x == BlockMaterial::Ground as u8 => Material::GROUND,
+        x if x == BlockMaterial::Wood as u8 => Material::WOOD,
+        x if x == BlockMaterial::Rock as u8 => Material::ROCK,
+        x if x == BlockMaterial::Iron as u8 => Material::IRON,
+        x if x == BlockMaterial::Water as u8 => Material::WATER,
+        x if x == BlockMaterial::Lava as u8 => Material::LAVA,
+        x if x == BlockMaterial::Leaves as u8 => Material::LEAVES,
+        x if x == BlockMaterial::Plants as u8 => Material::PLANTS,
+        x if x == BlockMaterial::Sponge as u8 => Material::SPONGE,
+        x if x == BlockMaterial::Cloth as u8 => Material::CLOTH,
+        x if x == BlockMaterial::Fire as u8 => Material::FIRE,
+        x if x == BlockMaterial::Sand as u8 => Material::SAND,
+        x if x == BlockMaterial::Circuits as u8 => Material::CIRCUITS,
+        x if x == BlockMaterial::Glass as u8 => Material::GLASS,
+        x if x == BlockMaterial::Tnt as u8 => Material::TNT,
+        x if x == BlockMaterial::Ice as u8 => Material::ICE,
+        x if x == BlockMaterial::Snow as u8 => Material::SNOW,
+        x if x == BlockMaterial::BuiltSnow as u8 => Material::BUILT_SNOW,
+        x if x == BlockMaterial::Cactus as u8 => Material::CACTUS,
+        x if x == BlockMaterial::Clay as u8 => Material::CLAY,
+        x if x == BlockMaterial::Pumpkin as u8 => Material::PUMPKIN,
+        x if x == BlockMaterial::Portal as u8 => Material::PORTAL,
+        _ => Material::AIR,
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct World {    pub seed: i64,
+    pub time: i64,
+    pub spawn: [i32; 3],
+    chunks: HashMap<(i32, i32), Chunk>,
+    pub entities: EntityTable,
+    pub tracker: Tracker,
+}
+
+impl World {
+    pub fn new(seed: i64) -> Self {
+        World {
+            seed,
+            time: 0,
+            spawn: [0, 64, 0],
+            chunks: HashMap::new(),
+            entities: EntityTable::new(),
+            tracker: Tracker::new(),
+        }
+    }
+
+    pub fn insert_chunk(&mut self, chunk: Chunk) {
+        self.chunks.insert((chunk.x_position, chunk.z_position), chunk);
+    }
+
+    pub fn chunk_count(&self) -> usize {
+        self.chunks.len()
+    }
+
+    pub fn has_chunk(&self, cx: i32, cz: i32) -> bool {
+        self.chunks.contains_key(&(cx, cz))
+    }
+
+    fn chunk_of(x: i32, z: i32) -> (i32, i32, i32, i32) {
+        (x.div_euclid(16), z.div_euclid(16), x.rem_euclid(16), z.rem_euclid(16))
+    }
+
+    pub fn get_block_id(&self, x: i32, y: i32, z: i32) -> u8 {
+        if y < 0 || y >= WORLD_HEIGHT {
+            return 0;
+        }
+        let (cx, cz, lx, lz) = Self::chunk_of(x, z);
+        self.chunks.get(&(cx, cz)).map(|c| c.get_block_id(lx, y, lz)).unwrap_or(0)
+    }
+
+    pub fn get_block_meta(&self, x: i32, y: i32, z: i32) -> u8 {
+        if y < 0 || y >= WORLD_HEIGHT {
+            return 0;
+        }
+        let (cx, cz, lx, lz) = Self::chunk_of(x, z);
+        self.chunks.get(&(cx, cz)).map(|c| c.get_block_metadata(lx, y, lz)).unwrap_or(0)
+    }
+
+    /// Missing chunk or out-of-range Y: no-op returning false (mirrors the
+    /// NoChunkLoad setters swallowing silently).
+    pub fn set_block_id(&mut self, x: i32, y: i32, z: i32, id: u8) -> bool {
+        if y < 0 || y >= WORLD_HEIGHT {
+            return false;
+        }
+        let (cx, cz, lx, lz) = Self::chunk_of(x, z);
+        self.chunks.get_mut(&(cx, cz)).map(|c| c.set_block_id(lx, y, lz, id)).unwrap_or(false)
+    }
+
+    pub fn set_block_meta(&mut self, x: i32, y: i32, z: i32, meta: u8) -> bool {
+        if y < 0 || y >= WORLD_HEIGHT {
+            return false;
+        }
+        let (cx, cz, lx, lz) = Self::chunk_of(x, z);
+        self.chunks
+            .get_mut(&(cx, cz))
+            .map(|c| {
+                c.set_block_metadata(lx, y, lz, meta);
+                true
+            })
+            .unwrap_or(false)
+    }
+
+    pub fn material_at(&self, x: i32, y: i32, z: i32) -> Material {
+        let id = self.get_block_id(x, y, z);
+        if id == 0 {
+            return Material::AIR;
+        }
+        material_of(alpha_block_properties_get(id as u32).material)
+    }
+
+    pub fn is_solid(&self, x: i32, y: i32, z: i32) -> bool {
+        // ID list mirrors World::isBlockSolidNoChunkLoad exactly
+        // (NOT material-based: torches and the like count as solid here).
+        if y < 0 || y >= WORLD_HEIGHT {
+            return false;
+        }
+        match self.get_block_id(x, y, z) {
+            0 | 8 | 9 | 10 | 11 | 78 | 37 | 38 | 39 | 40 | 83 | 51 | 6 => false,
+            _ => true,
+        }
+    }
+
+    pub fn is_water(&self, x: i32, y: i32, z: i32) -> bool {
+        self.material_at(x, y, z) == Material::WATER
+    }
+
+    pub fn is_lava(&self, x: i32, y: i32, z: i32) -> bool {
+        self.material_at(x, y, z) == Material::LAVA
+    }
+
+    pub fn get_height_value(&self, x: i32, z: i32) -> i32 {
+        let (cx, cz, lx, lz) = Self::chunk_of(x, z);
+        self.chunks.get(&(cx, cz)).map(|c| c.get_height_value(lx, lz)).unwrap_or(0)
+    }
+
+    /// Saved light by type (mirrors `World::getSavedLightValue`:
+    /// 0 = sky, 1 = block). Out-of-range and missing chunks read 0,
+    /// except above the world where sky reads 15.
+    pub fn saved_light_value(&self, kind: u8, x: i32, y: i32, z: i32) -> u8 {
+        if y < 0 {
+            return 0;
+        }
+        if y >= WORLD_HEIGHT {
+            return if kind == 0 { 15 } else { 0 };
+        }
+        let (cx, cz, lx, lz) = Self::chunk_of(x, z);
+        self.chunks
+            .get(&(cx, cz))
+            .map(|c| c.get_saved_light_value(kind as i32, lx, y, lz))
+            .unwrap_or(0)
+    }
+
+    /// Combined light (mirrors `World::getBlockLightValue`).
+    pub fn block_light_value(&self, x: i32, y: i32, z: i32) -> u8 {
+        if y < 0 || y >= WORLD_HEIGHT {
+            return 0;
+        }
+        self.saved_light_value(0, x, y, z).max(self.saved_light_value(1, x, y, z))
+    }
+
+    /// Collision boxes of blocks overlapping `mask` (mirrors
+    /// `World::getCollidingBoundingBoxes` over loaded chunks only).
+    pub fn colliding_boxes(&self, mask: &AxisAlignedBB) -> Vec<AxisAlignedBB> {
+        let mut out = Vec::new();
+        let min_bx = mask.min_x.floor() as i32;
+        let max_bx = mask.max_x.floor() as i32;
+        let min_by = mask.min_y.floor() as i32;
+        let max_by = mask.max_y.floor() as i32;
+        let min_bz = mask.min_z.floor() as i32;
+        let max_bz = mask.max_z.floor() as i32;
+        for x in min_bx..=max_bx {
+            for y in min_by..=max_by {
+                for z in min_bz..=max_bz {
+                    let id = self.get_block_id(x, y, z);
+                    if id == 0 {
+                        continue;
+                    }
+                    let props = alpha_block_properties_get(id as u32);
+                    if !has_collision_box(props.block_type) {
+                        continue;
+                    }
+                    let bb = AxisAlignedBB::get_bounding_box(
+                        x as f64 + props.min_x as f64,
+                        y as f64 + props.min_y as f64,
+                        z as f64 + props.min_z as f64,
+                        x as f64 + props.max_x as f64,
+                        y as f64 + props.max_y as f64,
+                        z as f64 + props.max_z as f64,
+                    );
+                    if mask.intersects_with(&bb) {
+                        out.push(bb);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Closest living-or-not player within range, like `getClosestPlayer`
+    /// (strict `<`, first minimum wins; ids resolved by the caller).
+    pub fn closest_player(&self, x: f64, y: f64, z: f64, max_dist: f64) -> Option<EntityId> {
+        let mut best: Option<(EntityId, f64)> = None;
+        let mut ids: Vec<EntityId> = self.entities.alive_ids();
+        ids.sort_unstable();
+        for id in ids {
+            let e = self.entities.get(id)?;
+            if !matches!(e, crate::entity_table::Entity::Player(_)) {
+                continue;
+            }
+            let d = e.body().distance_sq(x, y, z);
+            if d < max_dist * max_dist && best.map(|(_, b)| d < b).unwrap_or(true) {
+                best = Some((id, d));
+            }
+        }
+        best.map(|(id, _)| id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entity_table::{LivingBody, PlayerEnt};
+
+    fn world_with_floor() -> World {
+        let mut w = World::new(1234);
+        let mut c = Chunk::new(0, 0);
+        for x in 0..16 {
+            for z in 0..16 {
+                c.set_block_id(x, 63, z, 1); // stone floor
+            }
+        }
+        c.generate_height_map();
+        w.insert_chunk(c);
+        w
+    }
+
+    fn add_player(w: &mut World, name: &str, x: f64, y: f64, z: f64) -> EntityId {
+        let id = w.entities.alloc_id();
+        let mut l = LivingBody::new(id, 0.6, 1.8, 0.0);
+        l.body.set_position(x, y, z);
+        w.entities.insert(crate::entity_table::Entity::Player(PlayerEnt {
+            living: l,
+            username: name.to_string(),
+            score: 0,
+        }));
+        id
+    }
+
+    #[test]
+    fn test_block_access_and_missing_chunks() {
+        let mut w = world_with_floor();
+        assert_eq!(w.get_block_id(3, 63, 4), 1);
+        assert_eq!(w.get_block_id(1000, 63, 1000), 0);
+        assert_eq!(w.get_block_id(0, 200, 0), 0);
+        assert!(w.set_block_id(3, 64, 4, 5));
+        assert_eq!(w.get_block_id(3, 64, 4), 5);
+        assert!(!w.set_block_id(1000, 64, 1000, 5));
+        assert!(!w.set_block_id(0, 200, 0, 5));
+        assert_eq!(w.get_height_value(3, 4), 65);
+    }
+
+    #[test]
+    fn test_material_queries() {
+        let w = world_with_floor();
+        assert!(w.is_solid(3, 63, 4));
+        // ID-list rule, not material: torch counts as solid here.
+        assert!(!w.is_solid(3, 70, 4));
+        assert!(!w.is_water(3, 63, 4));
+        assert_eq!(w.material_at(9, 9, 9), Material::AIR);
+    }
+
+    #[test]
+    fn test_light_defaults_match_cpp() {
+        let w = world_with_floor();
+        assert_eq!(w.saved_light_value(0, 1000, 64, 1000), 0);
+        assert_eq!(w.saved_light_value(1, 1000, 64, 1000), 0);
+        assert_eq!(w.saved_light_value(0, 0, 200, 0), 15);
+        assert_eq!(w.saved_light_value(1, 0, 200, 0), 0);
+        assert_eq!(w.saved_light_value(0, 0, -5, 0), 0);
+        assert_eq!(w.block_light_value(1000, 64, 1000), 0);
+    }
+
+    #[test]
+    fn test_colliding_boxes_floor() {
+        let w = world_with_floor();
+        // Box straddling the floor top picks up the stone cells beneath.
+        let mask = AxisAlignedBB::get_bounding_box(3.2, 63.5, 4.2, 3.8, 64.5, 4.8);
+        let boxes = w.colliding_boxes(&mask);
+        assert!(!boxes.is_empty());
+        assert!(boxes.iter().all(|b| b.max_y <= 64.0 + 1e-9));
+        // Air mask collects nothing.
+        let air = AxisAlignedBB::get_bounding_box(3.2, 70.0, 4.2, 3.8, 71.0, 4.8);
+        assert!(w.colliding_boxes(&air).is_empty());
+    }
+
+    #[test]
+    fn test_closest_player_strict_range() {
+        let mut w = World::new(7);
+        let a = add_player(&mut w, "a", 0.0, 64.0, 0.0);
+        let _b = add_player(&mut w, "b", 100.0, 64.0, 0.0);
+        assert_eq!(w.closest_player(3.0, 64.0, 4.0, 24.0), Some(a));
+        assert_eq!(w.closest_player(3.0, 64.0, 4.0, 4.0), None);
+        // Boundary is exclusive like C++ (strict <).
+        assert_eq!(w.closest_player(24.0, 64.0, 0.0, 24.0), None);
+    }
+}
