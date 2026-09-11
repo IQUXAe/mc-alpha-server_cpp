@@ -9,9 +9,9 @@ A Rust server implementation for Minecraft Alpha 1.2.6, written from scratch. Pr
 **Dependencies:** a recent stable Rust toolchain.
 
 ```bash
-cd rust/alpha_bridge
+cd rust/alpha_server
 cargo build --release
-./../../target/release/alpha_bridge [server.properties] [world-dir] [port]
+./../../target/release/alpha_server [server.properties] [world-dir] [port]
 ```
 
 All three arguments are optional: properties default to
@@ -23,7 +23,7 @@ All three arguments are optional: properties default to
 
 ## Architecture
 
-All logic lives in the `alpha_bridge` library (`rust/alpha_bridge/src`):
+All logic lives in the `alpha_server` library (`rust/alpha_server/src`):
 
 | Module | Description |
 | :--- | :--- |

@@ -10,9 +10,9 @@ use std::io::BufRead;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use alpha_bridge::server::Server;
-use alpha_bridge::server_config::ServerConfig;
-use alpha_bridge::server_log as log;
+use alpha_server::server::Server;
+use alpha_server::server_config::ServerConfig;
+use alpha_server::server_log as log;
 
 static STOP: AtomicBool = AtomicBool::new(false);
 

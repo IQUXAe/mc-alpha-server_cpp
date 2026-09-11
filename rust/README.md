@@ -1,13 +1,13 @@
 # Rust server sources
 
-`alpha_bridge/` is the whole server: a library with the game logic plus
-the `alpha_bridge` binary (`src/main.rs`).
+`alpha_server/` is the whole server: a library with the game logic plus
+the `alpha_server` binary (`src/main.rs`).
 
 ## Build & test
 
 ```bash
-cd rust/alpha_bridge
-cargo build --release   # binary at target/release/alpha_bridge
+cd rust/alpha_server
+cargo build --release   # binary at target/release/alpha_server
 cargo test              # full suite (world, entities, sessions, server)
 ```
 

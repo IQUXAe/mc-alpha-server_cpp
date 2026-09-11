@@ -1,5 +1,5 @@
 [package]
-name = "alpha_bridge"
+name = "alpha_server"
 version = "0.1.0"
 edition = "2021"
 
