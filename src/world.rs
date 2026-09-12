@@ -115,9 +115,14 @@ pub struct World {
     /// Spawn switches (mirror `isSpawnMonsters/isSpawnAnimals`).
     pub spawn_monsters: bool,
     pub spawn_animals: bool,
-    /// Scheduled block updates keyed by (time, x, y, z) like the C++
-    /// `scheduledTicks` set (duplicate keys keep the FIRST entry).
-    scheduled: BTreeMap<(i64, i32, i32, i32), u8>,
+    /// Scheduled block updates keyed by (time, x, y, z, id) like the Java
+    /// `scheduledTickTreeSet` (the id is part of the entry identity, same
+    /// as `scheduledTickSet`).
+    scheduled: BTreeMap<(i64, i32, i32, i32, u8), ()>,
+    /// Membership mirror of `scheduled` for O(1) dedup by (x, y, z, id)
+    /// (Java `scheduledTickSet`); the BTreeMap scan per schedule was
+    /// quadratic under fluid/fire load and stalled the tick loop.
+    scheduled_set: std::collections::HashSet<(i32, i32, i32, u8)>,
     /// Leaves-decay search guard (mirrors the singleton `BlockLeaves`
     /// instance field threaded through the decay drivers).
     leaves_guard: i32,
@@ -149,6 +154,10 @@ pub struct World {
     /// for `EntityTNTPrimed`: the block is already air, the blast lands at
     /// radius 4 when the fuse runs out — 80 ticks hand-lit, 10..30 chained).
     pub pending_tnt: Vec<(i32, i32, i32, i32)>,
+    /// Per-tick cache of live player positions for despawn distance checks
+    /// (rebuilt once per tick; per-mob scans allocated a Vec each and made
+    /// the mob pass quadratic).
+    player_pos_cache: (i64, Vec<[f64; 3]>),
     /// Population guard (mirrors `World::isPopulating`): decoration
     /// sets bypass skylight regen exactly like the C++ populate path
     /// (the write-back regenerates explicitly instead).
@@ -193,6 +202,7 @@ impl World {
             spawn_monsters: true,
             spawn_animals: true,
             scheduled: BTreeMap::new(),
+            scheduled_set: std::collections::HashSet::new(),
             leaves_guard: 0,
             unload_radius: 10,
             unloaded: HashMap::new(),
@@ -201,6 +211,7 @@ impl World {
             item_pickups: Vec::new(),
             death_events: Vec::new(),
             pending_tnt: Vec::new(),
+            player_pos_cache: (-1, Vec::new()),
             populating: false,
             generator: None,
             chunks: HashMap::new(),
@@ -1936,16 +1947,27 @@ mod tests {
         w.tick_world();
         assert_eq!(w.scheduled.len(), 1);
         assert_eq!(w.get_block_id(5, 66, 5), 0);
-        // Duplicate keys keep the first entry like the C++ set.
+        // Same cell, different ids: Java keeps both (identity includes
+        // the id); same cell+id twice keeps one.
         w.schedule_block_update(7, 66, 7, 13, 2);
         w.schedule_block_update(7, 66, 7, 12, 2);
-        let dups: Vec<u8> = w
+        w.schedule_block_update(7, 66, 7, 13, 2);
+        let mut dups: Vec<u8> = w
             .scheduled
             .iter()
-            .filter(|((_, x, y, z), _)| (*x, *y, *z) == (7, 66, 7))
-            .map(|(_, v)| *v)
+            .filter(|((_, x, y, z, _), _)| (*x, *y, *z) == (7, 66, 7))
+            .map(|((_, _, _, _, id), _)| *id)
             .collect();
-        assert_eq!(dups, vec![13]);
+        dups.sort_unstable();
+        assert_eq!(dups, vec![12, 13]);
+        // Processed entries free the dedup slot: re-scheduling the same
+        // cell+id afterwards queues again (guards the set/map sync).
+        for _ in 0..5 {
+            w.tick_world();
+        }
+        assert!(w.scheduled.is_empty());
+        w.schedule_block_update(7, 66, 7, 12, 0);
+        assert_eq!(w.scheduled.len(), 1);
     }
 
 
@@ -3653,18 +3675,22 @@ impl World {
             Some(e) if !e.body().dead => (e.body().pos[0], e.body().pos[1], e.body().pos[2]),
             _ => return true,
         };
-        let mut best: Option<f64> = None;
-        for oid in self.entities.alive_ids() {
-            let (qx, qy, qz, is_player) = match self.entities.get(oid) {
-                Some(Entity::Player(p)) if !p.living.body.dead => {
-                    (p.living.body.pos[0], p.living.body.pos[1], p.living.body.pos[2], true)
+        // Rebuild the player-position cache once per tick (players are few;
+        // scanning them per mob is cheap, allocating per mob is not).
+        if self.player_pos_cache.0 != self.time {
+            let mut pp = Vec::new();
+            for oid in self.entities.alive_ids() {
+                if let Some(Entity::Player(p)) = self.entities.get(oid) {
+                    if !p.living.body.dead {
+                        pp.push(p.living.body.pos);
+                    }
                 }
-                _ => continue,
-            };
-            if !is_player {
-                continue;
             }
-            let (dx, dy, dz) = (qx - px, qy - py, qz - pz);
+            self.player_pos_cache = (self.time, pp);
+        }
+        let mut best: Option<f64> = None;
+        for q in self.player_pos_cache.1.clone() {
+            let (dx, dy, dz) = (q[0] - px, q[1] - py, q[2] - pz);
             let d2 = dx * dx + dy * dy + dz * dz;
             best = Some(best.map_or(d2, |b: f64| b.min(d2)));
         }
@@ -6034,12 +6060,10 @@ impl World {
         if !self.chunks_exist_radius(x, z, 8) {
             return;
         }
-        if self.scheduled.values().zip(self.scheduled.keys()).any(|(v, k)| {
-            *v == block_id && k.1 == x && k.2 == y && k.3 == z
-        }) {
+        if !self.scheduled_set.insert((x, y, z, block_id)) {
             return;
         }
-        self.scheduled.entry((self.time + delay as i64, x, y, z)).or_insert(block_id);
+        self.scheduled.entry((self.time + delay as i64, x, y, z, block_id)).or_insert(());
     }
 
     /// Loaded-area check for a block radius (mirrors `checkChunksExist`).
@@ -6061,15 +6085,16 @@ impl World {
     fn process_scheduled_ticks(&mut self) {
         let mut ran = 0;
         while ran < 1000 {
-            let next = self.scheduled.iter().next().map(|(k, v)| (*k, *v));
-            let ((t, x, y, z), bid) = match next {
+            let next = self.scheduled.iter().next().map(|(k, _)| *k);
+            let (t, x, y, z, bid) = match next {
                 Some(n) => n,
                 None => break,
             };
             if t > self.time {
                 break;
             }
-            self.scheduled.remove(&(t, x, y, z));
+            self.scheduled.remove(&(t, x, y, z, bid));
+            self.scheduled_set.remove(&(x, y, z, bid));
             ran += 1;
             // Java processes only ticks whose radius-8 surroundings are
             // loaded (World.scheduleBlockUpdate/process path).
