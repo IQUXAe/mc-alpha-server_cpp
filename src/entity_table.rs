@@ -285,6 +285,9 @@ pub struct MobEnt {
     pub attack_cooldown: i32,
     pub target_timer: i32,
     pub burn_ticks: i32,
+    /// Despawn age (mirrors `field_9132_bn`): ++ per tick, dead past
+    /// 128 blocks or (600 + 1/800 roll) past 32 blocks.
+    pub age: i32,
     pub path: Vec<[i32; 3]>,
     pub path_index: usize,
     /// Creeper fuse state (`swellTime_` / `swellDirection_`): counts up
@@ -309,6 +312,7 @@ impl MobEnt {
             attack_cooldown: 0,
             target_timer: 0,
             burn_ticks: 0,
+            age: 0,
             path: Vec::new(),
             path_index: 0,
             swell_time: 0,
@@ -325,6 +329,8 @@ pub struct AnimalEnt {
     /// Pig saddle (mirrors `EntityPig::saddled`, NBT `Saddle`).
     pub saddled: bool,
     pub egg_timer: i32,
+    /// Despawn age, same rules as mobs (vanilla counts animals too).
+    pub age: i32,
     pub path: Vec<[i32; 3]>,
     pub path_index: usize,
 }
@@ -349,6 +355,7 @@ impl AnimalEnt {
             sheared: false,
             saddled: false,
             egg_timer: 6000,
+            age: 0,
             path: Vec::new(),
             path_index: 0,
         }

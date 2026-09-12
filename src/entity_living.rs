@@ -258,6 +258,7 @@ struct FlyOut {
 pub struct MoveFeedback {
     pub on_ground: bool,
     pub collided_vert: bool,
+    pub collided_horiz: bool,
     pub pos_y: f64,
 }
 
@@ -282,6 +283,13 @@ pub struct HeadingIo {
 /// Shared heading core (mirrors `EntityLiving::moveEntityWithHeading`).
 /// World answers arrive as closures so both the FFI shell and the native
 /// world use this exact flow. Returns false when the move itself fails.
+///
+/// Java reference (`EntityLiving.java:425-480`):
+/// - water branch: accel 0.02, damping 0.8, gravity -0.02;
+/// - lava branch: accel 0.02, damping 0.5, gravity -0.02;
+/// - swim-up: horizontal collision => motionY = 0.3 (no jump needed);
+/// - ground friction = block slipperiness * 0.91 (0.6 default, 0.98 ice);
+/// - ladder clamp + climb use horizontal collision, not vertical.
 pub fn living_heading_run(
     strafe: f32,
     forward: f32,
@@ -290,10 +298,12 @@ pub fn living_heading_run(
     yaw: f32,
     io: &mut HeadingIo,
     touching_liquid: bool,
+    in_lava: bool,
+    ground_friction: f32,
     ladder: &mut dyn FnMut() -> bool,
     do_move: &mut dyn FnMut(f64, f64, f64, &mut MoveFeedback) -> bool,
 ) -> bool {
-    let mut fb = MoveFeedback { on_ground: false, collided_vert: false, pos_y: 0.0 };
+    let mut fb = MoveFeedback { on_ground: false, collided_vert: false, collided_horiz: false, pos_y: 0.0 };
 
     if jumping {
         if touching_liquid {
@@ -309,21 +319,22 @@ pub fn living_heading_run(
             io.motion_x += fly.dmx as f64;
             io.motion_z += fly.dmz as f64;
         }
-        let start_y = io.motion_y;
         if !do_move(io.motion_x, io.motion_y, io.motion_z, &mut fb) {
             return false;
         }
-        io.motion_x *= 0.8;
-        io.motion_y *= 0.8;
-        io.motion_z *= 0.8;
+        let damp = if in_lava { 0.5 } else { 0.8 };
+        io.motion_x *= damp;
+        io.motion_y *= damp;
+        io.motion_z *= damp;
         io.motion_y -= 0.02;
-        if (fb.on_ground || fb.pos_y <= start_y) && jumping {
+        // Swim-up: pushing horizontally against an obstacle floats up.
+        if fb.collided_horiz {
             io.motion_y = 0.3;
         }
         return true;
     }
 
-    let friction: f32 = if on_ground { 0.546 } else { 0.91 };
+    let friction: f32 = if on_ground { ground_friction * 0.91 } else { 0.91 };
     let accel = 0.16277136f32 / (friction * friction * friction);
     let applied = if on_ground { 0.1f32 * accel } else { 0.02f32 };
     let mut fly = FlyOut { dmx: 0.0, dmz: 0.0 };
@@ -343,7 +354,9 @@ pub fn living_heading_run(
         return false;
     }
 
-    if fb.collided_vert && ladder() {
+    // Ladder climb uses horizontal collision (pressed against the wall),
+    // not vertical (Java EntityLiving:472).
+    if fb.collided_horiz && ladder() {
         io.motion_y = 0.2;
     }
 
@@ -371,7 +384,8 @@ pub fn alpha_living_heading(
         return false;
     };
     let mut mover = |dx: f64, dy: f64, dz: f64, fb: &mut MoveFeedback| do_move(dx, dy, dz, fb);
-    living_heading_run(strafe, forward, jumping, on_ground, yaw, io, liquid, &mut ladder, &mut mover)
+    // FFI shell has no lava/friction context: assume water + default ground.
+    living_heading_run(strafe, forward, jumping, on_ground, yaw, io, liquid, false, 0.6, &mut ladder, &mut mover)
 }
 
 fn fly_apply(strafe: f32, forward: f32, acceleration: f32, yaw: f32, out: &mut FlyOut) -> bool {

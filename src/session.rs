@@ -1124,7 +1124,9 @@ impl PlaySession {
         }
         if let Some(e) = ctx.world.entities.get_mut(me) {
             e.body_mut().fall_distance = fall_res.new_fall_distance;
-            e.body_mut().on_ground = on_ground;
+            // Server-authoritative ground: move_body just computed on_ground
+            // from collisions — never trust the client's flag (else no-fall
+            // cheats). Vanilla derives damage from the post-move state.
         }
         if let Some(e) = ctx.world.entities.get(me) {
             self.last = e.body().pos;
@@ -2497,6 +2499,10 @@ impl PlaySession {
             }
             if bite.heal > 0 {
                 if let Some(Entity::Player(p)) = ctx.world.entities.get_mut(me) {
+                    // Java EntityLiving.heal:283 also resets hurtResist = max/2.
+                    if bite.heal > 0 && !p.living.body.dead && p.living.health > 0 {
+                        p.living.hurt_resist = p.living.max_hurt_resist / 2;
+                    }
                     p.living.health = crate::entity_living::alpha_living_heal(
                         p.living.health,
                         p.living.max_health,

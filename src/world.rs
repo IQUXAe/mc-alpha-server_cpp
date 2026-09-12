@@ -488,9 +488,13 @@ impl World {
     /// without the soil-walking sound, which arrives with the block phase).
     /// Returns the fall event distance when `onFall` must fire.
     pub fn move_body(&mut self, id: EntityId, dx: f64, dy: f64, dz: f64) -> Option<f32> {
-        let (orig, no_clip, step, was_ground, suppress, fall) = match self.entities.get(id) {
+        let (orig, no_clip, step, was_ground, suppress, fall, sneaking) = match self.entities.get(id) {
             Some(e) => {
                 let b = e.body();
+                let sneak = match e {
+                    Entity::Player(p) => p.living.sneaking,
+                    _ => false,
+                };
                 (
                     b.bounding_box.clone(),
                     b.no_clip,
@@ -498,12 +502,40 @@ impl World {
                     b.on_ground,
                     b.suppress_fall_state,
                     b.fall_distance,
+                    sneak,
                 )
             }
             None => return None,
         };
         let (old_x, old_y, old_z) = (dx, dy, dz);
         let (mut mx, mut my, mut mz) = (dx, dy, dz);
+        // Sneak edge-stop (Java Entity.moveEntity:212-234): on ground while
+        // sneaking, trim each horizontal axis in 0.05 steps so the destination
+        // still has ground below.
+        if was_ground && sneaking {
+            let mut nx = mx;
+            while nx != 0.0 && self.colliding_boxes(&orig.get_offset_bounding_box(nx, -1.0, 0.0)).is_empty() {
+                if nx < 0.05 && nx >= -0.05 {
+                    nx = 0.0;
+                } else if nx > 0.0 {
+                    nx -= 0.05;
+                } else {
+                    nx += 0.05;
+                }
+            }
+            mx = nx;
+            let mut nz = mz;
+            while nz != 0.0 && self.colliding_boxes(&orig.get_offset_bounding_box(0.0, -1.0, nz)).is_empty() {
+                if nz < 0.05 && nz >= -0.05 {
+                    nz = 0.0;
+                } else if nz > 0.0 {
+                    nz -= 0.05;
+                } else {
+                    nz += 0.05;
+                }
+            }
+            mz = nz;
+        }
         let mut work = orig.clone();
         if no_clip {
             if let Some(e) = self.entities.get_mut(id) {
@@ -1171,6 +1203,7 @@ mod tests {
             attack_cooldown: 0,
             target_timer: 0,
             burn_ticks: 0,
+            age: 0,
             path: Vec::new(),
             path_index: 0,
             swell_time: 0,
@@ -2953,6 +2986,32 @@ impl World {
         self.material_at(x, y, z).is_liquid() || self.material_at(x, y + 1, z).is_liquid()
     }
 
+    /// Lava touch (mirrors the lava branch of `EntityLiving.func_148_c`):
+    /// lava at the feet or the block above damps 0.5 instead of 0.8.
+    fn touching_lava(&self, id: EntityId) -> bool {
+        let (px, min_y, pz) = match self.entities.get(id) {
+            Some(e) => (e.body().pos[0], e.body().bounding_box.min_y, e.body().pos[2]),
+            None => return false,
+        };
+        let (x, y, z) = (floor_double(px), floor_double(min_y), floor_double(pz));
+        self.material_at(x, y, z) == Material::LAVA || self.material_at(x, y + 1, z) == Material::LAVA
+    }
+
+    /// Ground slipperiness under the feet (mirrors `Block.slipperiness`
+    /// read in `EntityLiving.func_148_c`): 0.98 on ice, 0.6 default.
+    fn ground_slipperiness(&self, id: EntityId) -> f32 {
+        let (px, min_y, pz) = match self.entities.get(id) {
+            Some(e) => (e.body().pos[0], e.body().bounding_box.min_y, e.body().pos[2]),
+            None => return 0.6,
+        };
+        let (x, y, z) = (floor_double(px), floor_double(min_y) - 1, floor_double(pz));
+        if self.get_block_id(x, y, z) == 79 {
+            0.98
+        } else {
+            0.6
+        }
+    }
+
     /// Ladder grip (mirrors `isOnLadder`): ladders for everyone, any
     /// adjacent solid block for spiders (the Java wall-climb).
     fn ladder_for(&self, id: EntityId) -> bool {
@@ -3007,7 +3066,28 @@ impl World {
         if !self.target_alive(near) || !self.mob_aggro_ok(kind, id) {
             return None;
         }
+        // Java EntityMobs.func_158_i: only players the mob can see
+        // (eye-to-eye raytrace clear, EntityLiving.func_145_g).
+        if !self.can_entity_see(id, near) {
+            return None;
+        }
         Some(near)
+    }
+
+    /// Eye-to-eye visibility (mirrors `EntityLiving.func_145_g`): raytrace
+    /// between eye heights (pos + height*0.85) must be clear.
+    fn can_entity_see(&self, id: EntityId, target: EntityId) -> bool {
+        let (sp, sh) = match self.entities.get(id) {
+            Some(e) => (e.body().pos, e.body().height as f64),
+            None => return false,
+        };
+        let (tp, th) = match self.entities.get(target) {
+            Some(e) => (e.body().pos, e.body().height as f64),
+            None => return false,
+        };
+        let from = [sp[0], sp[1] + sh * 0.85, sp[2]];
+        let to = [tp[0], tp[1] + th * 0.85, tp[2]];
+        self.ray_trace_clear(from, to)
     }
 
     /// Mob target refresh (mirrors the head of `EntityMob::updateAI`):
@@ -3371,6 +3451,8 @@ impl World {
             _ => return None,
         };
         let liquid = self.touching_liquid(id);
+        let lava = self.touching_lava(id);
+        let friction = self.ground_slipperiness(id);
         let world = self as *mut World;
         // SAFETY: re-entrant raw borrows, disjoint by construction:
         // Raw back-channel so the pre-move leg can sync the heading core's
@@ -3392,12 +3474,13 @@ impl World {
                 if let Some(e) = w.entities.get(id) {
                     fb.on_ground = e.body().on_ground;
                     fb.collided_vert = e.body().collided_vert;
+                    fb.collided_horiz = e.body().collided_horiz;
                     fb.pos_y = e.body().pos[1];
                 }
             }
             true
         };
-        living_heading_run(strafe, forward, jumping, on_ground, yaw, &mut io, liquid, &mut ladder, &mut mover);
+        living_heading_run(strafe, forward, jumping, on_ground, yaw, &mut io, liquid, lava, friction, &mut ladder, &mut mover);
         // Only motion round-trips through `io` now: fall state already
         // lives in the row (synced pre-move, accumulated by `move_body`).
         match self.entities.get_mut(id) {
@@ -3523,11 +3606,89 @@ impl World {
         (strafe, forward)
     }
 
+    /// Despawn (mirrors `EntityLiving.func_152_d`: ++age; dead past 128
+    /// blocks from the nearest player, or past age 600 + 1/800 roll past
+    /// 32 blocks). Nearest-player search covers all players (the -1.0D
+    /// radius means "any"). Returns true when the row died here.
+    fn despawn_check(&mut self, id: EntityId) -> bool {
+        let (px, py, pz) = match self.entities.get(id) {
+            Some(e) if !e.body().dead => (e.body().pos[0], e.body().pos[1], e.body().pos[2]),
+            _ => return true,
+        };
+        let mut best: Option<f64> = None;
+        for oid in self.entities.alive_ids() {
+            let (qx, qy, qz, is_player) = match self.entities.get(oid) {
+                Some(Entity::Player(p)) if !p.living.body.dead => {
+                    (p.living.body.pos[0], p.living.body.pos[1], p.living.body.pos[2], true)
+                }
+                _ => continue,
+            };
+            if !is_player {
+                continue;
+            }
+            let (dx, dy, dz) = (qx - px, qy - py, qz - pz);
+            let d2 = dx * dx + dy * dy + dz * dz;
+            best = Some(best.map_or(d2, |b: f64| b.min(d2)));
+        }
+        let Some(d2) = best else {
+            // No live players: still age the row, never despawn.
+            match self.entities.get_mut(id) {
+                Some(Entity::Mob(m)) => m.age += 1,
+                Some(Entity::Animal(a)) => a.age += 1,
+                _ => {}
+            }
+            return false;
+        };
+        if d2 > 16384.0 {
+            if let Some(e) = self.entities.get_mut(id) {
+                e.body_mut().dead = true;
+            }
+            return true;
+        }
+        let age = match self.entities.get_mut(id) {
+            Some(Entity::Mob(m)) => {
+                m.age += 1;
+                m.age
+            }
+            Some(Entity::Animal(a)) => {
+                a.age += 1;
+                a.age
+            }
+            _ => return true,
+        };
+        if age > 600 && self.rng.next_int_bound(800) == 0 {
+            if d2 < 1024.0 {
+                match self.entities.get_mut(id) {
+                    Some(Entity::Mob(m)) => m.age = 0,
+                    Some(Entity::Animal(a)) => a.age = 0,
+                    _ => {}
+                }
+            } else {
+                if let Some(e) = self.entities.get_mut(id) {
+                    e.body_mut().dead = true;
+                }
+                return true;
+            }
+        }
+        false
+    }
+
     /// Mob tick (mirrors `EntityMob::tick`): living maintenance, cooldown
     /// and burn schedule, daylight ignition, AI, heading move with fall
     /// damage, and neighbor shoves. Like C++, the AI and move still run
     /// when burn damage kills mid-tick.
     pub fn tick_mob(&mut self, id: EntityId) {
+        // Peaceful (difficulty 0): mobs die instead of ticking
+        // (Java EntityMobs.onUpdate: monstersEnabled == 0 -> dead).
+        if self.difficulty == 0 {
+            if let Some(e) = self.entities.get_mut(id) {
+                e.body_mut().dead = true;
+            }
+            return;
+        }
+        if self.despawn_check(id) {
+            return;
+        }
         self.tick_living(id);
         let kind = match self.entities.get(id) {
             Some(Entity::Mob(m)) if !m.living.body.dead => m.kind,
@@ -3568,6 +3729,9 @@ impl World {
     /// shared creature AI, heading move with fall damage (chickens override
     /// `onFall` to a no-op), chicken extras, and neighbor shoves.
     pub fn tick_animal(&mut self, id: EntityId) {
+        if self.despawn_check(id) {
+            return;
+        }
         self.tick_living(id);
         let kind = match self.entities.get(id) {
             Some(Entity::Animal(a)) if !a.living.body.dead => a.kind,

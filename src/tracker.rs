@@ -730,6 +730,7 @@ mod tests {
             attack_cooldown: 0,
             target_timer: 0,
             burn_ticks: 0,
+            age: 0,
             path: Vec::new(),
             path_index: 0,
             swell_time: 0,
@@ -749,6 +750,7 @@ mod tests {
             sheared: false,
             saddled: false,
             egg_timer: 6000,
+            age: 0,
             path: Vec::new(),
             path_index: 0,
         }));
