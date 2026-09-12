@@ -1,10 +1,9 @@
-//! Native entity table: the Rust-owned replacement for the C++ `Entity*`
-//! hierarchy (mirrors Java `Entity` identity and mount semantics).
+//! Native entity table (mirrors Java `Entity` identity and mount semantics).
 //!
 //! Design: one `Body` with every base-`Entity` field, plus per-kind payloads
-//! in the `Entity` enum. `dynamic_cast` becomes `match`; the mount graph
+//! in the `Entity` enum. Downcasting becomes `match`; the mount graph
 //! (`ridingEntityId` / `riddenByEntityId`) is manipulated through table
-//! methods that tolerate missing rows exactly like the C++ null checks.
+//! methods that tolerate missing rows.
 //!
 //! Physics, damage, and steering keep living in `entity_physics`,
 //! `entity_living`, and `entity_ai`; this module owns identity, mounting,

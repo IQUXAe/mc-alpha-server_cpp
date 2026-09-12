@@ -1,12 +1,9 @@
 //! Native persistence: gzip-NBT chunk blobs (byte-identical schema to the
 //! legacy `c.*.dat` files and the LevelDB values), `level.dat`, player
-//! files, and the LevelDB chunk store via `rusty-leveldb` (pure Rust, so
-//! the cutout drops the C++ leveldb dependency).
+//! files, and the LevelDB chunk store via `rusty-leveldb`.
 //!
-//! Tag schema mirrors `chunk_loader.rs` / `player_storage.rs` / the
-//! `AlphaLevelDat` codec field-for-field; round-trip tests plus a live-DB
-//! decode prove parity instead of sharing the raw-pointer structs (which
-//! would need meticulous manual freeing under `panic = "abort"`).
+//! Tag schema mirrors the legacy chunk/player/`level.dat` codecs
+//! field-for-field; round-trip tests plus a live-DB decode prove parity.
 //!
 //! Deliberate scope notes:
 //! - Tile ticking (furnaces) is the server slice's; storage rides here.

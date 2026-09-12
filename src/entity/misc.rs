@@ -1,10 +1,9 @@
-//! Small-entity kernels ported from C++ `EntityItem`, `EntityFallingSand`,
-//! `EntityBoat`, and `EntityArrow` (mirrors Java `EntityItem`,
+//! Small-entity kernels (mirrors Java `EntityItem`,
 //! `EntityFallingSand`, `EntityBoat`, `EntityArrow`).
 //!
 //! Only closed-form pieces move: push-out side selection, friction damping,
 //! falling-sand landing decisions, water-fraction scan math, and yaw/rider
-//! geometry. Entity pointers, world mutation, and drops stay in C++.
+//! geometry. Entity storage, world mutation, and drops live in `world`.
 
 /// Push-out side for an item stuck in a solid block (mirrors
 /// `EntityItem::pushOutOfBlocks` scoring). Free-face flags come in

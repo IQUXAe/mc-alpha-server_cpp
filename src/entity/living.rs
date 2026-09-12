@@ -1,11 +1,11 @@
-//! Living-entity logic ported from C++ `EntityLiving` (mirrors Java
-//! `EntityLiving`): healing, the damage pipeline, per-tick suffocation /
-//! drowning / timers, movement helpers, and fall damage.
+//! Living-entity logic (mirrors Java `EntityLiving`): healing, the damage
+//! pipeline, per-tick suffocation / drowning / timers, movement helpers,
+//! and fall damage.
 //!
-//! Split along the virtual boundary: Rust owns damage math, knockback, and
-//! movement integration; C++ keeps virtual dispatch (`onDeath`, `onFall`
+//! Split along the virtual boundary: this module owns damage math,
+//! knockback, and movement integration; dispatch (`onDeath`, `onFall`
 //! overrides elsewhere, `sendEntityStatus`), the entity table, and world
-//! queries (passed in as scalars or narrow callbacks).
+//! queries arrive as scalars or narrow callbacks.
 //!
 //! RNG: the old knockback jitter used `std::rand()/RAND_MAX`; it now draws
 //! `next_f01` (uniform `[0,1)`, same stream family as the spawner draws).

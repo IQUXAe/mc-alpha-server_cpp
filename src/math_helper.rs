@@ -1,15 +1,15 @@
-//! Port of C++ `core/MathHelper.h`.
+//! Math helpers (mirrors Java `MathHelper.java`).
 //!
 //! Bit-for-bit notes:
-//! - `SIN_TABLE` fill matches the C++ `init()` loop:
+//! - `SIN_TABLE` fill matches the vanilla `init()` loop:
 //!   `sin(i * PI * 2 / 65536)` computed in `f64`, narrowed to `f32`.
-//! - `sin` / `cos` indexing matches C++:
+//! - `sin` / `cos` indexing matches vanilla:
 //!   `(int)(v * 10430.378f [+ 16384.0f]) & 0xFFFF`.
-//!   The `as i32` cast truncates toward zero like the C++ cast for
+//!   The `as i32` cast truncates toward zero like the Java cast for
 //!   in-range values.
 //! - `floor_float` / `floor_double` use truncation plus adjust, not
-//!   `.floor()`, to mirror the C++ quirk exactly.
-//! - `abs` uses a manual branch so `-0.0` stays `-0.0`, like C++
+//!   `.floor()`, to mirror the vanilla quirk exactly.
+//! - `abs` uses a manual branch so `-0.0` stays `-0.0`, like vanilla
 //!   `v >= 0 ? v : -v` (whereas `f32::abs` maps `-0.0` to `+0.0`).
 //! - `sqrt_float` widens to `f64` first, matching C++
 //!   `sqrt((double)v)` narrowed back to `f32`.

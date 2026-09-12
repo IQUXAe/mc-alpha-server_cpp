@@ -1,29 +1,23 @@
-//! Safe port of `src/world/Chunk.h` / `src/world/Chunk.cpp` (data + light only).
+//! Chunk data + light (mirrors Java `Chunk.java`).
 //!
 //! Mapping notes:
 //! - Dimensions match Alpha 1.2.6 exactly: 16 x 128 x 16, volume 32768.
-//! - Index formula is 1:1 with C++: `(x << 11) | (z << 7) | y`.
+//! - Index formula: `(x << 11) | (z << 7) | y`.
 //! - `blocks` is an owned `[u8; 32768]`; `data` / `skylight` / `blocklight`
-//!   reuse [`crate::nibble::NibbleArray`] (16384 bytes each, 1:1 nibble layout).
-//! - `height_map` is an owned `[u8; 256]`, indexed `(z << 4) | x` like C++.
+//!   reuse [`crate::nibble::NibbleArray`] (16384 bytes each, same nibble layout).
+//! - `height_map` is an owned `[u8; 256]`, indexed `(z << 4) | x`.
 //! - `lightOpacity` / `lightValue` are NOT duplicated here: they are read from
 //!   [`crate::block`] via `block_properties_get` (single source of truth).
 //! - Out-of-range policy: reads return `0`, writes are no-ops returning
-//!   `false` where the C++ signature returns `bool`. This mirrors the safe
-//!   `nibble.rs` behaviour. Note the C++ `setBlockID` family performs no
-//!   bounds check and would write out of bounds; the Rust port deliberately
-//!   hardens that path.
-//! - `is_modified` mirrors C++ `isModified`. C++ only sets it when
-//!   `worldObj && !isPopulating`; the Rust port has no `World`, so any
-//!   successful in-bounds mutation sets it (equivalent to the C++
-//!   world-present path). OOB no-ops never dirty the chunk.
+//!   `false`. Vanilla performs no bounds check and would write out of
+//!   bounds; this port deliberately hardens that path.
+//! - `is_modified` is set on any successful in-bounds mutation
+//!   (equivalent to the world-present path). OOB no-ops never dirty the chunk.
 //!
-//! Deferred (require `World`, entities, or I/O — intentionally not ported):
-//! - `World* worldObj` / cross-chunk lookup (`getChunkFromBlockCoords`)
-//! - `TileEntity` map (`addTileEntity` / `removeTileEntity` / `getTileEntity`)
-//! - Auto `generateSkylightMap()` call inside `setBlockIDWithMetadata`
-//!   (C++ only runs it when `worldObj` is present; with a null world — as in
-//!   `TestChunk.cpp` — it is skipped, same as here where the caller decides)
+//! Deferred (require `World`, entities, or I/O — intentionally not here):
+//! - `World` back-pointer / cross-chunk lookup
+//! - `TileEntity` map
+//! - Auto `generateSkylightMap()` call inside block set (the caller decides)
 //! - `isTerrainPopulated` is stored but never acted on (needs generator).
 
 use crate::block::table::block_properties_get;

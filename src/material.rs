@@ -1,20 +1,19 @@
-//! Port of `src/core/Material.h` + `src/core/Material.cpp`.
+//! Block materials (mirrors Java `Material.java`).
 //!
-//! Flag layout is 1:1 with C++ (`isLiquid`, `isSolid`, `canBlockGrass`,
+//! Flag layout (`isLiquid`, `isSolid`, `canBlockGrass`,
 //! `blocksMovement`, plus the `canBurn` flag set by `setBurning()`).
 //!
-//! The C++ subclasses are represented as `const` constructors instead of
-//! inheritance: `Material::transparent()` (`MaterialTransparent`),
-//! `Material::liquid()` (`MaterialLiquid`) and `Material::logic()`
-//! (`MaterialLogic`). Static instances are associated constants with the
-//! exact flags from `Material.cpp`, including the burnable-init pass that
+//! The Java subclasses are represented as `const` constructors instead of
+//! inheritance: `Material::transparent`, `Material::liquid` and
+//! `Material::logic`. Static instances are associated constants with the
+//! exact vanilla flags, including the burnable-init pass that
 //! marks wood, leaves, cloth and tnt as burning.
 
 /// Block material flags. `Copy` so the shared statics stay usable anywhere.
 ///
 /// Equality trap (caught live): AIR, PLANTS, FIRE, CIRCUITS, and SNOW all
-/// carry `(false, false, false, false)`, so `==` aliases them — C++
-/// compares singleton *pointers* and never does. Never test "is air" with
+/// carry `(false, false, false, false)`, so `==` aliases them — vanilla
+/// compares singleton references and never does. Never test "is air" with
 /// `== Material::AIR`; compare the material id byte (see `is_air_material`
 /// in `world.rs`) or match the specific const you mean.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -1,7 +1,5 @@
-//! Server administration ported from C++ `ServerConfigurationManager`
-//! (ban/op/IP lists) and `NetServerHandler::handleCommand` (player
-//! `/give` and `/tp`) — mirrors Java `ServerConfigurationManager` lists
-//! and vanilla op commands.
+//! Server administration (mirrors Java `ServerConfigurationManager`
+//! ban/op/IP lists and vanilla op commands).
 //!
 //! Two layers:
 //! - Name lists: lowercase normalization, `banned-*.txt`/`ops.txt` file

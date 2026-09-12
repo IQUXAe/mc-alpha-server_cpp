@@ -1,14 +1,14 @@
-//! Port of `src/core/PropertyManager.h`.
+//! Server properties (mirrors Java `PropertyManager`).
 //!
-//! Format is 1:1 with C++: `key=value` lines, `#` comment lines and empty
+//! Format: `key=value` lines, `#` comment lines and empty
 //! lines skipped, lines without `=` ignored. Keys lose trailing `' '` and
-//! values lose leading `' '` (spaces only, exactly like the C++ trims).
-//! The first occurrence of a key wins (`emplace` semantics). `save()` writes
-//! the `#Minecraft server properties` header followed by `key=value` lines.
+//! values lose leading `' '` (spaces only). The first occurrence of a key
+//! wins. `save()` writes the `#Minecraft server properties` header followed
+//! by `key=value` lines.
 //!
-//! This is the only ported module allowed to touch the filesystem: missing
+//! This is the only config module allowed to touch the filesystem: missing
 //! keys are persisted back via `save()`, and opening a missing file prints
-//! the same warning/generation notices as C++ before creating it.
+//! the same warning/generation notices before creating it.
 
 use std::collections::HashMap;
 use std::fs;
