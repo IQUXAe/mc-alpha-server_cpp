@@ -764,6 +764,9 @@ impl Server {
         if !self.world.save_player_to(&self.player_dir, eid) {
             log::warning(&format!("Failed to save player data for {username}"));
         }
+        // Drop the row explicitly: dead players are spared by the tick
+        // purge (respawn needs them), so logout must clean up itself.
+        self.world.entities.remove(eid);
         self.players.remove(&eid);
         if leave {
             self.broadcast_chat(format!("§e{username} left the game."));
@@ -1033,9 +1036,9 @@ impl Server {
         }
     }
 
-    /// Tracker pass (mirrors `EntityTracker::tick`): silently prune dead
-    /// rows, add newcomers, tick every live entity against the player
-    /// observers with the chunk-loaded gate, route the outbox.
+    /// Tracker pass (mirrors `EntityTracker::tick`): destroy packets for
+    /// retired entries (dead or vanished rows, e.g. killed mobs that used
+    /// to hang client-side), then per-entity updates for the live ones.
     fn tracker_tick(&mut self) {
         let mut ids = self.world.entities.alive_ids();
         ids.sort_unstable();
@@ -1047,7 +1050,15 @@ impl Server {
                 None => false,
             })
             .collect();
-        self.world.tracker.prune(&|id| live.contains(&id));
+        // Retire dead/vanished entries with destroy packets (mirrors
+        // `EntityTrackerEntry.func_604_a`), so killed mobs stop hanging
+        // client-side. Runs before the tick loop on a shared outbox.
+        let mut out = Vec::new();
+        let gone: Vec<EntityId> =
+            self.world.tracker.tracked_ids().into_iter().filter(|id| !live.contains(id)).collect();
+        for id in gone {
+            self.world.tracker.remove(id, &mut out);
+        }
         let observers: Vec<Observer> = live
             .iter()
             .filter_map(|id| match self.world.entities.get(*id) {
@@ -1099,7 +1110,6 @@ impl Server {
         let sessions = &self.sessions;
         let players = &self.players;
         let tracker = &mut self.world.tracker;
-        let mut out = Vec::new();
         for te in &tracked {
             tracker.add(te);
             tracker.tick_entity(
@@ -1127,7 +1137,7 @@ impl Server {
     /// to the item's watchers and picker (the client plays `random.pop`,
     /// flies the item over and removes it), then a full inventory sync for
     /// the picker. Drained before `tracker_tick` so Collect precedes the
-    /// silent prune of the dead item row.
+    /// destroy for the dead item row.
     fn drain_pickup_events(&mut self) {
         let pickups = std::mem::take(&mut self.world.item_pickups);
         if pickups.is_empty() {
@@ -1147,6 +1157,22 @@ impl Server {
                 }
             }
         }
+    }
+
+    /// Ship death animations (mirrors the status-3 broadcast in
+    /// `EntityLiving.onDeath` via `WorldServer.func_9206_a`): drained
+    /// before `tracker_tick` so the animation precedes the destroy packet
+    /// for the same tick's kills.
+    fn drain_death_events(&mut self) {
+        let deaths = std::mem::take(&mut self.world.death_events);
+        if deaths.is_empty() {
+            return;
+        }
+        let mut out = Vec::new();
+        for id in deaths {
+            self.world.tracker.death_fx(id, &mut out);
+        }
+        self.route_outbox(out);
     }
 
     /// Health watch (mirrors the `Packet8` send in
@@ -1212,6 +1238,7 @@ impl Server {
         }
         self.world.tick_world();
         self.drain_pickup_events();
+        self.drain_death_events();
         self.push_health_changes();
         if self.settings.auto_save_interval > 0
             && self.tick_count % self.settings.auto_save_interval as u64 == 0
@@ -1871,6 +1898,28 @@ mod tests {
         let (mut client, _cid) = pair(&mut srv);
         join(&mut srv, &mut client, "Steve");
         assert_eq!(srv.players.len(), 1);
+    }
+
+    #[test]
+    fn dead_mob_is_destroyed_for_watchers() {
+        // Killed mobs must vanish client-side: death status (38/3) then
+        // destroy (29). Before the tracker fix the prune was silent and
+        // corpses hung around frozen.
+        let mut srv = mk_server("");
+        let (mut client, _cid) = pair(&mut srv);
+        join(&mut srv, &mut client, "Steve");
+        let eid = *srv.players.keys().next().unwrap();
+        let pos = match srv.world.entities.get(eid) {
+            Some(e) => e.body().pos,
+            _ => panic!("player row"),
+        };
+        let mid = srv.world.entities.alloc_id();
+        let mut m = MobEnt::new(mid, MobKind::Zombie);
+        m.living.body.set_position(pos[0], pos[1], pos[2]);
+        srv.world.entities.insert(Entity::Mob(m));
+        assert_eq!(pump_match(&mut client, &mut srv, &|p| p.0 == 24).0, 24);
+        srv.world.attack_living(mid, 100, None);
+        assert_eq!(pump_match(&mut client, &mut srv, &|p| p.0 == 29).0, 29);
     }
 
     #[test]

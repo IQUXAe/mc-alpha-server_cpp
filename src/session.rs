@@ -1014,6 +1014,33 @@ impl PlaySession {
                 b.pitch = final_pitch;
                 b.on_ground = on_ground;
             }
+            // Fall bookkeeping still runs on stationary packets (vanilla
+            // runs Flying/Look through the same fall path): zero delta,
+            // client onGround, carried fall distance. Without this a
+            // landing reported without position change silently dropped
+            // the accumulated fall instead of converting it to damage.
+            let in_water = Self::in_water(ctx.world, me);
+            let fall =
+                ctx.world.entities.get(me).map(|e| e.body().fall_distance).unwrap_or(0.0);
+            let input = FfiMovementInput {
+                from_x: bx,
+                from_y: by,
+                from_z: bz,
+                to_x: bx,
+                to_y: by,
+                to_z: bz,
+                stance: by + 1.62,
+                on_ground,
+                is_in_water: in_water,
+                fall_distance: fall,
+            };
+            let res = alpha_movement_validate(&input);
+            if res.fall_damage > 0 {
+                ctx.world.attack_living(me, res.fall_damage, None);
+            }
+            if let Some(e) = ctx.world.entities.get_mut(me) {
+                e.body_mut().fall_distance = res.new_fall_distance;
+            }
             self.last = [bx, by, bz];
             return None;
         }
@@ -2909,6 +2936,66 @@ mod play_tests {
         assert_eq!((p.pos[0], p.pos[2]), (0.5, 0.5));
         assert_eq!(health_of(&w, player), 20);
         assert_eq!(sess.outbox[0], vec![9]);
+    }
+
+    #[test]
+    fn test_respawn_after_tick() {
+        // Live scenario: death, a server tick (purge must spare the player
+        // row), then the respawn packet. Before the purge fix the row was
+        // gone and the button silently did nothing.
+        let mut w = floor_world();
+        let ops = no_ops();
+        let player = spawn_player(&mut w, "Steve", 30.5, 64.0, 30.5);
+        w.attack_living(player, 100, None);
+        assert!(w.entities.get(player).unwrap().body().dead);
+        w.tick_world();
+        assert!(w.entities.get(player).is_some(), "dead player row survives purge");
+        let mut sess = PlaySession::new(player);
+        let mut bc = Vec::new();
+        assert!(sess.pump(&mut ctx(&mut w, &ops, &mut bc), PacketData::Respawn).is_none());
+        assert!(!w.entities.get(player).unwrap().body().dead);
+        assert_eq!(health_of(&w, player), 20);
+    }
+
+    #[test]
+    fn test_fall_damage_on_stationary_packet() {
+        // A landing reported without position change (Flying/Look) still
+        // converts carried fall distance to damage like vanilla.
+        let mut w = floor_world();
+        let ops = no_ops();
+        let player = spawn_player(&mut w, "Steve", 3.5, 64.0, 4.5);
+        if let Some(Entity::Player(p)) = w.entities.get_mut(player) {
+            p.living.body.fall_distance = 10.0;
+        }
+        let mut sess = PlaySession::new(player);
+        let mut bc = Vec::new();
+        assert!(sess.pump(&mut ctx(&mut w, &ops, &mut bc), PacketData::Flying { on_ground: true }).is_none());
+        assert_eq!(health_of(&w, player), 13);
+    }
+
+    #[test]
+    fn test_eating_pork_heals_instead_of_killing() {
+        // Regression probe for "pork kills at 2 hearts": with sane state
+        // the eat path strictly heals (4 + 3 = 7). A death here would mean
+        // max_health drifted to 0, not a food bug.
+        use crate::item_data::ITEM_PORK_RAW;
+        let mut w = floor_world();
+        let ops = no_ops();
+        let player = spawn_player(&mut w, "Steve", 3.5, 64.0, 4.5);
+        if let Some(Entity::Player(p)) = w.entities.get_mut(player) {
+            p.living.health = 4;
+        }
+        let mut sess = PlaySession::new(player);
+        let mut bc = Vec::new();
+        let pork = crate::inventory::FfiItemStack {
+            stack_size: 1,
+            animations_to_go: 0,
+            item_id: ITEM_PORK_RAW,
+            item_damage: 0,
+        };
+        assert!(sess.use_item_air(&mut ctx(&mut w, &ops, &mut bc), pork));
+        assert_eq!(health_of(&w, player), 7);
+        assert!(!w.entities.get(player).unwrap().body().dead);
     }
 
     #[test]

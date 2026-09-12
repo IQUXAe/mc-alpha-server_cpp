@@ -298,11 +298,10 @@ impl Tracker {
         self.entries.get(&id).map(|e| e.tracking.contains(&player)).unwrap_or(false)
     }
 
-    /// Silently drop entries the predicate rejects (mirrors the C++
-    /// `tick` erase of dead/missing rows; the logout destroy packet
-    /// stays in [`Tracker::remove`]).
-    pub fn prune(&mut self, keep: &dyn Fn(EntityId) -> bool) {
-        self.entries.retain(|id, _| keep(*id));
+    /// Currently tracked entity ids (the server retires entries whose
+    /// rows died or vanished, emitting destroy packets via `remove`).
+    pub fn tracked_ids(&self) -> Vec<EntityId> {
+        self.entries.keys().copied().collect()
     }
 
     /// Current watchers of an entity (mirrors `TrackerEntry.trackingPlayers`;
@@ -374,6 +373,13 @@ impl Tracker {
         if !self.is_tracking(item_id, picker_id) {
             out.push(Outbox { to: picker_id, bytes });
         }
+    }
+
+    /// Death animation (mirrors the `Packet38` status-3 broadcast in
+    /// `EntityLiving.onDeath` via `WorldServer.func_9206_a`).
+    pub fn death_fx(&self, id: EntityId, out: &mut Vec<Outbox>) {
+        let bytes = encode(RustPacket::EntityStatus { entity_id: id, status: 3 });
+        self.send_to_watchers(id, bytes, out);
     }
 
     /// Per-entity per-tick update (mirrors `updateTracking` + `sendUpdates`).

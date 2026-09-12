@@ -133,6 +133,10 @@ pub struct World {
     /// inventory sync for the picker. Recorded only on full takes, like
     /// vanilla (partial merges leave the item down with no packet).
     pub item_pickups: Vec<(EntityId, EntityId)>,
+    /// Deaths since the last server tick (mirrors the status-3 broadcast
+    /// in `EntityLiving.onDeath`); the server tick drains these before
+    /// the tracker retires the rows, so the animation precedes destroy.
+    pub death_events: Vec<EntityId>,
     /// Population guard (mirrors `World::isPopulating`): decoration
     /// sets bypass skylight regen exactly like the C++ populate path
     /// (the write-back regenerates explicitly instead).
@@ -182,6 +186,7 @@ impl World {
             tiles: HashMap::new(),
             furnace_updates: Vec::new(),
             item_pickups: Vec::new(),
+            death_events: Vec::new(),
             populating: false,
             generator: None,
             chunks: HashMap::new(),
@@ -2499,6 +2504,7 @@ impl World {
         if let Some(e) = self.entities.get_mut(id) {
             e.body_mut().dead = true;
         }
+        self.death_events.push(id);
     }
 
     /// Player damage scaling (mirrors `EntityPlayerMP::attackEntityFrom`

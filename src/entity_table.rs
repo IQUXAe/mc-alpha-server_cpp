@@ -506,10 +506,16 @@ impl EntityTable {
     }
 
     /// Drop dead rows (mirrors the end-of-tick erase); returns the purged
-    /// ids sorted for determinism.
+    /// ids sorted for determinism. Dead players are spared: like vanilla,
+    /// the player row survives death for the respawn packet and is only
+    /// dropped explicitly on logout.
     pub fn purge_dead(&mut self) -> Vec<EntityId> {
-        let mut dead: Vec<EntityId> =
-            self.rows.iter().filter(|(_, e)| e.body().dead).map(|(id, _)| *id).collect();
+        let mut dead: Vec<EntityId> = self
+            .rows
+            .iter()
+            .filter(|(_, e)| e.body().dead && !matches!(e, Entity::Player(_)))
+            .map(|(id, _)| *id)
+            .collect();
         dead.sort_unstable();
         for id in &dead {
             self.rows.remove(id);
