@@ -1260,7 +1260,26 @@ impl PlaySession {
             }
         }
         // Block drop when harvestable (uses the pre-removal id like C++).
+        // TNT never drops: breaking it primes the fuse instead (Java
+        // BlockTNT.onBlockDestroyedByPlayer).
+        // Ice leaves water behind when the cell below is solid/liquid
+        // (Java BlockIce.onBlockRemoval).
         if removed {
+            if bid == 46 {
+                ctx.world.ignite_tnt(x, y, z, 80);
+                return;
+            }
+            if bid == 79 {
+                let below_solid = ctx.world.is_solid(x, y - 1, z);
+                let below_liquid = {
+                    let m = ctx.world.material_at(x, y - 1, z);
+                    m.is_liquid()
+                };
+                if below_solid || below_liquid {
+                    ctx.world.apply_set_notify(x, y, z, 8);
+                    return;
+                }
+            }
             let held_id = self.selected_stack(ctx.world).map(|s| s.item_id).unwrap_or(0);
             if alpha_mining_can_harvest(bid as i32, held_id) {
                 ctx.world.drop_block_for(bid, meta, x, y, z);

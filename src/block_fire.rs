@@ -164,7 +164,8 @@ pub fn block_fire_tick(
                         chance += (ny - (y + 1)) * 100;
                     }
                     let neighbor = neighbors_encourage(w, nx, ny, nz);
-                    if neighbor > 0 && rng_int(w, chance) < neighbor {
+                    // Java BlockFire: nextInt(chance) <= encourage (inclusive).
+                    if neighbor > 0 && rng_int(w, chance) <= neighbor {
                         u_set_notify(w, nx, ny, nz, fire_id);
                     }
                 }

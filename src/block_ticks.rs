@@ -862,7 +862,8 @@ fn crops_growth_rate(w: &BlockTickWorld, crop_id: u8, x: i32, y: i32, z: i32) ->
     for dx in -1..=1 {
         for dz in -1..=1 {
             if q_id(w, x + dx, y - 1, z + dz) == 60 {
-                let mut bonus = if dx == 0 && dz == 0 { 3.0 } else { 1.0 };
+                // Java: 1.0 dry, 3.0 hydrated (soil meta > 0).
+                let mut bonus = if q_meta(w, x + dx, y - 1, z + dz) > 0 { 3.0 } else { 1.0 };
                 if dx != 0 || dz != 0 {
                     bonus /= 4.0;
                 }
@@ -909,21 +910,23 @@ pub fn block_crops_neighbor(
     u_schedule(w, x, y, z, block_id, 20);
 }
 
-fn block_crops_drop(w: &BlockTickWorld, wheat_id: i32, _seeds_id: i32, x: i32, y: i32, z: i32, metadata: u8) {
-    if rng_f01(w) > 1.0 {
-        return;
-    }
-    // Mature crops drop one wheat, growing ones nothing (mirrors
-    // BlockCrops.idDropped; seeds come only from hoeing grass).
+fn block_crops_drop(w: &BlockTickWorld, wheat_id: i32, seeds_id: i32, x: i32, y: i32, z: i32, metadata: u8) {
+    // Mature crops drop one wheat (Java BlockCrops.idDropped: 7 -> wheat).
     if metadata >= 7 {
         u_drop(w, wheat_id, 1, 0, x as f64 + 0.5, y as f64 + 0.5, z as f64 + 0.5, 0.05, 0.15);
+    }
+    // Seeds: 3 rolls of rand(15) <= meta (Java onBlockDestroyedByPlayer).
+    for _ in 0..3 {
+        if rng_int(w, 15) <= metadata as i32 {
+            u_drop(w, seeds_id, 1, 0, x as f64 + 0.5, y as f64 + 0.5, z as f64 + 0.5, 0.05, 0.15);
+        }
     }
 }
 
 pub fn block_crops_drop_ffi(
     world: &BlockTickWorld,
     wheat_id: i32,
-    _seeds_id: i32,
+    seeds_id: i32,
     x: i32,
     y: i32,
     z: i32,
@@ -934,9 +937,14 @@ pub fn block_crops_drop_ffi(
     if rng_f01(w) > chance {
         return;
     }
-    // Reuse the mature/immature split with the caller's chance gate.
+    // Same split as the neighbor/tick path (wheat + seed rolls).
     if metadata >= 7 {
         u_drop(w, wheat_id, 1, 0, x as f64 + 0.5, y as f64 + 0.5, z as f64 + 0.5, 0.05, 0.15);
+    }
+    for _ in 0..3 {
+        if rng_int(w, 15) <= metadata as i32 {
+            u_drop(w, seeds_id, 1, 0, x as f64 + 0.5, y as f64 + 0.5, z as f64 + 0.5, 0.05, 0.15);
+        }
     }
 }
 

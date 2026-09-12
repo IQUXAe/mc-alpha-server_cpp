@@ -19,7 +19,7 @@ use crate::block_ticks::{
     block_leaves_added, block_leaves_neighbor, block_leaves_tick, block_mushroom_neighbor,
     block_reed_added, block_reed_neighbor, block_reed_tick, block_sand_added, block_sand_neighbor,
     block_sand_tick, block_sapling_added, block_sapling_neighbor, block_sapling_tick,
-    block_soil_added, block_soil_neighbor, block_soil_tick, block_torch_neighbor,
+    block_soil_added, block_soil_neighbor, block_soil_tick, block_torch_added, block_torch_neighbor,
 };
 use crate::chunk::Chunk;
 use crate::entity_ai::{
@@ -43,9 +43,10 @@ use crate::tracker::Tracker;
 
 pub const WORLD_HEIGHT: i32 = 128;
 
-/// Block types with no collision box (mirrors the C++ `nullopt`
-/// `getCollisionBoundingBoxFromPool` overrides: fluids, plants, torches,
-/// saplings, crops, fire).
+/// Block ids with no collision box (mirrors the `null` returns from
+/// `getCollisionBoundingBoxFromPool`: fluids, plants, torches, saplings,
+/// crops, fire by type, plus rails/plates/buttons/signs/snow/reed/portal
+/// by id — all `null` in Java but `Normal` in our table).
 pub(crate) fn has_collision_box(block_type: u8) -> bool {
     !matches!(
         block_type,
@@ -58,6 +59,11 @@ pub(crate) fn has_collision_box(block_type: u8) -> bool {
             || x == BlockType::Crops as u8
             || x == BlockType::Fire as u8
     )
+}
+
+/// Id-level no-collision extras (Java `null` boxes our table types as Normal).
+pub(crate) fn has_collision_id(bid: u8) -> bool {
+    !matches!(bid, 55 | 63 | 65 | 66 | 68 | 69 | 70 | 72 | 75 | 76 | 77 | 78 | 83 | 90)
 }
 
 /// True when a block id has air material (mirrors the `== &Material::air`
@@ -137,6 +143,10 @@ pub struct World {
     /// in `EntityLiving.onDeath`); the server tick drains these before
     /// the tracker retires the rows, so the animation precedes destroy.
     pub death_events: Vec<EntityId>,
+    /// Primed TNT pending blasts as `(x, y, z, ticks_left)` (our stand-in
+    /// for `EntityTNTPrimed`: the block is already air, the blast lands at
+    /// radius 4 when the fuse runs out — 80 ticks hand-lit, 10..30 chained).
+    pub pending_tnt: Vec<(i32, i32, i32, i32)>,
     /// Population guard (mirrors `World::isPopulating`): decoration
     /// sets bypass skylight regen exactly like the C++ populate path
     /// (the write-back regenerates explicitly instead).
@@ -187,6 +197,7 @@ impl World {
             furnace_updates: Vec::new(),
             item_pickups: Vec::new(),
             death_events: Vec::new(),
+            pending_tnt: Vec::new(),
             populating: false,
             generator: None,
             chunks: HashMap::new(),
@@ -407,7 +418,7 @@ impl World {
                         continue;
                     }
                     let props = alpha_block_properties_get(id as u32);
-                    if !has_collision_box(props.block_type) {
+                    if !has_collision_box(props.block_type) || !has_collision_id(id) {
                         continue;
                     }
                     let bb = AxisAlignedBB::get_bounding_box(
@@ -2198,29 +2209,32 @@ mod tests {
 
     #[test]
     fn test_creeper_explodes_next_to_player() {
+        // Deterministic ballistics: blast directly at d=1 with clear LOS.
+        // Java formula: v=(1-1/3)=2/3 -> (v²+v)/2*8*3+1 = 14 damage.
         let mut w = world_with_floor();
         let player = add_player(&mut w, "steve", 4.5, 64.0, 4.5);
         let creeper = add_mob(&mut w, MobKind::Creeper, 3.5, 64.0, 4.5);
-        for _ in 0..40 {
-            // Pin positions: the chase would otherwise close the 1.0 gap by
-            // a physics-dependent amount and make the damage brittle.
-            if let Some(e) = w.entities.get_mut(creeper) {
+        w.blast(3.5, 64.0, 4.5, 3.0, Some(creeper));
+        assert_eq!(player_health(&w, player), 6);
+        // The fuse path still kills the creeper (fresh world, no knockback).
+        let mut w2 = world_with_floor();
+        let _p2 = add_player(&mut w2, "steve", 4.5, 64.0, 4.5);
+        let c2 = add_mob(&mut w2, MobKind::Creeper, 3.5, 64.0, 4.5);
+        for _ in 0..60 {
+            // Pin: knockback from the eventual blast must not matter here;
+            // the fuse needs dist<3 to light and <7 to hold.
+            if let Some(e) = w2.entities.get_mut(c2) {
+                if e.body().dead {
+                    break;
+                }
                 e.body_mut().set_position(3.5, 64.0, 4.5);
             }
-            if let Some(e) = w.entities.get_mut(player) {
-                e.body_mut().set_position(4.5, 64.0, 4.5);
-            }
-            w.tick_mob(creeper);
-            if w.entities.get(creeper).unwrap().body().dead {
+            w2.tick_mob(c2);
+            if w2.entities.get(c2).unwrap().body().dead {
                 break;
             }
         }
-        assert!(w.entities.get(creeper).unwrap().body().dead);
-        // Point-blank: 12 * (1 - d/3) with d~=1. The chase moves the creeper
-        // during the fuse, so accept the 7..9 band (exact Explosion ballistics
-        // land in Batch D).
-        let hp = player_health(&w, player);
-        assert!((11..=13).contains(&hp), "point-blank creeper hurt {hp}");
+        assert!(w2.entities.get(c2).unwrap().body().dead);
     }
 
     #[test]
@@ -4026,7 +4040,7 @@ impl World {
                         continue;
                     }
                     let props = alpha_block_properties_get(bid as u32);
-                    if !has_collision_box(props.block_type) {
+                    if !has_collision_box(props.block_type) || !has_collision_id(bid) {
                         continue;
                     }
                     let bb = AxisAlignedBB::get_bounding_box(
@@ -4259,56 +4273,76 @@ impl World {
         Some(target)
     }
 
-    /// Creeper blast (mirrors the Alpha inline `explode`): players in
-    /// radius 3 take `12 * (1 - d/3)` (min 1; mobs are immune by the
-    /// `dynamic_cast`), blocks in the rough sphere drop and vanish unless
-    /// unbreakable, and fires start in empty cells. The blast kills
-    /// without drops (C++ sets `isDead` directly, no `onDeath`).
-    fn creeper_explode(&mut self, id: EntityId) {
-        let (px, py, pz) = match self.entities.get(id) {
-            Some(e) => (e.body().pos[0], e.body().pos[1], e.body().pos[2]),
-            None => return,
-        };
-        // Phase 1: players in the blast.
+    /// Shared blast (vanilla `Explosion` simplified): entity damage with the
+    /// Java formula `(v*v+v)/2*8*size+1` and knockback, LOS-gated by the
+    /// eye raytrace; blocks in the sphere destroyed unless unbreakable,
+    /// drops at 0.3 via the harvest table, TNT cells chain-ignite instead
+    /// of dropping. Neither creepers nor TNT set fire in Alpha (only the
+    /// ghast fireball does), so no fire phase here.
+    fn blast(&mut self, px: f64, py: f64, pz: f64, radius: f32, attacker: Option<EntityId>) {
+        // Phase 1: living victims in the radius*2 box.
         let mut victims: Vec<EntityId> = Vec::new();
         for oid in self.entities.alive_ids() {
-            let hit = match self.entities.get(oid) {
-                Some(Entity::Player(p)) if !p.living.body.dead => {
-                    let (dx, dy, dz) = (
-                        p.living.body.pos[0] - px,
-                        p.living.body.pos[1] - py,
-                        p.living.body.pos[2] - pz,
-                    );
-                    let d = ((dx * dx + dy * dy + dz * dz) as f32).sqrt();
-                    d <= CREEPER_BLAST_RADIUS
-                }
+            let is_living = match self.entities.get(oid) {
+                Some(Entity::Mob(m)) if !m.living.body.dead => true,
+                Some(Entity::Animal(a)) if !a.living.body.dead => true,
+                Some(Entity::Player(p)) if !p.living.body.dead => true,
                 _ => false,
             };
-            if hit {
-                victims.push(oid);
+            if !is_living {
+                continue;
             }
+            if Some(oid) == attacker {
+                continue;
+            }
+            let (qx, qy, qz) = match self.entities.get(oid) {
+                Some(e) => (e.body().pos[0], e.body().pos[1], e.body().pos[2]),
+                None => continue,
+            };
+            let (dx, dy, dz) = (qx - px, qy - py, qz - pz);
+            let d = ((dx * dx + dy * dy + dz * dz) as f32).sqrt();
+            if d > radius {
+                continue;
+            }
+            victims.push(oid);
         }
         victims.sort_unstable();
         for v in victims {
-            let (dx, dy, dz) = match self.entities.get(v) {
-                Some(e) => (e.body().pos[0] - px, e.body().pos[1] - py, e.body().pos[2] - pz),
+            let (qx, qy, qz, h) = match self.entities.get(v) {
+                Some(e) => (e.body().pos[0], e.body().pos[1], e.body().pos[2], e.body().height as f64),
                 None => continue,
             };
+            let (dx, dy, dz) = (qx - px, qy - py, qz - pz);
             let d = ((dx * dx + dy * dy + dz * dz) as f32).sqrt();
-            let mut damage = (12.0 * (1.0 - d / CREEPER_BLAST_RADIUS)) as i32;
-            if damage < 1 {
-                damage = 1;
+            if d > radius {
+                continue;
             }
-            self.attack_living(v, damage, Some(id));
+            // LOS from the blast center to the victim's eye.
+            if !self.ray_trace_clear([px, py, pz], [qx, qy + h * 0.85, qz]) {
+                continue;
+            }
+            let vfrac = 1.0 - d / radius;
+            let damage = ((vfrac as f64 * vfrac as f64 + vfrac as f64) / 2.0 * 8.0 * radius as f64 + 1.0) as i32;
+            // Knockback along the blast direction, scaled by exposure.
+            let len = (dx * dx + dy * dy + dz * dz).sqrt().max(0.001);
+            if let Some(e) = self.entities.get_mut(v) {
+                let b = e.body_mut();
+                b.motion[0] += dx / len * vfrac as f64;
+                b.motion[1] += dy / len * vfrac as f64;
+                b.motion[2] += dz / len * vfrac as f64;
+            }
+            self.attack_living(v, damage.max(1), attacker);
         }
-        // Phase 2: blocks in the rough sphere.
+        // Phase 2: blocks in the sphere.
         let (cx, cy, cz) = (px.floor() as i32, py.floor() as i32, pz.floor() as i32);
-        let r = CREEPER_BLAST_RADIUS as i32;
+        let r = radius.ceil() as i32;
+        let mut tnt_chain: Vec<(i32, i32, i32)> = Vec::new();
+        let mut removals: Vec<(i32, i32, i32, u8, u8)> = Vec::new();
         for dx in -r..=r {
             for dy in -r..=r {
                 for dz in -r..=r {
                     let d = ((dx * dx + dy * dy + dz * dz) as f32).sqrt();
-                    if d > CREEPER_BLAST_RADIUS {
+                    if d > radius {
                         continue;
                     }
                     let (bx, by, bz) = (cx + dx, cy + dy, cz + dz);
@@ -4319,63 +4353,115 @@ impl World {
                     if alpha_block_properties_get(bid as u32).hardness < 0.0 {
                         continue;
                     }
-                    if self.rng.next_float() <= 1.0 - d / CREEPER_BLAST_RADIUS {
-                        self.spawn_item_entity(
-                            bid as i32, 1, 0, bx as f64 + 0.5, by as f64 + 0.5, bz as f64 + 0.5,
-                        );
-                        // Container contents scatter like the C++ removal
-                        // hook on the blast path (tile row cleared too).
-                        self.scatter_container_tile(bx, by, bz);
-                        self.set_block_id(bx, by, bz, 0);
-                    }
-                }
-            }
-        }
-        // Phase 3: fires in empty cells near burnables or soil.
-        for fx in cx - r..=cx + r {
-            for fz in cz - r..=cz + r {
-                for fy in cy - r..=cy + r {
-                    let d = (((fx - cx) * (fx - cx) + (fy - cy) * (fy - cy) + (fz - cz) * (fz - cz))
-                        as f32)
-                        .sqrt();
-                    if d > CREEPER_BLAST_RADIUS {
+                    if bid == 46 {
+                        tnt_chain.push((bx, by, bz));
+                        removals.push((bx, by, bz, bid, self.get_block_meta(bx, by, bz)));
                         continue;
                     }
-                    if self.get_block_id(fx, fy, fz) != 0 {
-                        continue;
-                    }
-                    if self.rng.next_int_bound(5) != 0 {
-                        continue;
-                    }
-                    if self.block_allows_attachment(fx, fy - 1, fz) {
-                        self.set_block_id(fx, fy, fz, FIRE_BLOCK_ID);
+                    if self.rng.next_float() <= 0.3 {
+                        removals.push((bx, by, bz, bid, self.get_block_meta(bx, by, bz)));
                     } else {
-                        const OFF: [[i32; 3]; 6] =
-                            [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
-                        for o in OFF {
-                            let nid = self.get_block_id(fx + o[0], fy + o[1], fz + o[2]);
-                            if nid == 0 {
-                                continue;
-                            }
-                            let mat = material_of(alpha_block_properties_get(nid as u32).material);
-                            if mat.get_burning() {
-                                self.set_block_id(fx, fy, fz, FIRE_BLOCK_ID);
-                                break;
-                            }
-                        }
+                        removals.push((bx, by, bz, 0, 0));
                     }
                 }
             }
         }
+        for (bx, by, bz, bid, meta) in removals {
+            if bid == 0 {
+                self.apply_set_notify(bx, by, bz, 0);
+                continue;
+            }
+            if bid == 46 {
+                // TNT never drops — it chains with a short fuse.
+                self.apply_set_notify(bx, by, bz, 0);
+                continue;
+            }
+            let (drop, qty) = self.rolled_drop_ids(bid, meta);
+            self.apply_set_notify(bx, by, bz, 0);
+            if drop > 0 && qty > 0 {
+                self.spawn_item_entity(drop, qty, 0, bx as f64 + 0.5, by as f64 + 0.5, bz as f64 + 0.5);
+            }
+        }
+        for (bx, by, bz) in tnt_chain {
+            let fuse = 10 + self.rng.next_int_bound(21);
+            self.pending_tnt.push((bx, by, bz, fuse));
+        }
+    }
+
+    /// Ignite TNT at a cell (mirrors `BlockTNT.onBlockDestroyedByPlayer` +
+    /// `BlockFire.tryToCatchBlockOnFire` for id 46): the block vanishes at
+    /// once (no drop) and the radius-4 blast lands when the fuse burns out.
+    /// Hand-lit fuses run 80 ticks like `EntityTNTPrimed`; chained ones
+    /// pass an explicit short fuse.
+    pub fn ignite_tnt(&mut self, x: i32, y: i32, z: i32, fuse: i32) {
+        if self.get_block_id(x, y, z) == 46 {
+            self.apply_set_notify(x, y, z, 0);
+        }
+        self.pending_tnt.push((x, y, z, fuse));
+    }
+
+    /// Tick primed TNT fuses; expired ones detonate at radius 4.
+    /// Call once per world tick before entity ticks.
+    pub fn tick_primed_tnt(&mut self) {
+        if self.pending_tnt.is_empty() {
+            return;
+        }
+        let mut due: Vec<(f64, f64, f64)> = Vec::new();
+        for entry in self.pending_tnt.iter_mut() {
+            entry.3 -= 1;
+            if entry.3 <= 0 {
+                due.push((entry.0 as f64 + 0.5, entry.1 as f64 + 0.5, entry.2 as f64 + 0.5));
+            }
+        }
+        self.pending_tnt.retain(|e| e.3 > 0);
+        for (px, py, pz) in due {
+            self.blast(px, py, pz, 4.0, None);
+        }
+    }
+
+    /// Creeper blast at radius 3 (mirrors `EntityCreeper` fuse end): shared
+    /// ballistics, then the creeper dies without drops.
+    fn creeper_explode(&mut self, id: EntityId) {
+        let (px, py, pz) = match self.entities.get(id) {
+            Some(e) => (e.body().pos[0], e.body().pos[1], e.body().pos[2]),
+            None => return,
+        };
+        self.blast(px, py, pz, CREEPER_BLAST_RADIUS, Some(id));
         if let Some(e) = self.entities.get_mut(id) {
             e.body_mut().dead = true;
         }
     }
 
+    /// Lava-water contact (mirrors `BlockFluids.func_302_i`): when a lava
+    /// cell touches water on any of the 4 sides or above, source lava
+    /// (meta 0) becomes obsidian, flowing lava (meta <= 4) becomes
+    /// cobblestone. Only lava cells trigger (water cells never do).
+    fn fluid_lava_contact(&mut self, x: i32, y: i32, z: i32, bid: u8) {
+        if !matches!(bid, 10 | 11) {
+            return;
+        }
+        if self.get_block_id(x, y, z) != bid {
+            return;
+        }
+        let wet = self.material_at(x + 1, y, z) == Material::WATER
+            || self.material_at(x - 1, y, z) == Material::WATER
+            || self.material_at(x, y, z + 1) == Material::WATER
+            || self.material_at(x, y, z - 1) == Material::WATER
+            || self.material_at(x, y + 1, z) == Material::WATER;
+        if !wet {
+            return;
+        }
+        let meta = self.get_block_meta(x, y, z);
+        if meta == 0 {
+            self.apply_set_notify(x, y, z, 49);
+        } else if meta <= 4 {
+            self.apply_set_notify(x, y, z, 4);
+        }
+    }
+
     /// Soil check for fire (mirrors `doesBlockAllowAttachment`: solid and
     /// movement-blocking material).
-    pub(crate) fn block_allows_attachment(&self, x: i32, y: i32, z: i32) -> bool {
-        let bid = self.get_block_id(x, y, z);
+    pub(crate) fn block_allows_attachment(&self, x: i32, y: i32, z: i32) -> bool {        let bid = self.get_block_id(x, y, z);
         if bid == 0 {
             return false;
         }
@@ -4483,7 +4569,7 @@ impl World {
                         continue;
                     }
                     let props = alpha_block_properties_get(bid as u32);
-                    if !has_collision_box(props.block_type) {
+                    if !has_collision_box(props.block_type) || !has_collision_id(bid) {
                         continue;
                     }
                     let bb = AxisAlignedBB::get_bounding_box(
@@ -5028,6 +5114,7 @@ impl World {
             self.spawn_passive_mobs();
         }
         self.tick_furnaces();
+        self.tick_primed_tnt();
         self.process_scheduled_ticks();
         self.random_block_ticks();
         let mut ids = self.entities.alive_ids();
@@ -5255,6 +5342,7 @@ fn tick_collidable(x: i32, y: i32, z: i32) -> bool {
             bid != 0
                 && alpha_block_properties_get(bid as u32).block_type != BlockType::Fluid as u8
                 && has_collision_box(alpha_block_properties_get(bid as u32).block_type)
+                && has_collision_id(bid)
         },
         false,
     )
@@ -5318,8 +5406,10 @@ fn tick_drop_occupant(x: i32, y: i32, z: i32) {
     with_tick_world(|w| w.drop_block_as_item(x, y, z), ());
 }
 
-fn tick_detonate(_x: i32, _y: i32, _z: i32) {
-    // No-op: TNT has no onBlockDestroyedByPlayer override in C++.
+fn tick_detonate(x: i32, y: i32, z: i32) {
+    // Java BlockFire.tryToCatchBlockOnFire for id 46: the TNT block is
+    // replaced by fire/air above, then onBlockDestroyedByPlayer primes it.
+    with_tick_world(|w| w.ignite_tnt(x, y, z, 80), ());
 }
 
 // Tree-generation accessor over the same bridge pointer.
@@ -5425,8 +5515,14 @@ impl World {
 
     /// Placement write (mirrors `setBlockWithNotify` minus removal scatter
     /// and client packets): set the id, run the added-router, notify
-    /// neighbors.
+    /// Placement write (mirrors `setBlockWithNotify`): run the removal hook
+    /// for the old id (container scatter + tile clear, Java
+    /// `onBlockRemoval`), then set, run the added-router, notify neighbors.
     pub(crate) fn apply_set_notify(&mut self, x: i32, y: i32, z: i32, id: u8) -> bool {
+        let old = self.get_block_id(x, y, z);
+        if old != 0 && old != id {
+            self.block_removed(x, y, z, old);
+        }
         if !self.set_block_id(x, y, z, id) {
             return false;
         }
@@ -5441,11 +5537,27 @@ impl World {
         if y < 0 || y >= WORLD_HEIGHT {
             return false;
         }
+        let old = self.get_block_id(x, y, z);
+        if old != 0 && old != id {
+            self.block_removed(x, y, z, old);
+        }
         self.set_block_id(x, y, z, id);
         self.set_block_meta(x, y, z, meta);
         self.block_added(x, y, z, id);
         self.notify_neighbors_of(x, y, z);
         true
+    }
+
+    /// Removal hook (mirrors `Block.onBlockRemoval` for containers): scatter
+    /// chest/furnace contents, drop the tile row. Safe to call when no tile
+    /// exists (scatter is a no-op then).
+    fn block_removed(&mut self, x: i32, y: i32, z: i32, old: u8) {
+        if matches!(old, 54 | 61 | 62 | 63 | 68) {
+            self.scatter_container_tile(x, y, z);
+            self.tiles.remove(&(x, y, z));
+        } else {
+            self.tiles.remove(&(x, y, z));
+        }
     }
 
     /// Neighbor fan-out (mirrors `notifyBlocksOfNeighborChange`).
@@ -5493,9 +5605,11 @@ impl World {
                     5,
                 );
                 block_fluid_added(&TICK_TABLE, bid, rate, x, y, z);
+                self.fluid_lava_contact(x, y, z, bid);
             }
             81 => block_cactus_added(&TICK_TABLE, bid, x, y, z),
             83 => block_reed_added(&TICK_TABLE, bid, x, y, z),
+            50 => block_torch_added(&TICK_TABLE, bid, x, y, z),
             18 => block_leaves_added(&TICK_TABLE, bid, x, y, z),
             6 => block_sapling_added(&TICK_TABLE, bid, x, y, z),
             59 => block_crops_added(&TICK_TABLE, bid, x, y, z),
@@ -5528,8 +5642,9 @@ impl World {
                     5,
                 );
                 block_fluid_neighbor(&TICK_TABLE, bid, rate, x, y, z);
+                self.fluid_lava_contact(x, y, z, bid);
             }
-            37 | 38 | 31 => {
+            37 | 38 => {
                 let (d, q, g) = Self::native_drop_ids(bid);
                 block_flower_neighbor(&TICK_TABLE, d, q, g, x, y, z);
             }
@@ -5541,6 +5656,7 @@ impl World {
                 let (d, q, g) = Self::native_drop_ids(bid);
                 block_torch_neighbor(&TICK_TABLE, d, q, g, x, y, z);
             }
+            78 => self.snow_neighbor(x, y, z),
             81 => {
                 let (d, q, g) = Self::native_drop_ids(bid);
                 block_cactus_neighbor(&TICK_TABLE, bid, d, q, g, x, y, z);
@@ -5566,6 +5682,19 @@ impl World {
         }
         if bid == 63 || bid == 68 {
             self.sign_neighbor(x, y, z, bid);
+        }
+    }
+
+    /// Snow-layer support (mirrors `BlockSnow.func_275_g`): needs a solid
+    /// attachable block below, else drops and vanishes.
+    fn snow_neighbor(&mut self, x: i32, y: i32, z: i32) {
+        let below = self.get_block_id(x, y - 1, z);
+        let ok = below != 0
+            && alpha_block_properties_get(below as u32).allows_attachment
+            && material_of(alpha_block_properties_get(below as u32).material).is_solid();
+        if !ok {
+            self.drop_block_for(78, 0, x, y, z);
+            self.apply_set_notify(x, y, z, 0);
         }
     }
 
@@ -5789,7 +5918,65 @@ impl World {
             59 => block_crops_tick(&TICK_TABLE, bid, bid, WHEAT_ITEM_ID, SEEDS_ITEM_ID, x, y, z),
             60 => block_soil_tick(&TICK_TABLE, bid, x, y, z),
             51 => block_fire_tick(&fire_table(), bid, 10, x, y, z),
+            50 => {
+                // Torch re-seats meta 0 (Java BlockTorch.updateTick).
+                if self.get_block_meta(x, y, z) == 0 {
+                    drop(_guard);
+                    let _g2 = TickGuard::enter(self as *mut World);
+                    block_torch_added(&TICK_TABLE, bid, x, y, z);
+                    return;
+                }
+            }
+            2 => self.grass_tick(x, y, z),
+            78 => {
+                // Snow melts under strong block light (Java BlockSnow).
+                if self.saved_light_value(1, x, y, z) > 11 {
+                    self.drop_block_for(78, 0, x, y, z);
+                    self.apply_set_notify(x, y, z, 0);
+                }
+            }
+            79 => {
+                // Ice melts to flowing water (Java BlockIce: light > 11-3).
+                if self.saved_light_value(1, x, y, z) > 8 {
+                    self.apply_set_notify(x, y, z, 9);
+                }
+            }
+            80 => {
+                if self.saved_light_value(1, x, y, z) > 11 {
+                    self.drop_block_for(80, 0, x, y, z);
+                    self.apply_set_notify(x, y, z, 0);
+                }
+            }
+            74 => {
+                // Glowing redstone cools back to idle (Java BlockRedstoneOre).
+                self.apply_set_notify(x, y, z, 73);
+            }
             _ => {}
+        }
+    }
+
+    /// Grass spread/decay (mirrors `BlockGrass.updateTick`): dark + opaque
+    /// cover turns to dirt (1/4 roll), bright spreads to nearby dirt.
+    fn grass_tick(&mut self, x: i32, y: i32, z: i32) {
+        let above_light = self.block_light_value(x, y + 1, z);
+        let above_mat = self.material_at(x, y + 1, z);
+        if above_light < 4 && above_mat.can_block_grass() {
+            if self.rng.next_int_bound(4) != 0 {
+                return;
+            }
+            self.apply_set_notify(x, y, z, 3);
+        } else if above_light >= 9 {
+            let (nx, ny, nz) = (
+                x + self.rng.next_int_bound(3) - 1,
+                y + self.rng.next_int_bound(5) - 3,
+                z + self.rng.next_int_bound(3) - 1,
+            );
+            if self.get_block_id(nx, ny, nz) == 3
+                && self.block_light_value(nx, ny + 1, nz) >= 4
+                && !self.material_at(nx, ny + 1, nz).can_block_grass()
+            {
+                self.apply_set_notify(nx, ny, nz, 2);
+            }
         }
     }
 
