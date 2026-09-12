@@ -2,20 +2,17 @@
 //! (mirrors handlePlace + activeBlockOrUseItem).
 //! Split out of `session.rs`; behavior unchanged.
 
-use std::collections::HashSet;
 use crate::entity_table::Entity;
 use crate::inventory::FfiItemStack;
 use crate::item_data::{alpha_item_food_heal, alpha_item_max_damage};
 use crate::item_use::alpha_item_food_bite;
 use crate::item_verbs::{
-    BoatThrow, FlintOut, item_block_use, item_boat_aim, item_boat_throw, item_flint_use,
-    item_hoe_use, item_seeds_use, item_sign_use,
+    BoatThrow, FlintOut, ItemUseWorld, item_block_use, item_boat_aim, item_boat_throw,
+    item_flint_use, item_hoe_use, item_seeds_use, item_sign_use,
 };
 use crate::session::play::PlaySession;
-use crate::session::shims::{USE_TABLE, UseGuard};
 use crate::session::{SessionCtx, SessionOutcome};
 use crate::session_packets::pkt_health;
-use crate::world::World;
 
 impl PlaySession {
     /// Write a mutated stack into the real current slot (air-use path).
@@ -229,15 +226,12 @@ impl PlaySession {
         }
         let me = self.player;
         let yaw = ctx.world.entities.get(me).map(|e| e.body().yaw).unwrap_or(0.0);
-        let _guard = UseGuard::enter(
-            ctx.world as *mut World,
-            me,
-            self as *mut PlaySession,
-            ctx.ops as *const HashSet<String>,
-        );
+        // Explicit borrow split: the world and the session reborrowed into
+        // the verb context (this replaces the old USE_CTX thread-local).
+        let mut u = ItemUseWorld { world: &mut *ctx.world, session: &mut *self };
         let used = match s.item_id {
             290..=294 => {
-                if !item_hoe_use(&USE_TABLE, 295, x, y, z) {
+                if !item_hoe_use(&mut u, 295, x, y, z) {
                     false
                 } else {
                     let max = alpha_item_max_damage(s.item_id);
@@ -248,7 +242,7 @@ impl PlaySession {
             295 => {
                 if side != 1 {
                     false
-                } else if !item_seeds_use(&USE_TABLE, x, y, z, side) {
+                } else if !item_seeds_use(&mut u, x, y, z, side) {
                     false
                 } else {
                     if s.stack_size > 0 {
@@ -260,7 +254,7 @@ impl PlaySession {
             259 => {
                 let max = alpha_item_max_damage(s.item_id);
                 let mut out = FlintOut { placed: false, new_damage: 0, broke: false };
-                if !item_flint_use(&USE_TABLE, s.item_damage, max, x, y, z, side, &mut out) {
+                if !item_flint_use(&mut u, s.item_damage, max, x, y, z, side, &mut out) {
                     false
                 } else {
                     s.item_damage = out.new_damage;
@@ -271,7 +265,7 @@ impl PlaySession {
                 }
             }
             323 => {
-                if !item_sign_use(&USE_TABLE, x, y, z, side, yaw) {
+                if !item_sign_use(&mut u, x, y, z, side, yaw) {
                     false
                 } else {
                     if s.stack_size > 0 {
@@ -282,7 +276,7 @@ impl PlaySession {
             }
             333 => false,
             1..=255 => {
-                if !item_block_use(&USE_TABLE, s.item_id as u8, s.stack_size, x, y, z, side, yaw)
+                if !item_block_use(&mut u, s.item_id as u8, s.stack_size, x, y, z, side, yaw)
                 {
                     false
                 } else {
@@ -294,7 +288,7 @@ impl PlaySession {
             }
             _ => false,
         };
-        drop(_guard);
+        drop(u);
         used
     }
 
@@ -352,16 +346,21 @@ impl PlaySession {
             ) {
                 return false;
             }
-            let _guard = UseGuard::enter(
-                ctx.world as *mut World,
-                me,
-                self as *mut PlaySession,
-                ctx.ops as *const HashSet<String>,
-            );
+            let mut u = ItemUseWorld { world: &mut *ctx.world, session: &mut *self };
             let (mut hx, mut hy, mut hz) = (0, 0, 0);
-            let ok =
-                item_boat_throw(&USE_TABLE, aim.sx, aim.sy, aim.sz, aim.ex, aim.ey, aim.ez, &mut hx, &mut hy, &mut hz);
-            drop(_guard);
+            let ok = item_boat_throw(
+                &mut u,
+                aim.sx,
+                aim.sy,
+                aim.sz,
+                aim.ex,
+                aim.ey,
+                aim.ez,
+                &mut hx,
+                &mut hy,
+                &mut hz,
+            );
+            drop(u);
             if !ok {
                 return false;
             }

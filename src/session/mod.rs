@@ -13,8 +13,6 @@
 //! - `play` — `PlaySession` core: dispatch (`pump`), movement echo, sends.
 //! - `play_movement` — position/look validation.
 //! - `play_digging` — block dig + harvest.
-//! - `shims` — thread-local `USE_CTX` bridge into the item-use drivers
-//!   (same pattern as `world/shims`; see that file's SAFETY docs).
 //! - `play_action` — entity use, chat, respawn, held-switch, arm swing.
 //! - `play_inventory` — inventory apply, ghost stacks, sign text.
 //! - `play_use` — block placement, block activation, air-use.
@@ -36,7 +34,6 @@ pub mod play_digging;
 pub mod play_inventory;
 pub mod play_movement;
 pub mod play_use;
-pub mod shims;
 pub mod transport;
 
 pub use self::login::{LoginEvent, LoginSession, VerifyFn, default_verify};
