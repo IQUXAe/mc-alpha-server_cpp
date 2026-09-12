@@ -1,6 +1,6 @@
 use crate::random::JavaRandom;
 use crate::math_helper::{cos as mcos, sin as msin};
-use super::WorldAccessor;
+use super::BlockAccess;
 
 pub struct WorldGenMinable {
     minable_block_id: u8,
@@ -15,7 +15,7 @@ impl WorldGenMinable {
         }
     }
 
-    pub fn generate(&self, accessor: &WorldAccessor, rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
+    pub fn generate(&self, accessor: &mut dyn BlockAccess, rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
         let var6 = rand.next_float() * std::f32::consts::PI;
         let var7 = (x + 8) as f64 + (msin(var6) * (self.number_of_blocks as f32) / 8.0) as f64;
         let var9 = (x + 8) as f64 - (msin(var6) * (self.number_of_blocks as f32) / 8.0) as f64;
@@ -46,8 +46,8 @@ impl WorldGenMinable {
                         let var37 = ((var33 as f64) + 0.5 - var22) / (var30 / 2.0);
                         let var39 = ((var34 as f64) + 0.5 - var24) / (var28 / 2.0);
                         if var35 * var35 + var37 * var37 + var39 * var39 < 1.0 {
-                            if (accessor.get_block_id)(var32, var33, var34) == 1 { // stone
-                                (accessor.set_block_id)(var32, var33, var34, self.minable_block_id);
+                            if accessor.get_block_id(var32, var33, var34) == 1 { // stone
+                                accessor.set_block_id(var32, var33, var34, self.minable_block_id);
                             }
                         }
                     }
@@ -71,8 +71,8 @@ impl WorldGenClay {
         }
     }
 
-    pub fn generate(&self, accessor: &WorldAccessor, rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
-        let bid = (accessor.get_block_id)(x, y, z);
+    pub fn generate(&self, accessor: &mut dyn BlockAccess, rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
+        let bid = accessor.get_block_id(x, y, z);
         if bid != 8 && bid != 9 { // water
             return false;
         }
@@ -107,8 +107,8 @@ impl WorldGenClay {
                         let var37 = ((var33 as f64) + 0.5 - var22) / (var30 / 2.0);
                         let var39 = ((var34 as f64) + 0.5 - var24) / (var28 / 2.0);
                         if var35 * var35 + var37 * var37 + var39 * var39 < 1.0 {
-                            if (accessor.get_block_id)(var32, var33, var34) == 12 { // sand
-                                (accessor.set_block_id)(var32, var33, var34, self.clay_block_id);
+                            if accessor.get_block_id(var32, var33, var34) == 12 { // sand
+                                accessor.set_block_id(var32, var33, var34, self.clay_block_id);
                             }
                         }
                     }

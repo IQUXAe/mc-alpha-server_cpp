@@ -2,12 +2,8 @@ use crate::random::JavaRandom;
 use crate::noise::{NoiseGeneratorOctaves, NoiseGeneratorOctaves2};
 use crate::biome::{MobSpawnerBase, get_biome_from_lookup};
 use crate::caves::MapGenCaves;
-use crate::decorators::{WorldAccessor, alpha_decorate_chunk};
-use std::cell::Cell;
+use crate::decorators::{BlockAccess, CanvasAccess, alpha_decorate_chunk};
 
-thread_local! {
-    static CURRENT_DECORATOR_WORLD: Cell<*mut std::ffi::c_void> = Cell::new(std::ptr::null_mut());
-}
 
 #[repr(C)]
 pub struct RustChunkData {
@@ -22,203 +18,6 @@ pub struct RustChunkDataBatch {
     pub chunks: [RustChunkData; 4],
 }
 
-struct DecoratorWorldState {
-    blocks: [*mut u8; 4],
-    metadata: [*mut u8; 4],
-    chunk_x: i32,
-    chunk_z: i32,
-    fallback_accessor: WorldAccessor,
-}
-
-fn local_get_block_id(x: i32, y: i32, z: i32) -> u8 {
-    // SAFETY: set from the live stack `DecoratorWorldState` for the decorate
-    // call below and cleared right after; null (no decoration) is checked next.
-    unsafe {
-        let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
-        if state_ptr.is_null() {
-            return 0;
-        }
-        let state = &*state_ptr;
-
-        let rel_x = x - state.chunk_x * 16;
-        let rel_z = z - state.chunk_z * 16;
-        if rel_x < 0 || rel_x >= 32 || rel_z < 0 || rel_z >= 32 {
-            return (state.fallback_accessor.get_block_id)(x, y, z);
-        }
-        if y < 0 || y >= 128 {
-            return (state.fallback_accessor.get_block_id)(x, y, z);
-        }
-        let cx = (rel_x >> 4) as usize;
-        let cz = (rel_z >> 4) as usize;
-        let lx = (rel_x & 15) as usize;
-        let lz = (rel_z & 15) as usize;
-        let idx = (lx << 11) | (lz << 7) | (y as usize);
-        let blocks_ptr = state.blocks[cx * 2 + cz];
-        *blocks_ptr.add(idx)
-    }
-}
-
-fn local_set_block_id(x: i32, y: i32, z: i32, id: u8) {
-    // SAFETY: set from the live stack `DecoratorWorldState` for the decorate
-    // call below and cleared right after; null (no decoration) is checked next.
-    unsafe {
-        let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
-        if state_ptr.is_null() {
-            return;
-        }
-        let state = &mut *state_ptr;
-
-        // Chest (54) or Mob Spawner (52) need C++ TileEntity creation
-        if id == 54 || id == 52 {
-            (state.fallback_accessor.set_block_id)(x, y, z, id);
-            return;
-        }
-
-        let rel_x = x - state.chunk_x * 16;
-        let rel_z = z - state.chunk_z * 16;
-        if rel_x < 0 || rel_x >= 32 || rel_z < 0 || rel_z >= 32 {
-            (state.fallback_accessor.set_block_id)(x, y, z, id);
-            return;
-        }
-        if y < 0 || y >= 128 {
-            (state.fallback_accessor.set_block_id)(x, y, z, id);
-            return;
-        }
-        let cx = (rel_x >> 4) as usize;
-        let cz = (rel_z >> 4) as usize;
-        let lx = (rel_x & 15) as usize;
-        let lz = (rel_z & 15) as usize;
-        let idx = (lx << 11) | (lz << 7) | (y as usize);
-        let blocks_ptr = state.blocks[cx * 2 + cz];
-        *blocks_ptr.add(idx) = id;
-    }
-}
-
-fn local_get_block_meta(x: i32, y: i32, z: i32) -> u8 {
-    // SAFETY: set from the live stack `DecoratorWorldState` for the decorate
-    // call below and cleared right after; null (no decoration) is checked next.
-    unsafe {
-        let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
-        if state_ptr.is_null() {
-            return 0;
-        }
-        let state = &*state_ptr;
-
-        let rel_x = x - state.chunk_x * 16;
-        let rel_z = z - state.chunk_z * 16;
-        if rel_x < 0 || rel_x >= 32 || rel_z < 0 || rel_z >= 32 {
-            return (state.fallback_accessor.get_block_meta)(x, y, z);
-        }
-        if y < 0 || y >= 128 {
-            return (state.fallback_accessor.get_block_meta)(x, y, z);
-        }
-        let cx = (rel_x >> 4) as usize;
-        let cz = (rel_z >> 4) as usize;
-        let lx = (rel_x & 15) as usize;
-        let lz = (rel_z & 15) as usize;
-        let idx = (lx << 11) | (lz << 7) | (y as usize);
-        let metadata_ptr = state.metadata[cx * 2 + cz];
-
-        let byte = *metadata_ptr.add(idx >> 1);
-        if (idx & 1) != 0 {
-            (byte >> 4) & 0xF
-        } else {
-            byte & 0xF
-        }
-    }
-}
-
-fn local_set_block_meta(x: i32, y: i32, z: i32, meta: u8) {
-    // SAFETY: set from the live stack `DecoratorWorldState` for the decorate
-    // call below and cleared right after; null (no decoration) is checked next.
-    unsafe {
-        let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
-        if state_ptr.is_null() {
-            return;
-        }
-        let state = &mut *state_ptr;
-
-        let rel_x = x - state.chunk_x * 16;
-        let rel_z = z - state.chunk_z * 16;
-        if rel_x < 0 || rel_x >= 32 || rel_z < 0 || rel_z >= 32 {
-            (state.fallback_accessor.set_block_meta)(x, y, z, meta);
-            return;
-        }
-        if y < 0 || y >= 128 {
-            (state.fallback_accessor.set_block_meta)(x, y, z, meta);
-            return;
-        }
-        let cx = (rel_x >> 4) as usize;
-        let cz = (rel_z >> 4) as usize;
-        let lx = (rel_x & 15) as usize;
-        let lz = (rel_z & 15) as usize;
-        let idx = (lx << 11) | (lz << 7) | (y as usize);
-        let metadata_ptr = state.metadata[cx * 2 + cz];
-
-        let byte_idx = idx >> 1;
-        let val = metadata_ptr.add(byte_idx);
-        if (idx & 1) != 0 {
-            *val = (*val & 0x0F) | ((meta & 0xF) << 4);
-        } else {
-            *val = (*val & 0xF0) | (meta & 0xF);
-        }
-    }
-}
-
-fn local_allows_attachment(x: i32, y: i32, z: i32) -> bool {
-    // SAFETY: set from the live stack `DecoratorWorldState` for the decorate
-    // call below and cleared right after; null (no decoration) is checked next.
-    unsafe {
-        let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
-        if state_ptr.is_null() {
-            return false;
-        }
-        ((*state_ptr).fallback_accessor.allows_attachment)(x, y, z)
-    }
-}
-
-fn local_is_block_solid(x: i32, y: i32, z: i32) -> bool {
-    // SAFETY: set from the live stack `DecoratorWorldState` for the decorate
-    // call below and cleared right after; null (no decoration) is checked next.
-    unsafe {
-        let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
-        if state_ptr.is_null() {
-            return false;
-        }
-        ((*state_ptr).fallback_accessor.is_block_solid)(x, y, z)
-    }
-}
-
-fn local_get_height_value(x: i32, z: i32) -> i32 {
-    // SAFETY: set from the live stack `DecoratorWorldState` for the decorate
-    // call below and cleared right after; null (no decoration) is checked next.
-    unsafe {
-        let state_ptr = CURRENT_DECORATOR_WORLD.with(|cell| cell.get()) as *mut DecoratorWorldState;
-        if state_ptr.is_null() {
-            return 0;
-        }
-        let state = &*state_ptr;
-
-        let rel_x = x - state.chunk_x * 16;
-        let rel_z = z - state.chunk_z * 16;
-        if rel_x < 0 || rel_x >= 32 || rel_z < 0 || rel_z >= 32 {
-            return (state.fallback_accessor.get_height_value)(x, z);
-        }
-        let cx = (rel_x >> 4) as usize;
-        let cz = (rel_z >> 4) as usize;
-        let lx = (rel_x & 15) as usize;
-        let lz = (rel_z & 15) as usize;
-
-        let blocks_ptr = state.blocks[cx * 2 + cz];
-        for y in (0..128).rev() {
-            let idx = (lx << 11) | (lz << 7) | y;
-            if *blocks_ptr.add(idx) != 0 {
-                return (y + 1) as i32;
-            }
-        }
-        0
-    }
-}
 
 pub struct RustChunkProviderGenerate {
     pub world_seed: i64,
@@ -528,20 +327,22 @@ pub fn rust_chunk_provider_generate_chunk(
 pub fn rust_chunk_provider_populate_batch(
     generator: &mut RustChunkProviderGenerate,
     batch: &RustChunkDataBatch,
-    accessor: WorldAccessor,
+    fallback: &mut dyn BlockAccess,
     chunk_x: i32,
     chunk_z: i32,
     biome_type_raw: i32,
     temperatures: &[f64],
 ) {
-    let mut state = DecoratorWorldState {
-        blocks: [
+    // Canvas over the 2x2 batch arrays with the live world behind it
+    // (explicit borrows instead of the old thread-local state).
+    let mut canvas = CanvasAccess::new(
+        [
             batch.chunks[0].blocks,
             batch.chunks[1].blocks,
             batch.chunks[2].blocks,
             batch.chunks[3].blocks,
         ],
-        metadata: [
+        [
             batch.chunks[0].metadata,
             batch.chunks[1].metadata,
             batch.chunks[2].metadata,
@@ -549,26 +350,12 @@ pub fn rust_chunk_provider_populate_batch(
         ],
         chunk_x,
         chunk_z,
-        fallback_accessor: accessor,
-    };
-
-    // Set thread local state
-    CURRENT_DECORATOR_WORLD.with(|cell| cell.set(&mut state as *mut DecoratorWorldState as *mut std::ffi::c_void));
-
-    // Build local accessor
-    let local_accessor = WorldAccessor {
-        get_block_id: local_get_block_id,
-        set_block_id: local_set_block_id,
-        get_block_meta: local_get_block_meta,
-        set_block_meta: local_set_block_meta,
-        allows_attachment: local_allows_attachment,
-        is_block_solid: local_is_block_solid,
-        get_height_value: local_get_height_value,
-    };
+        fallback,
+    );
 
     // Call the existing decorator logic
     alpha_decorate_chunk(
-        &local_accessor,
+        &mut canvas,
         generator.world_seed,
         chunk_x,
         chunk_z,
@@ -576,9 +363,6 @@ pub fn rust_chunk_provider_populate_batch(
         &mut generator.field_713_c,
         temperatures,
     );
-
-    // Clear thread local state
-    CURRENT_DECORATOR_WORLD.with(|cell| cell.set(std::ptr::null_mut()));
 }
 
 #[cfg(test)]

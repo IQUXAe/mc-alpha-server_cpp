@@ -2,34 +2,201 @@ pub mod ores;
 pub mod trees;
 pub mod misc;
 
+use std::collections::HashMap;
+use crate::chunk::Chunk;
 use crate::random::JavaRandom;
 use crate::noise::NoiseGeneratorOctaves;
 use crate::biome::BiomeType;
 use crate::block::alpha_block_properties_get;
 use crate::world::material_of;
+use crate::world::{World, is_air_material};
 
 use ores::{WorldGenMinable, WorldGenClay};
 use trees::{WorldGenTrees, WorldGenBigTree};
 use misc::{WorldGenLakes, WorldGenFlowers, WorldGenReed, WorldGenCactus, WorldGenPumpkin, WorldGenLiquids, WorldGenDungeons};
 
-#[repr(C)]
-pub struct WorldAccessor {
-    pub get_block_id: fn(x: i32, y: i32, z: i32) -> u8,
-    pub set_block_id: fn(x: i32, y: i32, z: i32, id: u8),
-    pub get_block_meta: fn(x: i32, y: i32, z: i32) -> u8,
-    pub set_block_meta: fn(x: i32, y: i32, z: i32, meta: u8),
-    pub allows_attachment: fn(x: i32, y: i32, z: i32) -> bool,
-    pub is_block_solid: fn(x: i32, y: i32, z: i32) -> bool,
-    pub get_height_value: fn(x: i32, z: i32) -> i32,
+/// Block access for decoration, as an explicit trait (no thread-local
+/// bridge). The populate canvas and the live world are the two backends;
+///
+/// tests implement it on a scripted fake.
+pub trait BlockAccess {
+    fn get_block_id(&mut self, x: i32, y: i32, z: i32) -> u8;
+    fn set_block_id(&mut self, x: i32, y: i32, z: i32, id: u8);
+    fn get_block_meta(&mut self, x: i32, y: i32, z: i32) -> u8;
+    fn set_block_meta(&mut self, x: i32, y: i32, z: i32, meta: u8);
+    fn allows_attachment(&mut self, x: i32, y: i32, z: i32) -> bool;
+    fn is_block_solid(&mut self, x: i32, y: i32, z: i32) -> bool;
+    fn get_height_value(&mut self, x: i32, z: i32) -> i32;
+}
+
+/// Live-world backend (sapling growth path): the chunk map plus the
+/// population flag, sharing the `*_in` flows with `World` (one formula).
+pub struct WorldAccess<'a> {
+    pub chunks: &'a mut HashMap<(i32, i32), Chunk>,
+    pub populating: bool,
+}
+
+impl<'a> BlockAccess for WorldAccess<'a> {
+    fn get_block_id(&mut self, x: i32, y: i32, z: i32) -> u8 {
+        World::block_id_in(self.chunks, x, y, z)
+    }
+    fn set_block_id(&mut self, x: i32, y: i32, z: i32, id: u8) {
+        World::set_block_id_in(self.chunks, self.populating, x, y, z, id);
+    }
+    fn get_block_meta(&mut self, x: i32, y: i32, z: i32) -> u8 {
+        World::block_meta_in(self.chunks, x, y, z)
+    }
+    fn set_block_meta(&mut self, x: i32, y: i32, z: i32, meta: u8) {
+        World::set_block_meta_in(self.chunks, x, y, z, meta);
+    }
+    fn allows_attachment(&mut self, x: i32, y: i32, z: i32) -> bool {
+        // Block::allowsAttachmentArr: registered plus the allowsAttachment flag.
+        let bid = self.get_block_id(x, y, z);
+        bid != 0
+            && !is_air_material(bid)
+            && crate::block::alpha_block_properties_get(bid as u32).allows_attachment
+    }
+    fn is_block_solid(&mut self, x: i32, y: i32, z: i32) -> bool {
+        World::is_solid_in(self.chunks, x, y, z)
+    }
+    fn get_height_value(&mut self, x: i32, z: i32) -> i32 {
+        World::height_in(self.chunks, x, z)
+    }
+}
+
+/// Canvas backend for chunk population: the 2x2 decorate arrays with a
+/// live fallback for out-of-canvas reads (and chest/spawner writes, which
+/// need live TileEntities). Array math mirrors the old `local_*` shims
+/// exactly, including nibble-packed metadata.
+pub struct CanvasAccess<'a> {
+    blocks: [&'a mut [u8; 32768]; 4],
+    metadata: [&'a mut [u8; 32768]; 4],
+    chunk_x: i32,
+    chunk_z: i32,
+    fallback: &'a mut dyn BlockAccess,
+}
+
+impl<'a> CanvasAccess<'a> {
+    /// Build over populate-batch arrays. SAFETY: caller guarantees every
+    /// array lives 32768 bytes for the returned lifetime (true for the
+    /// stack canvas in `populate_batch`, the only caller).
+    pub fn new(
+        blocks: [*mut u8; 4],
+        metadata: [*mut u8; 4],
+        chunk_x: i32,
+        chunk_z: i32,
+        fallback: &'a mut dyn BlockAccess,
+    ) -> Self {
+        unsafe {
+            Self {
+                blocks: [
+                    &mut *(blocks[0] as *mut [u8; 32768]),
+                    &mut *(blocks[1] as *mut [u8; 32768]),
+                    &mut *(blocks[2] as *mut [u8; 32768]),
+                    &mut *(blocks[3] as *mut [u8; 32768]),
+                ],
+                metadata: [
+                    &mut *(metadata[0] as *mut [u8; 32768]),
+                    &mut *(metadata[1] as *mut [u8; 32768]),
+                    &mut *(metadata[2] as *mut [u8; 32768]),
+                    &mut *(metadata[3] as *mut [u8; 32768]),
+                ],
+                chunk_x,
+                chunk_z,
+                fallback,
+            }
+        }
+    }
+
+    /// (array slot, local x, local z) for in-canvas columns.
+    fn canvas_slot(&self, x: i32, z: i32) -> Option<(usize, usize, usize)> {
+        let rel_x = x - self.chunk_x * 16;
+        let rel_z = z - self.chunk_z * 16;
+        if rel_x < 0 || rel_x >= 32 || rel_z < 0 || rel_z >= 32 {
+            return None;
+        }
+        Some(((rel_x >> 4) as usize * 2 + (rel_z >> 4) as usize, (rel_x & 15) as usize, (rel_z & 15) as usize))
+    }
+}
+
+impl<'a> BlockAccess for CanvasAccess<'a> {
+    fn get_block_id(&mut self, x: i32, y: i32, z: i32) -> u8 {
+        match self.canvas_slot(x, z) {
+            Some((slot, lx, lz)) if y >= 0 && y < 128 => {
+                self.blocks[slot][(lx << 11) | (lz << 7) | (y as usize)]
+            }
+            _ => self.fallback.get_block_id(x, y, z),
+        }
+    }
+    fn set_block_id(&mut self, x: i32, y: i32, z: i32, id: u8) {
+        // Chest (54) and spawner (52) need live TileEntities: always fallback.
+        if id == 54 || id == 52 {
+            self.fallback.set_block_id(x, y, z, id);
+            return;
+        }
+        match self.canvas_slot(x, z) {
+            Some((slot, lx, lz)) if y >= 0 && y < 128 => {
+                self.blocks[slot][(lx << 11) | (lz << 7) | (y as usize)] = id;
+            }
+            _ => self.fallback.set_block_id(x, y, z, id),
+        }
+    }
+    fn get_block_meta(&mut self, x: i32, y: i32, z: i32) -> u8 {
+        match self.canvas_slot(x, z) {
+            Some((slot, lx, lz)) if y >= 0 && y < 128 => {
+                let idx = (lx << 11) | (lz << 7) | (y as usize);
+                let byte = self.metadata[slot][idx >> 1];
+                if (idx & 1) != 0 {
+                    (byte >> 4) & 0xF
+                } else {
+                    byte & 0xF
+                }
+            }
+            _ => self.fallback.get_block_meta(x, y, z),
+        }
+    }
+    fn set_block_meta(&mut self, x: i32, y: i32, z: i32, meta: u8) {
+        match self.canvas_slot(x, z) {
+            Some((slot, lx, lz)) if y >= 0 && y < 128 => {
+                let idx = (lx << 11) | (lz << 7) | (y as usize);
+                let cell = &mut self.metadata[slot][idx >> 1];
+                if (idx & 1) != 0 {
+                    *cell = (*cell & 0x0F) | ((meta & 0xF) << 4);
+                } else {
+                    *cell = (*cell & 0xF0) | (meta & 0xF);
+                }
+            }
+            _ => self.fallback.set_block_meta(x, y, z, meta),
+        }
+    }
+    fn allows_attachment(&mut self, x: i32, y: i32, z: i32) -> bool {
+        self.fallback.allows_attachment(x, y, z)
+    }
+    fn is_block_solid(&mut self, x: i32, y: i32, z: i32) -> bool {
+        self.fallback.is_block_solid(x, y, z)
+    }
+    fn get_height_value(&mut self, x: i32, z: i32) -> i32 {
+        match self.canvas_slot(x, z) {
+            Some((slot, lx, lz)) => {
+                for y in (0..128).rev() {
+                    if self.blocks[slot][(lx << 11) | (lz << 7) | y] != 0 {
+                        return (y + 1) as i32;
+                    }
+                }
+                0
+            }
+            _ => self.fallback.get_height_value(x, z),
+        }
+    }
 }
 
 /// Top snow-support cell (mirrors `World.func_4075_e`): the first air
 /// cell above the highest occluding-or-liquid block, or -1 when the
 /// column has none. Flowers, torches and snow itself are seen through
 /// (their materials do not occlude); leaves and ice do occlude.
-fn snow_top_y(accessor: &WorldAccessor, x: i32, z: i32) -> i32 {
-    let mat_at = |y: i32| {
-        let id = (accessor.get_block_id)(x, y, z);
+fn snow_top_y(accessor: &mut dyn BlockAccess, x: i32, z: i32) -> i32 {
+    let mut mat_at = |y: i32| {
+        let id = accessor.get_block_id(x, y, z);
         (id, material_of(alpha_block_properties_get(id as u32).material))
     };
     let mut y = 127;
@@ -47,7 +214,7 @@ fn snow_top_y(accessor: &WorldAccessor, x: i32, z: i32) -> i32 {
 }
 
 pub fn alpha_decorate_chunk(
-    accessor: &WorldAccessor,
+    accessor: &mut dyn BlockAccess,
     seed: i64,
     chunk_x: i32,
     chunk_z: i32,
@@ -84,7 +251,7 @@ pub fn alpha_decorate_chunk(
         let var13 = var4 + rand.next_int_bound(16) + 8;
         let var14 = rand.next_int_bound(128);
         let var15 = var5 + rand.next_int_bound(16) + 8;
-        WorldGenLakes::new(9).generate(&accessor, &mut rand, var13, var14, var15);
+        WorldGenLakes::new(9).generate(&mut *accessor, &mut rand, var13, var14, var15);
     }
 
     // --- Lava lakes ---
@@ -94,7 +261,7 @@ pub fn alpha_decorate_chunk(
         let var14 = rand.next_int_bound(step1);
         let var15 = var5 + rand.next_int_bound(16) + 8;
         if var14 < 64 || rand.next_int_bound(10) == 0 {
-            WorldGenLakes::new(11).generate(&accessor, &mut rand, var13, var14, var15);
+            WorldGenLakes::new(11).generate(&mut *accessor, &mut rand, var13, var14, var15);
         }
     }
 
@@ -103,7 +270,7 @@ pub fn alpha_decorate_chunk(
         let dx = var4 + rand.next_int_bound(16) + 8;
         let dy = rand.next_int_bound(128);
         let dz = var5 + rand.next_int_bound(16) + 8;
-        WorldGenDungeons::new().generate(&accessor, &mut rand, dx, dy, dz);
+        WorldGenDungeons::new().generate(&mut *accessor, &mut rand, dx, dy, dz);
     }
 
     // --- Clay ---
@@ -111,7 +278,7 @@ pub fn alpha_decorate_chunk(
         let cx = var4 + rand.next_int_bound(16);
         let cy = rand.next_int_bound(128);
         let cz = var5 + rand.next_int_bound(16);
-        WorldGenClay::new(32).generate(&accessor, &mut rand, cx, cy, cz);
+        WorldGenClay::new(32).generate(&mut *accessor, &mut rand, cx, cy, cz);
     }
 
     // --- Dirt veins ---
@@ -119,7 +286,7 @@ pub fn alpha_decorate_chunk(
         let mx = var4 + rand.next_int_bound(16);
         let my = rand.next_int_bound(128);
         let mz = var5 + rand.next_int_bound(16);
-        WorldGenMinable::new(3, 32).generate(&accessor, &mut rand, mx, my, mz);
+        WorldGenMinable::new(3, 32).generate(&mut *accessor, &mut rand, mx, my, mz);
     }
 
     // --- Gravel veins ---
@@ -127,7 +294,7 @@ pub fn alpha_decorate_chunk(
         let mx = var4 + rand.next_int_bound(16);
         let my = rand.next_int_bound(128);
         let mz = var5 + rand.next_int_bound(16);
-        WorldGenMinable::new(13, 32).generate(&accessor, &mut rand, mx, my, mz);
+        WorldGenMinable::new(13, 32).generate(&mut *accessor, &mut rand, mx, my, mz);
     }
 
     // --- Coal ore ---
@@ -135,7 +302,7 @@ pub fn alpha_decorate_chunk(
         let mx = var4 + rand.next_int_bound(16);
         let my = rand.next_int_bound(128);
         let mz = var5 + rand.next_int_bound(16);
-        WorldGenMinable::new(16, 16).generate(&accessor, &mut rand, mx, my, mz);
+        WorldGenMinable::new(16, 16).generate(&mut *accessor, &mut rand, mx, my, mz);
     }
 
     // --- Iron ore ---
@@ -143,7 +310,7 @@ pub fn alpha_decorate_chunk(
         let mx = var4 + rand.next_int_bound(16);
         let my = rand.next_int_bound(64);
         let mz = var5 + rand.next_int_bound(16);
-        WorldGenMinable::new(15, 8).generate(&accessor, &mut rand, mx, my, mz);
+        WorldGenMinable::new(15, 8).generate(&mut *accessor, &mut rand, mx, my, mz);
     }
 
     // --- Gold ore ---
@@ -151,7 +318,7 @@ pub fn alpha_decorate_chunk(
         let mx = var4 + rand.next_int_bound(16);
         let my = rand.next_int_bound(32);
         let mz = var5 + rand.next_int_bound(16);
-        WorldGenMinable::new(14, 8).generate(&accessor, &mut rand, mx, my, mz);
+        WorldGenMinable::new(14, 8).generate(&mut *accessor, &mut rand, mx, my, mz);
     }
 
     // --- Redstone ore ---
@@ -159,7 +326,7 @@ pub fn alpha_decorate_chunk(
         let mx = var4 + rand.next_int_bound(16);
         let my = rand.next_int_bound(16);
         let mz = var5 + rand.next_int_bound(16);
-        WorldGenMinable::new(73, 7).generate(&accessor, &mut rand, mx, my, mz);
+        WorldGenMinable::new(73, 7).generate(&mut *accessor, &mut rand, mx, my, mz);
     }
 
     // --- Diamond ore ---
@@ -167,7 +334,7 @@ pub fn alpha_decorate_chunk(
         let mx = var4 + rand.next_int_bound(16);
         let my = rand.next_int_bound(16);
         let mz = var5 + rand.next_int_bound(16);
-        WorldGenMinable::new(56, 7).generate(&accessor, &mut rand, mx, my, mz);
+        WorldGenMinable::new(56, 7).generate(&mut *accessor, &mut rand, mx, my, mz);
     }
 
     // --- Trees ---
@@ -218,12 +385,12 @@ pub fn alpha_decorate_chunk(
     for _ in 0..var14t {
         let tx = var4 + rand.next_int_bound(16) + 8;
         let tz = var5 + rand.next_int_bound(16) + 8;
-        let ty = (accessor.get_height_value)(tx, tz);
+        let ty = accessor.get_height_value(tx, tz);
         if let Some(ref mut big_tree) = big_tree_gen {
             big_tree.func_420_a(1.0, 1.0, 1.0);
-            big_tree.generate(&accessor, &mut rand, tx, ty, tz);
+            big_tree.generate(&mut *accessor, &mut rand, tx, ty, tz);
         } else if let Some(ref mut normal_tree) = normal_tree_gen {
-            normal_tree.generate(&accessor, &mut rand, tx, ty, tz);
+            normal_tree.generate(&mut *accessor, &mut rand, tx, ty, tz);
         }
     }
 
@@ -232,7 +399,7 @@ pub fn alpha_decorate_chunk(
         let fx = var4 + rand.next_int_bound(16) + 8;
         let fy = rand.next_int_bound(128);
         let fz = var5 + rand.next_int_bound(16) + 8;
-        WorldGenFlowers::new(37).generate(&accessor, &mut rand, fx, fy, fz);
+        WorldGenFlowers::new(37).generate(&mut *accessor, &mut rand, fx, fy, fz);
     }
 
     // --- Red flower ---
@@ -240,7 +407,7 @@ pub fn alpha_decorate_chunk(
         let fx = var4 + rand.next_int_bound(16) + 8;
         let fy = rand.next_int_bound(128);
         let fz = var5 + rand.next_int_bound(16) + 8;
-        WorldGenFlowers::new(38).generate(&accessor, &mut rand, fx, fy, fz);
+        WorldGenFlowers::new(38).generate(&mut *accessor, &mut rand, fx, fy, fz);
     }
 
     // --- Brown mushroom ---
@@ -248,7 +415,7 @@ pub fn alpha_decorate_chunk(
         let fx = var4 + rand.next_int_bound(16) + 8;
         let fy = rand.next_int_bound(128);
         let fz = var5 + rand.next_int_bound(16) + 8;
-        WorldGenFlowers::new(39).generate(&accessor, &mut rand, fx, fy, fz);
+        WorldGenFlowers::new(39).generate(&mut *accessor, &mut rand, fx, fy, fz);
     }
 
     // --- Red mushroom ---
@@ -256,7 +423,7 @@ pub fn alpha_decorate_chunk(
         let fx = var4 + rand.next_int_bound(16) + 8;
         let fy = rand.next_int_bound(128);
         let fz = var5 + rand.next_int_bound(16) + 8;
-        WorldGenFlowers::new(40).generate(&accessor, &mut rand, fx, fy, fz);
+        WorldGenFlowers::new(40).generate(&mut *accessor, &mut rand, fx, fy, fz);
     }
 
     // --- Reed ---
@@ -264,7 +431,7 @@ pub fn alpha_decorate_chunk(
         let rx = var4 + rand.next_int_bound(16) + 8;
         let ry = rand.next_int_bound(128);
         let rz = var5 + rand.next_int_bound(16) + 8;
-        WorldGenReed::new().generate(&accessor, &mut rand, rx, ry, rz);
+        WorldGenReed::new().generate(&mut *accessor, &mut rand, rx, ry, rz);
     }
 
     // --- Pumpkin ---
@@ -272,7 +439,7 @@ pub fn alpha_decorate_chunk(
         let px = var4 + rand.next_int_bound(16) + 8;
         let py = rand.next_int_bound(128);
         let pz = var5 + rand.next_int_bound(16) + 8;
-        WorldGenPumpkin::new().generate(&accessor, &mut rand, px, py, pz);
+        WorldGenPumpkin::new().generate(&mut *accessor, &mut rand, px, py, pz);
     }
 
     // --- Cactus ---
@@ -284,7 +451,7 @@ pub fn alpha_decorate_chunk(
         let cx = var4 + rand.next_int_bound(16) + 8;
         let cy = rand.next_int_bound(128);
         let cz = var5 + rand.next_int_bound(16) + 8;
-        WorldGenCactus::new().generate(&accessor, &mut rand, cx, cy, cz);
+        WorldGenCactus::new().generate(&mut *accessor, &mut rand, cx, cy, cz);
     }
 
     // --- Underground water springs ---
@@ -293,7 +460,7 @@ pub fn alpha_decorate_chunk(
         let step1 = rand.next_int_bound(120) + 8;
         let sy = rand.next_int_bound(step1);
         let sz = var5 + rand.next_int_bound(16) + 8;
-        WorldGenLiquids::new(8).generate(&accessor, &mut rand, sx, sy, sz);
+        WorldGenLiquids::new(8).generate(&mut *accessor, &mut rand, sx, sy, sz);
     }
 
     // --- Underground lava springs ---
@@ -303,7 +470,7 @@ pub fn alpha_decorate_chunk(
         let step2 = rand.next_int_bound(step1) + 8;
         let sy = rand.next_int_bound(step2);
         let sz = var5 + rand.next_int_bound(16) + 8;
-        WorldGenLiquids::new(10).generate(&accessor, &mut rand, sx, sy, sz);
+        WorldGenLiquids::new(10).generate(&mut *accessor, &mut rand, sx, sy, sz);
     }
 
     // --- Snow ---
@@ -316,19 +483,19 @@ pub fn alpha_decorate_chunk(
             for var18 in (var5 + 8)..(var5 + 8 + 16) {
                 let var19 = var17 - (var4 + 8);
                 let var20 = var18 - (var5 + 8);
-                let var21 = snow_top_y(accessor, var17, var18);
+                let var21 = snow_top_y(&mut *accessor, var17, var18);
                 let var22 = temps_slice[(var19 * 16 + var20) as usize] - ((var21 - 64) as f64) / 64.0 * 0.3;
 
                 if var22 < 0.5 && var21 > 0 && var21 < 128
-                    && (accessor.get_block_id)(var17, var21, var18) == 0
+                    && accessor.get_block_id(var17, var21, var18) == 0
                 {
                     // Short-circuit above guarantees var21 - 1 >= 0.
-                    let below_id = (accessor.get_block_id)(var17, var21 - 1, var18);
+                    let below_id = accessor.get_block_id(var17, var21 - 1, var18);
                     let below_mat =
                         material_of(alpha_block_properties_get(below_id as u32).material);
                     if below_mat.is_solid() && below_id != 79 {
                         // occluding ground that is not ice
-                        (accessor.set_block_id)(var17, var21, var18, 78); // snow layer
+                        accessor.set_block_id(var17, var21, var18, 78); // snow layer
                     }
                 }
             }

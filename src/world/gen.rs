@@ -3,7 +3,6 @@
 
 use crate::chunk::Chunk;
 use crate::world::World;
-use crate::world::shims::{TickGuard, tree_accessor};
 use crate::world::tiles::TileData;
 
 impl World {
@@ -93,15 +92,26 @@ impl World {
             ],
         };
         {
-            let _guard = TickGuard::enter(self as *mut World);
             // Decoration sets bypass skylight regen (mirrors C++
             // isPopulating); the write-back below regenerates instead.
             self.populating = true;
-            let gen = self.generator();
+            // Field-split borrows: the generator tables and the chunk map
+            // are disjoint, so the live map can back the canvas fallback
+            // explicitly (no thread-local bridge).
+            if self.generator.is_none() {
+                let seed = self.seed;
+                self.generator =
+                    Some(crate::generator::RustChunkProviderGenerate::new(seed));
+            }
+            let gen = self.generator.as_mut().unwrap();
+            let mut fallback = crate::decorators::WorldAccess {
+                chunks: &mut self.chunks,
+                populating: self.populating,
+            };
             rust_chunk_provider_populate_batch(
                 gen,
                 &batch,
-                tree_accessor(),
+                &mut fallback,
                 cx,
                 cz,
                 center_biome.biome_type as i32,

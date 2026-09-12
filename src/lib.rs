@@ -68,7 +68,7 @@ use crate::random::JavaRandom;
 
 /// Grow a small tree through a block accessor (sapling path).
 pub fn generate_tree(
-    accessor: &crate::decorators::WorldAccessor,
+    accessor: &mut dyn crate::decorators::BlockAccess,
     seed: i64,
     x: i32,
     y: i32,
@@ -80,7 +80,7 @@ pub fn generate_tree(
 
 /// Grow a big tree through a block accessor (1/10 sapling roll).
 pub fn generate_big_tree(
-    accessor: &crate::decorators::WorldAccessor,
+    accessor: &mut dyn crate::decorators::BlockAccess,
     seed: i64,
     x: i32,
     y: i32,

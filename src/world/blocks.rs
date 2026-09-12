@@ -18,7 +18,6 @@ use crate::world::{
     TileData, WORLD_HEIGHT, World, animal_kind_of, animal_string_id, is_air_material, material_of,
     mob_kind_of, mob_string_id, pending_creature,
 };
-use crate::world::shims::{TickGuard, tree_accessor};
 
 /// Alpha wheat/seeds item ids for the crops drivers.
 const WHEAT_ITEM_ID: i32 = 296;
@@ -471,14 +470,16 @@ impl World {
     pub(crate) fn grow_sapling(&mut self, x: i32, y: i32, z: i32, bid: u8, seed: u64) {
         self.apply_set_notify(x, y, z, 0);
         let big = self.rng.next_int_bound(10) == 0;
-        let _guard = TickGuard::enter(self as *mut World);
-        let acc = tree_accessor();
-            let ok = if big {
-                crate::generate_big_tree(&acc, seed as i64, x, y, z)
-            } else {
-                crate::generate_tree(&acc, seed as i64, x, y, z)
-            };
-        drop(_guard);
+        let mut access = crate::decorators::WorldAccess {
+            chunks: &mut self.chunks,
+            populating: self.populating,
+        };
+        let ok = if big {
+            crate::generate_big_tree(&mut access, seed as i64, x, y, z)
+        } else {
+            crate::generate_tree(&mut access, seed as i64, x, y, z)
+        };
+        drop(access);
         if !ok {
             self.apply_set_notify(x, y, z, bid);
         }

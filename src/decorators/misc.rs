@@ -1,13 +1,13 @@
 use crate::random::JavaRandom;
 use crate::block::alpha_block_properties_get;
 use crate::world::material_of;
-use super::WorldAccessor;
+use super::BlockAccess;
 
 /// True when any horizontal neighbor of a cactus cell is solid
 /// (mirrors the `func_216_a` side checks in `BlockCactus.canBlockStay`).
-fn cactus_blocked(accessor: &WorldAccessor, x: i32, y: i32, z: i32) -> bool {
+fn cactus_blocked(accessor: &mut dyn BlockAccess, x: i32, y: i32, z: i32) -> bool {
     for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-        let id = (accessor.get_block_id)(x + dx, y, z + dz);
+        let id = accessor.get_block_id(x + dx, y, z + dz);
         if material_of(alpha_block_properties_get(id as u32).material).is_solid() {
             return true;
         }
@@ -27,10 +27,10 @@ impl WorldGenLakes {
         Self { liquid_block_id: block_id }
     }
 
-    pub fn generate(&self, accessor: &WorldAccessor, rand: &mut JavaRandom, mut x: i32, mut y: i32, mut z: i32) -> bool {
+    pub fn generate(&self, accessor: &mut dyn BlockAccess, rand: &mut JavaRandom, mut x: i32, mut y: i32, mut z: i32) -> bool {
         x -= 8;
         z -= 8;
-        while y > 0 && (accessor.get_block_id)(x, y, z) == 0 {
+        while y > 0 && accessor.get_block_id(x, y, z) == 0 {
             y -= 1;
         }
         y -= 4;
@@ -76,12 +76,12 @@ impl WorldGenLakes {
                          (by < 7 && arr[(bx * 16 + bz) * 8 + by + 1]) ||
                          (by > 0 && arr[(bx * 16 + bz) * 8 + (by - 1)]));
                     if is_edge {
-                        let bid = (accessor.get_block_id)(x + ibx, y + iby, z + ibz);
+                        let bid = accessor.get_block_id(x + ibx, y + iby, z + ibz);
                         if by >= 4 && (bid == 8 || bid == 9 || bid == 10 || bid == 11) {
                             return false;
                         }
                         let solid = bid != 0 && bid != 8 && bid != 9 && bid != 10 && bid != 11;
-                        if by < 4 && !solid && (accessor.get_block_id)(x + ibx, y + iby, z + ibz) != self.liquid_block_id {
+                        if by < 4 && !solid && accessor.get_block_id(x + ibx, y + iby, z + ibz) != self.liquid_block_id {
                             return false;
                         }
                     }
@@ -97,7 +97,7 @@ impl WorldGenLakes {
                 for by in 0..8 {
                     let iby = by as i32;
                     if arr[(bx * 16 + bz) * 8 + by] {
-                        (accessor.set_block_id)(x + ibx, y + iby, z + ibz, if by >= 4 { 0 } else { self.liquid_block_id });
+                        accessor.set_block_id(x + ibx, y + iby, z + ibz, if by >= 4 { 0 } else { self.liquid_block_id });
                     }
                 }
             }
@@ -110,8 +110,8 @@ impl WorldGenLakes {
                 let ibz = bz as i32;
                 for by in 4..8 {
                     let iby = by as i32;
-                    if arr[(bx * 16 + bz) * 8 + by] && (accessor.get_block_id)(x + ibx, y + iby - 1, z + ibz) == 3 {
-                        (accessor.set_block_id)(x + ibx, y + iby - 1, z + ibz, 2); // grass
+                    if arr[(bx * 16 + bz) * 8 + by] && accessor.get_block_id(x + ibx, y + iby - 1, z + ibz) == 3 {
+                        accessor.set_block_id(x + ibx, y + iby - 1, z + ibz, 2); // grass
                     }
                 }
             }
@@ -133,7 +133,7 @@ impl WorldGenFlowers {
         Self { plant_block_id: block_id }
     }
 
-    pub fn generate(&self, accessor: &WorldAccessor, rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
+    pub fn generate(&self, accessor: &mut dyn BlockAccess, rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
         for _ in 0..64 {
             let fx = x + rand.next_int_bound(8) - rand.next_int_bound(8);
             let fy = y + rand.next_int_bound(4) - rand.next_int_bound(4);
@@ -144,8 +144,8 @@ impl WorldGenFlowers {
             if !(1..=127).contains(&fy) {
                 continue;
             }
-            if (accessor.get_block_id)(fx, fy, fz) == 0 && flower_soil_ok(accessor, self.plant_block_id, fx, fy, fz) {
-                (accessor.set_block_id)(fx, fy, fz, self.plant_block_id);
+            if accessor.get_block_id(fx, fy, fz) == 0 && flower_soil_ok(&mut *accessor, self.plant_block_id, fx, fy, fz) {
+                accessor.set_block_id(fx, fy, fz, self.plant_block_id);
             }
         }
         true
@@ -162,15 +162,15 @@ impl WorldGenFlowers {
 /// and reject. The canvas has no light yet, so shade is approximated by
 /// the heightmap: a cell at/above the top is sunlit (reject), below it is
 /// shaded (accept, like the 15-opacity-minus-layers vanilla outcome).
-fn flower_soil_ok(accessor: &WorldAccessor, plant_id: u8, x: i32, y: i32, z: i32) -> bool {
-    let below = (accessor.get_block_id)(x, y - 1, z);
+fn flower_soil_ok(accessor: &mut dyn BlockAccess, plant_id: u8, x: i32, y: i32, z: i32) -> bool {
+    let below = accessor.get_block_id(x, y - 1, z);
     match plant_id {
         37 | 38 => below == 2 || below == 3 || below == 60,
         39 | 40 => {
             if below == 0 || !alpha_block_properties_get(below as u32).allows_attachment {
                 return false;
             }
-            y < (accessor.get_height_value)(x, z)
+            y < accessor.get_height_value(x, z)
         }
         _ => false,
     }
@@ -186,16 +186,16 @@ impl WorldGenReed {
         Self
     }
 
-    pub fn generate(&self, accessor: &WorldAccessor, rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
+    pub fn generate(&self, accessor: &mut dyn BlockAccess, rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
         for _ in 0..20 {
             let rx = x + rand.next_int_bound(4) - rand.next_int_bound(4);
             let ry = y;
             let rz = z + rand.next_int_bound(4) - rand.next_int_bound(4);
-            if (accessor.get_block_id)(rx, ry, rz) == 0 {
-                let has_water = (accessor.get_block_id)(rx - 1, ry - 1, rz) == 8 || (accessor.get_block_id)(rx - 1, ry - 1, rz) == 9 ||
-                                (accessor.get_block_id)(rx + 1, ry - 1, rz) == 8 || (accessor.get_block_id)(rx + 1, ry - 1, rz) == 9 ||
-                                (accessor.get_block_id)(rx, ry - 1, rz - 1) == 8 || (accessor.get_block_id)(rx, ry - 1, rz - 1) == 9 ||
-                                (accessor.get_block_id)(rx, ry - 1, rz + 1) == 8 || (accessor.get_block_id)(rx, ry - 1, rz + 1) == 9;
+            if accessor.get_block_id(rx, ry, rz) == 0 {
+                let has_water = accessor.get_block_id(rx - 1, ry - 1, rz) == 8 || accessor.get_block_id(rx - 1, ry - 1, rz) == 9 ||
+                                accessor.get_block_id(rx + 1, ry - 1, rz) == 8 || accessor.get_block_id(rx + 1, ry - 1, rz) == 9 ||
+                                accessor.get_block_id(rx, ry - 1, rz - 1) == 8 || accessor.get_block_id(rx, ry - 1, rz - 1) == 9 ||
+                                accessor.get_block_id(rx, ry - 1, rz + 1) == 8 || accessor.get_block_id(rx, ry - 1, rz + 1) == 9;
                 if has_water {
                     let step1 = rand.next_int_bound(3) + 1;
                     let height = 2 + rand.next_int_bound(step1);
@@ -204,7 +204,7 @@ impl WorldGenReed {
                         if !(1..=127).contains(&(ry + h)) {
                             break;
                         }
-                        let below = (accessor.get_block_id)(rx, ry + h - 1, rz);
+                        let below = accessor.get_block_id(rx, ry + h - 1, rz);
                         if h == 0 {
                             // `BlockReed.canPlaceBlockAt`: grass or dirt
                             // only (sand never hosts reed).
@@ -216,8 +216,8 @@ impl WorldGenReed {
                                 break;
                             }
                         }
-                        if (accessor.get_block_id)(rx, ry + h, rz) == 0 {
-                            (accessor.set_block_id)(rx, ry + h, rz, 83); // reed
+                        if accessor.get_block_id(rx, ry + h, rz) == 0 {
+                            accessor.set_block_id(rx, ry + h, rz, 83); // reed
                         }
                     }
                 }
@@ -237,12 +237,12 @@ impl WorldGenCactus {
         Self
     }
 
-    pub fn generate(&self, accessor: &WorldAccessor, rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
+    pub fn generate(&self, accessor: &mut dyn BlockAccess, rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
         for _ in 0..10 {
             let cx = x + rand.next_int_bound(8) - rand.next_int_bound(8);
             let cy = y + rand.next_int_bound(4) - rand.next_int_bound(4);
             let cz = z + rand.next_int_bound(8) - rand.next_int_bound(8);
-            if (accessor.get_block_id)(cx, cy, cz) == 0 {
+            if accessor.get_block_id(cx, cy, cz) == 0 {
                 let step1 = rand.next_int_bound(3) + 1;
                 let height = 1 + rand.next_int_bound(step1);
                 for h in 0..height {
@@ -250,7 +250,7 @@ impl WorldGenCactus {
                     if !(1..=127).contains(&(cy + h)) {
                         break;
                     }
-                    let below = (accessor.get_block_id)(cx, cy + h - 1, cz);
+                    let below = accessor.get_block_id(cx, cy + h - 1, cz);
                     if h == 0 {
                         if below != 12 { // sand
                             break;
@@ -262,11 +262,11 @@ impl WorldGenCactus {
                     }
                     // `BlockCactus.canBlockStay`: no *solid* (`func_216_a`)
                     // neighbor — water and air are both fine.
-                    if cactus_blocked(accessor, cx, cy + h, cz) {
+                    if cactus_blocked(&mut *accessor, cx, cy + h, cz) {
                         break;
                     }
-                    if (accessor.get_block_id)(cx, cy + h, cz) == 0 {
-                        (accessor.set_block_id)(cx, cy + h, cz, 81); // cactus
+                    if accessor.get_block_id(cx, cy + h, cz) == 0 {
+                        accessor.set_block_id(cx, cy + h, cz, 81); // cactus
                     }
                 }
             }
@@ -285,14 +285,14 @@ impl WorldGenPumpkin {
         Self
     }
 
-    pub fn generate(&self, accessor: &WorldAccessor, rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
+    pub fn generate(&self, accessor: &mut dyn BlockAccess, rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
         for _ in 0..64 {
             let px = x + rand.next_int_bound(8) - rand.next_int_bound(8);
             let py = y + rand.next_int_bound(4) - rand.next_int_bound(4);
             let pz = z + rand.next_int_bound(8) - rand.next_int_bound(8);
-            if (accessor.get_block_id)(px, py, pz) == 0 && (accessor.get_block_id)(px, py - 1, pz) == 2 {
-                (accessor.set_block_id)(px, py, pz, 86); // pumpkin
-                (accessor.set_block_meta)(px, py, pz, rand.next_int_bound(4) as u8);
+            if accessor.get_block_id(px, py, pz) == 0 && accessor.get_block_id(px, py - 1, pz) == 2 {
+                accessor.set_block_id(px, py, pz, 86); // pumpkin
+                accessor.set_block_meta(px, py, pz, rand.next_int_bound(4) as u8);
             }
         }
         true
@@ -311,26 +311,26 @@ impl WorldGenLiquids {
         Self { liquid_block_id: block_id }
     }
 
-    pub fn generate(&self, accessor: &WorldAccessor, _rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
-        if (accessor.get_block_id)(x, y + 1, z) != 1 { return false; } // stone above
-        if (accessor.get_block_id)(x, y - 1, z) != 1 { return false; } // stone below
-        let current = (accessor.get_block_id)(x, y, z);
+    pub fn generate(&self, accessor: &mut dyn BlockAccess, _rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
+        if accessor.get_block_id(x, y + 1, z) != 1 { return false; } // stone above
+        if accessor.get_block_id(x, y - 1, z) != 1 { return false; } // stone below
+        let current = accessor.get_block_id(x, y, z);
         if current != 0 && current != 1 { return false; }
 
         let mut stone_count = 0;
-        if (accessor.get_block_id)(x - 1, y, z) == 1 { stone_count += 1; }
-        if (accessor.get_block_id)(x + 1, y, z) == 1 { stone_count += 1; }
-        if (accessor.get_block_id)(x, y, z - 1) == 1 { stone_count += 1; }
-        if (accessor.get_block_id)(x, y, z + 1) == 1 { stone_count += 1; }
+        if accessor.get_block_id(x - 1, y, z) == 1 { stone_count += 1; }
+        if accessor.get_block_id(x + 1, y, z) == 1 { stone_count += 1; }
+        if accessor.get_block_id(x, y, z - 1) == 1 { stone_count += 1; }
+        if accessor.get_block_id(x, y, z + 1) == 1 { stone_count += 1; }
 
         let mut air_count = 0;
-        if (accessor.get_block_id)(x - 1, y, z) == 0 { air_count += 1; }
-        if (accessor.get_block_id)(x + 1, y, z) == 0 { air_count += 1; }
-        if (accessor.get_block_id)(x, y, z - 1) == 0 { air_count += 1; }
-        if (accessor.get_block_id)(x, y, z + 1) == 0 { air_count += 1; }
+        if accessor.get_block_id(x - 1, y, z) == 0 { air_count += 1; }
+        if accessor.get_block_id(x + 1, y, z) == 0 { air_count += 1; }
+        if accessor.get_block_id(x, y, z - 1) == 0 { air_count += 1; }
+        if accessor.get_block_id(x, y, z + 1) == 0 { air_count += 1; }
 
         if stone_count == 3 && air_count == 1 {
-            (accessor.set_block_id)(x, y, z, self.liquid_block_id);
+            accessor.set_block_id(x, y, z, self.liquid_block_id);
         }
         true
     }
@@ -346,7 +346,7 @@ impl WorldGenDungeons {
         Self
     }
 
-    pub fn generate(&self, accessor: &WorldAccessor, rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
+    pub fn generate(&self, accessor: &mut dyn BlockAccess, rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
         let half_x = rand.next_int_bound(2) + 2;
         let half_z = rand.next_int_bound(2) + 2;
         let height = 3;
@@ -356,12 +356,12 @@ impl WorldGenDungeons {
         for dx in (x - half_x - 1)..=(x + half_x + 1) {
             for dy in (y - 1)..=(y + height + 1) {
                 for dz in (z - half_z - 1)..=(z + half_z + 1) {
-                    let bid = (accessor.get_block_id)(dx, dy, dz);
+                    let bid = accessor.get_block_id(dx, dy, dz);
                     let solid = bid != 0 && bid != 8 && bid != 9 && bid != 10 && bid != 11;
                     if dy == y - 1 && !solid { return false; }
                     if dy == y + height + 1 && !solid { return false; }
                     if (dx == x - half_x - 1 || dx == x + half_x + 1 || dz == z - half_z - 1 || dz == z + half_z + 1) &&
-                        dy == y && (accessor.get_block_id)(dx, dy, dz) == 0 && (accessor.get_block_id)(dx, dy + 1, dz) == 0
+                        dy == y && accessor.get_block_id(dx, dy, dz) == 0 && accessor.get_block_id(dx, dy + 1, dz) == 0
                     {
                         solid_count += 1;
                     }
@@ -377,17 +377,17 @@ impl WorldGenDungeons {
                         if dx != x - half_x - 1 && dy != y - 1 && dz != z - half_z - 1 &&
                             dx != x + half_x + 1 && dy != y + height + 1 && dz != z + half_z + 1
                         {
-                            (accessor.set_block_id)(dx, dy, dz, 0); // air
+                            accessor.set_block_id(dx, dy, dz, 0); // air
                         } else {
-                            let bid = (accessor.get_block_id)(dx, dy, dz);
+                            let bid = accessor.get_block_id(dx, dy, dz);
                             let solid = bid != 0 && bid != 8 && bid != 9;
                             if dy >= 0 && !solid {
-                                (accessor.set_block_id)(dx, dy, dz, 0);
+                                accessor.set_block_id(dx, dy, dz, 0);
                             } else if solid {
                                 if dy == y - 1 && rand.next_int_bound(4) != 0 {
-                                    (accessor.set_block_id)(dx, dy, dz, 48); // mossy cobblestone
+                                    accessor.set_block_id(dx, dy, dz, 48); // mossy cobblestone
                                 } else {
-                                    (accessor.set_block_id)(dx, dy, dz, 4); // cobblestone
+                                    accessor.set_block_id(dx, dy, dz, 4); // cobblestone
                                 }
                             }
                         }
@@ -399,15 +399,15 @@ impl WorldGenDungeons {
                 for _ in 0..3 {
                     let cx = x + rand.next_int_bound(half_x * 2 + 1) - half_x;
                     let cz = z + rand.next_int_bound(half_z * 2 + 1) - half_z;
-                    if (accessor.get_block_id)(cx, y, cz) == 0 {
+                    if accessor.get_block_id(cx, y, cz) == 0 {
                         let mut solid_count = 0;
-                        if (accessor.is_block_solid)(cx - 1, y, cz) { solid_count += 1; }
-                        if (accessor.is_block_solid)(cx + 1, y, cz) { solid_count += 1; }
-                        if (accessor.is_block_solid)(cx, y, cz - 1) { solid_count += 1; }
-                        if (accessor.is_block_solid)(cx, y, cz + 1) { solid_count += 1; }
+                        if accessor.is_block_solid(cx - 1, y, cz) { solid_count += 1; }
+                        if accessor.is_block_solid(cx + 1, y, cz) { solid_count += 1; }
+                        if accessor.is_block_solid(cx, y, cz - 1) { solid_count += 1; }
+                        if accessor.is_block_solid(cx, y, cz + 1) { solid_count += 1; }
 
                         if solid_count == 1 {
-                            (accessor.set_block_id)(cx, y, cz, 54); // chest block
+                            accessor.set_block_id(cx, y, cz, 54); // chest block
 
                             // Chest loot (Java WorldGenDungeons: 8 rolls of
                             // func_434_a into random slots).
@@ -424,7 +424,7 @@ impl WorldGenDungeons {
             }
 
             // Place spawner
-            (accessor.set_block_id)(x, y, z, 52); // mob spawner
+            accessor.set_block_id(x, y, z, 52); // mob spawner
             dungeon_spawner_kind(rand); // Choose spawner mob type (RNG burn; spawner tiles arrive later)
             true
         } else {
@@ -501,91 +501,89 @@ fn dungeon_spawner_kind(rand: &mut JavaRandom) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::RefCell;
     use std::collections::HashMap;
 
-    thread_local! {
-        static CELLS: RefCell<HashMap<(i32, i32, i32), u8>> = RefCell::new(HashMap::new());
+    struct FakeAccess {
+        cells: HashMap<(i32, i32, i32), u8>,
     }
 
-    fn t_get(x: i32, y: i32, z: i32) -> u8 {
-        CELLS.with(|c| c.borrow().get(&(x, y, z)).copied().unwrap_or(0))
-    }
-    fn t_set(x: i32, y: i32, z: i32, id: u8) {
-        CELLS.with(|c| c.borrow_mut().insert((x, y, z), id));
-    }
-    fn t_meta(_x: i32, _y: i32, _z: i32) -> u8 {
-        0
-    }
-    fn t_set_meta(_x: i32, _y: i32, _z: i32, _m: u8) {}
-    fn t_attach(_x: i32, _y: i32, _z: i32) -> bool {
-        false
-    }
-    fn t_solid(x: i32, y: i32, z: i32) -> bool {
-        t_get(x, y, z) != 0
-    }
-    fn t_height(x: i32, z: i32) -> i32 {
-        for y in (0..128).rev() {
-            if t_get(x, y, z) != 0 {
-                return y + 1;
+    impl FakeAccess {
+        fn new() -> Self {
+            Self { cells: HashMap::new() }
+        }
+        fn flat_grass(&mut self) {
+            self.cells.clear();
+            for x in -16..16 {
+                for z in -16..16 {
+                    self.set(x, 63, z, 2); // grass
+                }
             }
         }
-        0
-    }
-    fn t_accessor() -> WorldAccessor {
-        WorldAccessor {
-            get_block_id: t_get,
-            set_block_id: t_set,
-            get_block_meta: t_meta,
-            set_block_meta: t_set_meta,
-            allows_attachment: t_attach,
-            is_block_solid: t_solid,
-            get_height_value: t_height,
+        fn set(&mut self, x: i32, y: i32, z: i32, id: u8) {
+            self.cells.insert((x, y, z), id);
+        }
+        fn planted(&self, id: u8) -> usize {
+            self.cells.values().filter(|v| **v == id).count()
         }
     }
-    fn flat_grass() {
-        CELLS.with(|c| c.borrow_mut().clear());
-        for x in -16..16 {
-            for z in -16..16 {
-                t_set(x, 63, z, 2); // grass
+
+    impl BlockAccess for FakeAccess {
+        fn get_block_id(&mut self, x: i32, y: i32, z: i32) -> u8 {
+            self.cells.get(&(x, y, z)).copied().unwrap_or(0)
+        }
+        fn set_block_id(&mut self, x: i32, y: i32, z: i32, id: u8) {
+            self.cells.insert((x, y, z), id);
+        }
+        fn get_block_meta(&mut self, _x: i32, _y: i32, _z: i32) -> u8 {
+            0
+        }
+        fn set_block_meta(&mut self, _x: i32, _y: i32, _z: i32, _m: u8) {}
+        fn allows_attachment(&mut self, _x: i32, _y: i32, _z: i32) -> bool {
+            false
+        }
+        fn is_block_solid(&mut self, x: i32, y: i32, z: i32) -> bool {
+            self.get_block_id(x, y, z) != 0
+        }
+        fn get_height_value(&mut self, x: i32, z: i32) -> i32 {
+            for y in (0..128).rev() {
+                if self.get_block_id(x, y, z) != 0 {
+                    return y + 1;
+                }
             }
+            0
         }
-    }
-    fn planted(id: u8) -> usize {
-        CELLS.with(|c| c.borrow().values().filter(|v| **v == id).count())
     }
 
     #[test]
     fn test_mushroom_rejects_sunlit_ground() {
         // Open grass flat: vanilla reads skylight ~15 (>13) and plants no
         // mushrooms; shaded cells (canopy above) accept.
-        flat_grass();
-        let acc = t_accessor();
+        let mut acc = FakeAccess::new();
+        acc.flat_grass();
         let mut rand = JavaRandom::new(1234);
-        WorldGenFlowers::new(39).generate(&acc, &mut rand, 0, 64, 0);
-        WorldGenFlowers::new(40).generate(&acc, &mut rand, 0, 64, 0);
-        assert_eq!(planted(39), 0, "brown mushrooms must not plant on sunlit ground");
-        assert_eq!(planted(40), 0, "red mushrooms must not plant on sunlit ground");
+        WorldGenFlowers::new(39).generate(&mut acc, &mut rand, 0, 64, 0);
+        WorldGenFlowers::new(40).generate(&mut acc, &mut rand, 0, 64, 0);
+        assert_eq!(acc.planted(39), 0, "brown mushrooms must not plant on sunlit ground");
+        assert_eq!(acc.planted(40), 0, "red mushrooms must not plant on sunlit ground");
         // Same flat with a leaf canopy overhead: shade accepts.
         for x in -16..16 {
             for z in -16..16 {
-                t_set(x, 70, z, 18);
+                acc.set(x, 70, z, 18);
             }
         }
         let mut rand = JavaRandom::new(1234);
-        WorldGenFlowers::new(39).generate(&acc, &mut rand, 0, 64, 0);
-        assert!(planted(39) > 0, "shaded mushrooms must plant");
+        WorldGenFlowers::new(39).generate(&mut acc, &mut rand, 0, 64, 0);
+        assert!(acc.planted(39) > 0, "shaded mushrooms must plant");
     }
 
     #[test]
     fn test_flowers_plant_on_open_grass() {
-        flat_grass();
-        let acc = t_accessor();
+        let mut acc = FakeAccess::new();
+        acc.flat_grass();
         let mut rand = JavaRandom::new(42);
-        WorldGenFlowers::new(37).generate(&acc, &mut rand, 0, 64, 0);
-        WorldGenFlowers::new(38).generate(&acc, &mut rand, 0, 64, 0);
-        assert!(planted(37) > 0, "yellow flowers must plant on open grass");
-        assert!(planted(38) > 0, "red flowers must plant on open grass");
+        WorldGenFlowers::new(37).generate(&mut acc, &mut rand, 0, 64, 0);
+        WorldGenFlowers::new(38).generate(&mut acc, &mut rand, 0, 64, 0);
+        assert!(acc.planted(37) > 0, "yellow flowers must plant on open grass");
+        assert!(acc.planted(38) > 0, "red flowers must plant on open grass");
     }
 }
-

@@ -12,8 +12,6 @@
 //! - `spawning` — spawn fitness, hostile/passive passes, world tick.
 //! - `blocks` — placement, neighbor updates, drops, tick scheduling.
 //! - `gen` — on-demand chunk generation/population.
-//! - `shims` — the last thread-local bridge (tree generation; the
-//!   block/spawn/item bridges are gone, see that file).
 //! - `tiles` — `TileData`, entity string-id helpers.
 //! - `tests` — unit tests (same module-tree access).
 //!
@@ -27,7 +25,6 @@ pub mod combat;
 pub mod gen;
 pub mod living;
 pub mod physics;
-pub mod shims;
 pub mod spawning;
 pub mod tiles;
 
@@ -304,12 +301,86 @@ impl World {
         chunks.get(&(cx, cz)).map(|c| c.get_block_id(lx, y, lz)).unwrap_or(0)
     }
 
-    pub fn get_block_meta(&self, x: i32, y: i32, z: i32) -> u8 {
+    /// Chunk-map half of [`World::get_block_meta`] (same split as
+    /// `block_id_in`; also reused by the decorator tree accessor).
+    pub(crate) fn block_meta_in(chunks: &HashMap<(i32, i32), Chunk>, x: i32, y: i32, z: i32) -> u8 {
         if y < 0 || y >= WORLD_HEIGHT {
             return 0;
         }
         let (cx, cz, lx, lz) = Self::chunk_of(x, z);
-        self.chunks.get(&(cx, cz)).map(|c| c.get_block_metadata(lx, y, lz)).unwrap_or(0)
+        chunks.get(&(cx, cz)).map(|c| c.get_block_metadata(lx, y, lz)).unwrap_or(0)
+    }
+
+    /// Chunk-map half of [`World::set_block_meta`] (same split as
+    /// `block_meta_in`; also reused by the decorator tree accessor).
+    pub(crate) fn set_block_meta_in(
+        chunks: &mut HashMap<(i32, i32), Chunk>,
+        x: i32,
+        y: i32,
+        z: i32,
+        meta: u8,
+    ) -> bool {
+        if y < 0 || y >= WORLD_HEIGHT {
+            return false;
+        }
+        let (cx, cz, lx, lz) = Self::chunk_of(x, z);
+        chunks
+            .get_mut(&(cx, cz))
+            .map(|c| {
+                c.set_block_metadata(lx, y, lz, meta);
+                true
+            })
+            .unwrap_or(false)
+    }
+
+    /// Chunk-map half of [`World::set_block_id`]: the `populating` flag
+    /// travels explicitly so the decorator tree accessor shares one flow.
+    /// Skylight follows the C++ `setBlock` path (full regen while a world
+    /// holds the chunk); the native BFS pass stays single-chunk, so a
+    /// one-cell fringe seam at borders is a known approximation until
+    /// the pass learns cross-chunk spread like the C++ one does.
+    pub(crate) fn set_block_id_in(
+        chunks: &mut HashMap<(i32, i32), Chunk>,
+        populating: bool,
+        x: i32,
+        y: i32,
+        z: i32,
+        id: u8,
+    ) -> bool {
+        if y < 0 || y >= WORLD_HEIGHT {
+            return false;
+        }
+        let (cx, cz, lx, lz) = Self::chunk_of(x, z);
+        let changed =
+            chunks.get_mut(&(cx, cz)).map(|c| c.set_block_id(lx, y, lz, id)).unwrap_or(false);
+        if changed && !populating {
+            if let Some(c) = chunks.get_mut(&(cx, cz)) {
+                c.generate_skylight_map();
+            }
+        }
+        changed
+    }
+
+    /// Chunk-map half of [`World::is_solid`] (same split; the id list
+    /// mirrors `isBlockSolidNoChunkLoad` exactly).
+    pub(crate) fn is_solid_in(chunks: &HashMap<(i32, i32), Chunk>, x: i32, y: i32, z: i32) -> bool {
+        if y < 0 || y >= WORLD_HEIGHT {
+            return false;
+        }
+        match Self::block_id_in(chunks, x, y, z) {
+            0 | 8 | 9 | 10 | 11 | 78 | 37 | 38 | 39 | 40 | 83 | 51 | 6 => false,
+            _ => true,
+        }
+    }
+
+    /// Chunk-map half of [`World::get_height_value`] (same split).
+    pub(crate) fn height_in(chunks: &HashMap<(i32, i32), Chunk>, x: i32, z: i32) -> i32 {
+        let (cx, cz, lx, lz) = Self::chunk_of(x, z);
+        chunks.get(&(cx, cz)).map(|c| c.get_height_value(lx, lz)).unwrap_or(0)
+    }
+
+    pub fn get_block_meta(&self, x: i32, y: i32, z: i32) -> u8 {
+        Self::block_meta_in(&self.chunks, x, y, z)
     }
 
     /// Missing chunk or out-of-range Y: no-op returning false (mirrors the
@@ -317,40 +388,11 @@ impl World {
     /// follows the C++ `setBlock` path (full regen while a world holds
     /// the chunk); population sets bypass it via [`World::populating`].
     pub fn set_block_id(&mut self, x: i32, y: i32, z: i32, id: u8) -> bool {
-        if y < 0 || y >= WORLD_HEIGHT {
-            return false;
-        }
-        let (cx, cz, lx, lz) = Self::chunk_of(x, z);
-        let changed = self.chunks.get_mut(&(cx, cz)).map(|c| c.set_block_id(lx, y, lz, id)).unwrap_or(false);
-        if changed && !self.populating {
-            self.refresh_skylight(x, z);
-        }
-        changed
-    }
-
-    /// Recompute skylight for the touched column's chunk (mirrors the
-    /// C++ regen on set; the native BFS pass stays single-chunk, so a
-    /// one-cell fringe seam at borders is a known approximation until
-    /// the pass learns cross-chunk spread like the C++ one does).
-    fn refresh_skylight(&mut self, x: i32, z: i32) {
-        let (cx, cz, _, _) = Self::chunk_of(x, z);
-        if let Some(c) = self.chunks.get_mut(&(cx, cz)) {
-            c.generate_skylight_map();
-        }
+        Self::set_block_id_in(&mut self.chunks, self.populating, x, y, z, id)
     }
 
     pub fn set_block_meta(&mut self, x: i32, y: i32, z: i32, meta: u8) -> bool {
-        if y < 0 || y >= WORLD_HEIGHT {
-            return false;
-        }
-        let (cx, cz, lx, lz) = Self::chunk_of(x, z);
-        self.chunks
-            .get_mut(&(cx, cz))
-            .map(|c| {
-                c.set_block_metadata(lx, y, lz, meta);
-                true
-            })
-            .unwrap_or(false)
+        Self::set_block_meta_in(&mut self.chunks, x, y, z, meta)
     }
 
     pub fn material_at(&self, x: i32, y: i32, z: i32) -> Material {
@@ -369,13 +411,7 @@ impl World {
     pub fn is_solid(&self, x: i32, y: i32, z: i32) -> bool {
         // ID list mirrors World::isBlockSolidNoChunkLoad exactly
         // (NOT material-based: torches and the like count as solid here).
-        if y < 0 || y >= WORLD_HEIGHT {
-            return false;
-        }
-        match self.get_block_id(x, y, z) {
-            0 | 8 | 9 | 10 | 11 | 78 | 37 | 38 | 39 | 40 | 83 | 51 | 6 => false,
-            _ => true,
-        }
+        Self::is_solid_in(&self.chunks, x, y, z)
     }
 
     pub fn is_water(&self, x: i32, y: i32, z: i32) -> bool {
@@ -387,8 +423,7 @@ impl World {
     }
 
     pub fn get_height_value(&self, x: i32, z: i32) -> i32 {
-        let (cx, cz, lx, lz) = Self::chunk_of(x, z);
-        self.chunks.get(&(cx, cz)).map(|c| c.get_height_value(lx, lz)).unwrap_or(0)
+        Self::height_in(&self.chunks, x, z)
     }
 
     /// Saved light by type (mirrors `World::getSavedLightValue`:

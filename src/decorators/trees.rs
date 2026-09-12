@@ -1,5 +1,5 @@
 use crate::random::JavaRandom;
-use super::WorldAccessor;
+use super::BlockAccess;
 
 pub struct WorldGenTrees;
 
@@ -8,7 +8,7 @@ impl WorldGenTrees {
         Self
     }
 
-    pub fn generate(&self, accessor: &WorldAccessor, rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
+    pub fn generate(&self, accessor: &mut dyn BlockAccess, rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
         let var6 = rand.next_int_bound(3) + 4;
         let mut var7 = true;
 
@@ -25,7 +25,7 @@ impl WorldGenTrees {
                 for var10 in (x - var9)..=(x + var9) {
                     for var11 in (z - var9)..=(z + var9) {
                         if var8 >= 0 && var8 < 128 {
-                            let var12 = (accessor.get_block_id)(var10, var8, var11);
+                            let var12 = accessor.get_block_id(var10, var8, var11);
                             if var12 != 0 && var12 != 18 { // air, leaves
                                 var7 = false;
                             }
@@ -40,9 +40,9 @@ impl WorldGenTrees {
                 return false;
             }
 
-            let var8 = (accessor.get_block_id)(x, y - 1, z);
+            let var8 = accessor.get_block_id(x, y - 1, z);
             if (var8 == 2 || var8 == 3) && y < 128 - var6 - 1 {
-                (accessor.set_block_id)(x, y - 1, z, 3); // dirt
+                accessor.set_block_id(x, y - 1, z, 3); // dirt
 
                 // Leaves
                 for var16 in (y - 3 + var6)..=y + var6 {
@@ -53,9 +53,9 @@ impl WorldGenTrees {
                         for var14 in (z - var11)..=(z + var11) {
                             let var15 = var14 - z;
                             if (var13.abs() != var11 || var15.abs() != var11 || (rand.next_int_bound(2) != 0 && var10 != 0))
-                                && !(accessor.allows_attachment)(var12, var16, var14)
+                                && !accessor.allows_attachment(var12, var16, var14)
                             {
-                                (accessor.set_block_id)(var12, var16, var14, 18); // leaves
+                                accessor.set_block_id(var12, var16, var14, 18); // leaves
                             }
                         }
                     }
@@ -63,9 +63,9 @@ impl WorldGenTrees {
 
                 // Trunk
                 for var16 in 0..var6 {
-                    let var10 = (accessor.get_block_id)(x, y + var16, z);
+                    let var10 = accessor.get_block_id(x, y + var16, z);
                     if var10 == 0 || var10 == 18 {
-                        (accessor.set_block_id)(x, y + var16, z, 17); // log
+                        accessor.set_block_id(x, y + var16, z, 17); // log
                     }
                 }
                 return true;
@@ -154,7 +154,7 @@ impl WorldGenBigTree {
         }
     }
 
-    fn check_block_line(&self, accessor: &WorldAccessor, from: &[i32; 3], to: &[i32; 3]) -> i32 {
+    fn check_block_line(&self, accessor: &mut dyn BlockAccess, from: &[i32; 3], to: &[i32; 3]) -> i32 {
         let mut diff = [0; 3];
         let mut max_axis = 0;
         for i in 0..3 {
@@ -179,7 +179,7 @@ impl WorldGenBigTree {
             pos[max_axis] = from[max_axis] + i;
             pos[ax1] = (from[ax1] as f64 + (i as f64) * r1) as i32;
             pos[ax2] = (from[ax2] as f64 + (i as f64) * r2) as i32;
-            let bid = (accessor.get_block_id)(pos[0], pos[1], pos[2]);
+            let bid = accessor.get_block_id(pos[0], pos[1], pos[2]);
             if bid != 0 && bid != 18 {
                 break;
             }
@@ -193,7 +193,7 @@ impl WorldGenBigTree {
         }
     }
 
-    fn place_block_line(&self, accessor: &WorldAccessor, from: &[i32; 3], to: &[i32; 3], block_id: u8) {
+    fn place_block_line(&self, accessor: &mut dyn BlockAccess, from: &[i32; 3], to: &[i32; 3], block_id: u8) {
         let mut diff = [0; 3];
         let mut max_axis = 0;
         for i in 0..3 {
@@ -218,12 +218,12 @@ impl WorldGenBigTree {
             pos[max_axis] = ((from[max_axis] + i) as f64 + 0.5).floor() as i32;
             pos[ax1] = (from[ax1] as f64 + (i as f64) * r1 + 0.5).floor() as i32;
             pos[ax2] = (from[ax2] as f64 + (i as f64) * r2 + 0.5).floor() as i32;
-            (accessor.set_block_id)(pos[0], pos[1], pos[2], block_id);
+            accessor.set_block_id(pos[0], pos[1], pos[2], block_id);
             i += step;
         }
     }
 
-    fn gen_tree_layer(&self, accessor: &WorldAccessor, x: i32, y: i32, z: i32, radius: f32, axis: usize, block_id: u8) {
+    fn gen_tree_layer(&self, accessor: &mut dyn BlockAccess, x: i32, y: i32, z: i32, radius: f32, axis: usize, block_id: u8) {
         let int_radius = (radius as f64 + 0.618) as i32;
         let ax1 = OTHER_COORD_PAIRS[axis] as usize;
         let ax2 = OTHER_COORD_PAIRS[axis + 3] as usize;
@@ -239,23 +239,23 @@ impl WorldGenBigTree {
                     continue;
                 }
                 pos[ax2] = center[ax2] + j;
-                let bid = (accessor.get_block_id)(pos[0], pos[1], pos[2]);
+                let bid = accessor.get_block_id(pos[0], pos[1], pos[2]);
                 if bid != 0 && bid != 18 {
                     continue;
                 }
-                (accessor.set_block_id)(pos[0], pos[1], pos[2], block_id);
+                accessor.set_block_id(pos[0], pos[1], pos[2], block_id);
             }
         }
     }
 
-    fn generate_leaf_node(&self, accessor: &WorldAccessor, x: i32, y: i32, z: i32) {
+    fn generate_leaf_node(&self, accessor: &mut dyn BlockAccess, x: i32, y: i32, z: i32) {
         for i in y..(y + self.leaf_distance_limit) {
             let size = self.leaf_size(i - y);
-            self.gen_tree_layer(accessor, x, i, z, size, 1, 18); // leaves
+            self.gen_tree_layer(&mut *accessor, x, i, z, size, 1, 18); // leaves
         }
     }
 
-    fn generate_leaf_node_list(&mut self, accessor: &WorldAccessor) {
+    fn generate_leaf_node_list(&mut self, accessor: &mut dyn BlockAccess) {
         self.height = (self.height_limit as f64 * self.height_attenuation) as i32;
         if self.height >= self.height_limit {
             self.height = self.height_limit - 1;
@@ -295,7 +295,7 @@ impl WorldGenBigTree {
                 let b_from = [bx, top_y, bz];
                 let b_to = [bx, top_y + self.leaf_distance_limit, bz];
 
-                if self.check_block_line(accessor, &b_from, &b_to) == -1 {
+                if self.check_block_line(&mut *accessor, &b_from, &b_to) == -1 {
                     let mut trunk = [self.base_pos[0], self.base_pos[1], self.base_pos[2]];
                     let h_dist = (((self.base_pos[0] - bx).abs() as f64).powi(2) + ((self.base_pos[2] - bz).abs() as f64).powi(2)).sqrt();
                     let branch_y = h_dist * self.branch_slope;
@@ -304,7 +304,7 @@ impl WorldGenBigTree {
                     } else {
                         trunk[1] = ((b_from[1] as f64) - branch_y) as i32;
                     }
-                    if self.check_block_line(accessor, &trunk, &b_from) == -1 {
+                    if self.check_block_line(&mut *accessor, &trunk, &b_from) == -1 {
                         temp.push(LeafNode {
                             x: bx,
                             y: top_y,
@@ -321,38 +321,38 @@ impl WorldGenBigTree {
         self.leaf_nodes = temp;
     }
 
-    fn generate_leaves(&self, accessor: &WorldAccessor) {
+    fn generate_leaves(&self, accessor: &mut dyn BlockAccess) {
         for node in &self.leaf_nodes {
-            self.generate_leaf_node(accessor, node.x, node.y, node.z);
+            self.generate_leaf_node(&mut *accessor, node.x, node.y, node.z);
         }
     }
 
-    fn generate_trunk(&self, accessor: &WorldAccessor) {
+    fn generate_trunk(&self, accessor: &mut dyn BlockAccess) {
         let from = [self.base_pos[0], self.base_pos[1], self.base_pos[2]];
         let to = [self.base_pos[0], self.base_pos[1] + self.height, self.base_pos[2]];
-        self.place_block_line(accessor, &from, &to, 17); // log
+        self.place_block_line(&mut *accessor, &from, &to, 17); // log
     }
 
-    fn generate_leaf_node_bases(&self, accessor: &WorldAccessor) {
+    fn generate_leaf_node_bases(&self, accessor: &mut dyn BlockAccess) {
         let mut trunk = [self.base_pos[0], self.base_pos[1], self.base_pos[2]];
         for node in &self.leaf_nodes {
             let node_pos = [node.x, node.y, node.z];
             trunk[1] = node.branch_y;
             let rel_y = trunk[1] - self.base_pos[1];
             if (rel_y as f64) >= (self.height_limit as f64) * 0.2 {
-                self.place_block_line(accessor, &trunk, &node_pos, 17); // log
+                self.place_block_line(&mut *accessor, &trunk, &node_pos, 17); // log
             }
         }
     }
 
-    fn valid_tree_location(&mut self, accessor: &WorldAccessor) -> bool {
+    fn valid_tree_location(&mut self, accessor: &mut dyn BlockAccess) -> bool {
         let from = [self.base_pos[0], self.base_pos[1], self.base_pos[2]];
         let to = [self.base_pos[0], self.base_pos[1] + self.height_limit - 1, self.base_pos[2]];
-        let below = (accessor.get_block_id)(self.base_pos[0], self.base_pos[1] - 1, self.base_pos[2]);
+        let below = accessor.get_block_id(self.base_pos[0], self.base_pos[1] - 1, self.base_pos[2]);
         if below != 2 && below != 3 {
             return false; // grass/dirt
         }
-        let result = self.check_block_line(accessor, &from, &to);
+        let result = self.check_block_line(&mut *accessor, &from, &to);
         if result == -1 {
             return true;
         }
@@ -363,20 +363,20 @@ impl WorldGenBigTree {
         true
     }
 
-    pub fn generate(&mut self, accessor: &WorldAccessor, rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
+    pub fn generate(&mut self, accessor: &mut dyn BlockAccess, rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
         let lng = rand.next_long();
         self.tree_rand.set_seed(lng);
         self.base_pos = [x, y, z];
         if self.height_limit == 0 {
             self.height_limit = 5 + self.tree_rand.next_int_bound(self.height_limit_limit);
         }
-        if !self.valid_tree_location(accessor) {
+        if !self.valid_tree_location(&mut *accessor) {
             return false;
         }
-        self.generate_leaf_node_list(accessor);
-        self.generate_leaves(accessor);
-        self.generate_trunk(accessor);
-        self.generate_leaf_node_bases(accessor);
+        self.generate_leaf_node_list(&mut *accessor);
+        self.generate_leaves(&mut *accessor);
+        self.generate_trunk(&mut *accessor);
+        self.generate_leaf_node_bases(&mut *accessor);
         true
     }
 }
