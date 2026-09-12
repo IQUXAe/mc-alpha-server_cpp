@@ -21,14 +21,14 @@ pub struct RustChunkDataBatch {
 
 pub struct RustChunkProviderGenerate {
     pub world_seed: i64,
-    pub field_705_k: Box<NoiseGeneratorOctaves>,
-    pub field_704_l: Box<NoiseGeneratorOctaves>,
-    pub field_703_m: Box<NoiseGeneratorOctaves>,
-    pub field_702_n: Box<NoiseGeneratorOctaves>,
-    pub field_701_o: Box<NoiseGeneratorOctaves>,
-    pub field_715_a: Box<NoiseGeneratorOctaves>,
-    pub field_714_b: Box<NoiseGeneratorOctaves>,
-    pub field_713_c: Box<NoiseGeneratorOctaves>,
+    pub min_noise: Box<NoiseGeneratorOctaves>,
+    pub max_noise: Box<NoiseGeneratorOctaves>,
+    pub main_noise: Box<NoiseGeneratorOctaves>,
+    pub biome_noise: Box<NoiseGeneratorOctaves>,
+    pub stone_noise: Box<NoiseGeneratorOctaves>,
+    pub depth_noise: Box<NoiseGeneratorOctaves>,
+    pub scale_noise: Box<NoiseGeneratorOctaves>,
+    pub tree_noise: Box<NoiseGeneratorOctaves>,
     
     // Biome generators (WorldChunkManager)
     pub temp_noise_gen: Box<NoiseGeneratorOctaves2>,
@@ -39,14 +39,14 @@ pub struct RustChunkProviderGenerate {
 impl RustChunkProviderGenerate {
     pub fn new(seed: i64) -> Self {
         let mut rand = JavaRandom::new(seed);
-        let field_705_k = Box::new(NoiseGeneratorOctaves::new(&mut rand, 16));
-        let field_704_l = Box::new(NoiseGeneratorOctaves::new(&mut rand, 16));
-        let field_703_m = Box::new(NoiseGeneratorOctaves::new(&mut rand, 8));
-        let field_702_n = Box::new(NoiseGeneratorOctaves::new(&mut rand, 4));
-        let field_701_o = Box::new(NoiseGeneratorOctaves::new(&mut rand, 4));
-        let field_715_a = Box::new(NoiseGeneratorOctaves::new(&mut rand, 10));
-        let field_714_b = Box::new(NoiseGeneratorOctaves::new(&mut rand, 16));
-        let field_713_c = Box::new(NoiseGeneratorOctaves::new(&mut rand, 8));
+        let min_noise = Box::new(NoiseGeneratorOctaves::new(&mut rand, 16));
+        let max_noise = Box::new(NoiseGeneratorOctaves::new(&mut rand, 16));
+        let main_noise = Box::new(NoiseGeneratorOctaves::new(&mut rand, 8));
+        let biome_noise = Box::new(NoiseGeneratorOctaves::new(&mut rand, 4));
+        let stone_noise = Box::new(NoiseGeneratorOctaves::new(&mut rand, 4));
+        let depth_noise = Box::new(NoiseGeneratorOctaves::new(&mut rand, 10));
+        let scale_noise = Box::new(NoiseGeneratorOctaves::new(&mut rand, 16));
+        let tree_noise = Box::new(NoiseGeneratorOctaves::new(&mut rand, 8));
 
         let temp_noise_gen = Box::new(NoiseGeneratorOctaves2::new(&mut JavaRandom::new(seed.wrapping_mul(9871)), 4));
         let humid_noise_gen = Box::new(NoiseGeneratorOctaves2::new(&mut JavaRandom::new(seed.wrapping_mul(39811)), 4));
@@ -54,14 +54,14 @@ impl RustChunkProviderGenerate {
 
         Self {
             world_seed: seed,
-            field_705_k,
-            field_704_l,
-            field_703_m,
-            field_702_n,
-            field_701_o,
-            field_715_a,
-            field_714_b,
-            field_713_c,
+            min_noise,
+            max_noise,
+            main_noise,
+            biome_noise,
+            stone_noise,
+            depth_noise,
+            scale_noise,
+            tree_noise,
             temp_noise_gen,
             humid_noise_gen,
             noise_gen3,
@@ -90,14 +90,14 @@ pub fn climate_into(
     debug_assert_eq!(humidities.len(), n);
     // Java passes (double)0.025F / (double)0.05F (float widened), NOT the
     // decimal f64 — the simplex lattice shifts otherwise (biome borders).
-    gen.temp_noise_gen.func_4101_a(temperatures, x0 as f64, z0 as f64, w, h, 0.025f32 as f64, 0.025f32 as f64, 0.25);
-    gen.humid_noise_gen.func_4101_a(humidities, x0 as f64, z0 as f64, w, h, 0.05f32 as f64, 0.05f32 as f64, 1.0 / 3.0);
+    gen.temp_noise_gen.fill2_default(temperatures, x0 as f64, z0 as f64, w, h, 0.025f32 as f64, 0.025f32 as f64, 0.25);
+    gen.humid_noise_gen.fill2_default(humidities, x0 as f64, z0 as f64, w, h, 0.05f32 as f64, 0.05f32 as f64, 1.0 / 3.0);
 
-    let mut field_4257_c = vec![0.0; n];
-    gen.noise_gen3.func_4101_a(&mut field_4257_c, x0 as f64, z0 as f64, w, h, 0.25, 0.25, 0.5882352941176471);
+    let mut scratch = vec![0.0; n];
+    gen.noise_gen3.fill2_default(&mut scratch, x0 as f64, z0 as f64, w, h, 0.25, 0.25, 0.5882352941176471);
 
     for idx in 0..n {
-        let noise = field_4257_c[idx] * 1.1 + 0.5;
+        let noise = scratch[idx] * 1.1 + 0.5;
 
         let d1_t = 0.01;
         let d2_t = 1.0 - d1_t;
@@ -128,11 +128,11 @@ pub fn chunk_temperatures(
     z0: i32,
     out: &mut [f64; 256],
 ) {
-    gen.temp_noise_gen.func_4101_a(out, x0 as f64, z0 as f64, 16, 16, 0.025f32 as f64, 0.025f32 as f64, 0.25);
-    let mut field_4257_c = [0.0f64; 256];
-    gen.noise_gen3.func_4101_a(&mut field_4257_c, x0 as f64, z0 as f64, 16, 16, 0.25, 0.25, 0.5882352941176471);
+    gen.temp_noise_gen.fill2_default(out, x0 as f64, z0 as f64, 16, 16, 0.025f32 as f64, 0.025f32 as f64, 0.25);
+    let mut scratch = [0.0f64; 256];
+    gen.noise_gen3.fill2_default(&mut scratch, x0 as f64, z0 as f64, 16, 16, 0.25, 0.25, 0.5882352941176471);
     for idx in 0..256 {
-        let noise = field_4257_c[idx] * 1.1 + 0.5;
+        let noise = scratch[idx] * 1.1 + 0.5;
         let mut temp = (out[idx] * 0.15 + 0.7) * 0.99 + noise * 0.01;
         temp = 1.0 - (1.0 - temp) * (1.0 - temp);
         out[idx] = temp.clamp(0.0, 1.0);
@@ -187,11 +187,11 @@ pub fn rust_chunk_provider_generate_chunk(
         var10,
         temperatures,
         humidities,
-        &gen.field_715_a,
-        &gen.field_714_b,
-        &gen.field_703_m,
-        &gen.field_705_k,
-        &gen.field_704_l,
+        &gen.depth_noise,
+        &gen.scale_noise,
+        &gen.main_noise,
+        &gen.min_noise,
+        &gen.max_noise,
     );
 
     for var11 in 0..var6 {
@@ -258,21 +258,21 @@ pub fn rust_chunk_provider_generate_chunk(
     let var5_biome = 64;
     let var6_biome = 1.0 / 32.0;
 
-    let mut field_698_r = vec![0.0; 256];
-    gen.field_702_n.func_648_a(&mut field_698_r, (chunk_x * 16) as f64, (chunk_z * 16) as f64, 0.0, 16, 16, 1, var6_biome, var6_biome, 1.0);
+    let mut biome_r = vec![0.0; 256];
+    gen.biome_noise.fill3_octaves(&mut biome_r, (chunk_x * 16) as f64, (chunk_z * 16) as f64, 0.0, 16, 16, 1, var6_biome, var6_biome, 1.0);
 
-    let mut field_697_s = vec![0.0; 256];
-    gen.field_702_n.func_648_a(&mut field_697_s, (chunk_z * 16) as f64, 109.0134, (chunk_x * 16) as f64, 16, 1, 16, var6_biome, 1.0, var6_biome);
+    let mut biome_s = vec![0.0; 256];
+    gen.biome_noise.fill3_octaves(&mut biome_s, (chunk_z * 16) as f64, 109.0134, (chunk_x * 16) as f64, 16, 1, 16, var6_biome, 1.0, var6_biome);
 
-    let mut field_696_t = vec![0.0; 256];
-    gen.field_701_o.func_648_a(&mut field_696_t, (chunk_x * 16) as f64, (chunk_z * 16) as f64, 0.0, 16, 16, 1, var6_biome * 2.0, var6_biome * 2.0, var6_biome * 2.0);
+    let mut stone_t = vec![0.0; 256];
+    gen.stone_noise.fill3_octaves(&mut stone_t, (chunk_x * 16) as f64, (chunk_z * 16) as f64, 0.0, 16, 16, 1, var6_biome * 2.0, var6_biome * 2.0, var6_biome * 2.0);
 
     for var8_b in 0..16 {
         for var9_b in 0..16 {
             let var10_b = &biomes[(var8_b * 16 + var9_b) as usize];
-            let var11_b = field_698_r[(var8_b + var9_b * 16) as usize] + rand.next_double() * 0.2 > 0.0;
-            let var12_b = field_697_s[(var8_b + var9_b * 16) as usize] + rand.next_double() * 0.2 > 3.0;
-            let var13_b = (field_696_t[(var8_b + var9_b * 16) as usize] / 3.0 + 3.0 + rand.next_double() * 0.25) as i32;
+            let var11_b = biome_r[(var8_b + var9_b * 16) as usize] + rand.next_double() * 0.2 > 0.0;
+            let var12_b = biome_s[(var8_b + var9_b * 16) as usize] + rand.next_double() * 0.2 > 3.0;
+            let var13_b = (stone_t[(var8_b + var9_b * 16) as usize] / 3.0 + 3.0 + rand.next_double() * 0.25) as i32;
             let mut var14_b = -1;
             let mut var15_b = var10_b.top_block;
             let mut var16_b = var10_b.filler_block;
@@ -360,7 +360,7 @@ pub fn rust_chunk_provider_populate_batch(
         chunk_x,
         chunk_z,
         biome_type_raw,
-        &mut generator.field_713_c,
+        &mut generator.tree_noise,
         temperatures,
     );
 }

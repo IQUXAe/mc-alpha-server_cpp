@@ -116,7 +116,7 @@ impl WorldGenBigTree {
         }
     }
 
-    pub fn func_420_a(&mut self, a: f64, b: f64, c: f64) {
+    pub fn configure(&mut self, a: f64, b: f64, c: f64) {
         self.height_limit_limit = (a * 12.0) as i32;
         if a > 0.5 {
             self.leaf_distance_limit = 5;

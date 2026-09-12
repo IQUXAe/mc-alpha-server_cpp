@@ -10,27 +10,27 @@ pub fn alpha_density_generate_field(
     var7: i32,
     temperatures: &[f64],
     humidities: &[f64],
-    gen_715: &NoiseGeneratorOctaves,
-    gen_714: &NoiseGeneratorOctaves,
-    gen_703: &NoiseGeneratorOctaves,
-    gen_705: &NoiseGeneratorOctaves,
-    gen_704: &NoiseGeneratorOctaves,
+    depth_gen: &NoiseGeneratorOctaves,
+    scale_gen: &NoiseGeneratorOctaves,
+    main_gen: &NoiseGeneratorOctaves,
+    min_gen: &NoiseGeneratorOctaves,
+    max_gen: &NoiseGeneratorOctaves,
 ) {
 
     let var8 = 684.412;
     let var10 = 684.412;
 
-    let mut field_4226_g = vec![0.0; (var5 * var7) as usize];
-    let mut field_4225_h = vec![0.0; (var5 * var7) as usize];
-    let mut field_4229_d = vec![0.0; (var5 * var6 * var7) as usize];
-    let mut field_4228_e = vec![0.0; (var5 * var6 * var7) as usize];
-    let mut field_4227_f = vec![0.0; (var5 * var6 * var7) as usize];
+    let mut noise_depth = vec![0.0; (var5 * var7) as usize];
+    let mut noise_scale = vec![0.0; (var5 * var7) as usize];
+    let mut noise_main = vec![0.0; (var5 * var6 * var7) as usize];
+    let mut noise_min = vec![0.0; (var5 * var6 * var7) as usize];
+    let mut noise_max = vec![0.0; (var5 * var6 * var7) as usize];
 
-    gen_715.func_4103_a(&mut field_4226_g, var2, var4, var5 as usize, var7 as usize, 1.121, 1.121);
-    gen_714.func_4103_a(&mut field_4225_h, var2, var4, var5 as usize, var7 as usize, 200.0, 200.0);
-    gen_703.func_648_a(&mut field_4229_d, var2 as f64, var3 as f64, var4 as f64, var5 as usize, var6 as usize, var7 as usize, var8 / 80.0, var10 / 160.0, var8 / 80.0);
-    gen_705.func_648_a(&mut field_4228_e, var2 as f64, var3 as f64, var4 as f64, var5 as usize, var6 as usize, var7 as usize, var8, var10, var8);
-    gen_704.func_648_a(&mut field_4227_f, var2 as f64, var3 as f64, var4 as f64, var5 as usize, var6 as usize, var7 as usize, var8, var10, var8);
+    depth_gen.fill_slice(&mut noise_depth, var2, var4, var5 as usize, var7 as usize, 1.121, 1.121);
+    scale_gen.fill_slice(&mut noise_scale, var2, var4, var5 as usize, var7 as usize, 200.0, 200.0);
+    main_gen.fill3_octaves(&mut noise_main, var2 as f64, var3 as f64, var4 as f64, var5 as usize, var6 as usize, var7 as usize, var8 / 80.0, var10 / 160.0, var8 / 80.0);
+    min_gen.fill3_octaves(&mut noise_min, var2 as f64, var3 as f64, var4 as f64, var5 as usize, var6 as usize, var7 as usize, var8, var10, var8);
+    max_gen.fill3_octaves(&mut noise_max, var2 as f64, var3 as f64, var4 as f64, var5 as usize, var6 as usize, var7 as usize, var8, var10, var8);
 
     let mut var14 = 0;
     let mut var15 = 0;
@@ -49,11 +49,11 @@ pub fn alpha_density_generate_field(
             var25 *= var25;
             var25 *= var25;
             var25 = 1.0 - var25;
-            let mut var27 = (field_4226_g[var15] + 256.0) / 512.0;
+            let mut var27 = (noise_depth[var15] + 256.0) / 512.0;
             var27 *= var25;
             if var27 > 1.0 { var27 = 1.0; }
 
-            let mut var29 = field_4225_h[var15] / 8000.0;
+            let mut var29 = noise_scale[var15] / 8000.0;
             if var29 < 0.0 { var29 = -var29 * 0.3; }
 
             var29 = var29 * 3.0 - 2.0;
@@ -80,9 +80,9 @@ pub fn alpha_density_generate_field(
                 let mut var36 = (var33 as f64 - var31) * 12.0 / var27;
                 if var36 < 0.0 { var36 *= 4.0; }
 
-                let var38 = field_4228_e[var14] / 512.0;
-                let var40 = field_4227_f[var14] / 512.0;
-                let var42 = (field_4229_d[var14] / 10.0 + 1.0) / 2.0;
+                let var38 = noise_min[var14] / 512.0;
+                let var40 = noise_max[var14] / 512.0;
+                let var42 = (noise_main[var14] / 10.0 + 1.0) / 2.0;
 
                 if var42 < 0.0 {
                     var34 = var38;

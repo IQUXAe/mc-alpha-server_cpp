@@ -339,7 +339,7 @@ pub fn alpha_decorate_chunk(
 
     // --- Trees ---
     let var11d = 0.5;
-    let noise_val = noise_gen_713.func_647_a((var4 as f64) * var11d, (var5 as f64) * var11d);
+    let noise_val = noise_gen_713.sample2_octaves((var4 as f64) * var11d, (var5 as f64) * var11d);
 
     let var13t = ((noise_val / 8.0 + rand.next_double() * 4.0 + 4.0) / 3.0) as i32;
     let mut var14t = 0;
@@ -371,7 +371,7 @@ pub fn alpha_decorate_chunk(
 
     let mut big_tree_gen = if use_big_tree {
         let mut bt = WorldGenBigTree::new();
-        bt.func_420_a(1.0, 1.0, 1.0);
+        bt.configure(1.0, 1.0, 1.0);
         Some(bt)
     } else {
         None
@@ -387,7 +387,7 @@ pub fn alpha_decorate_chunk(
         let tz = var5 + rand.next_int_bound(16) + 8;
         let ty = accessor.get_height_value(tx, tz);
         if let Some(ref mut big_tree) = big_tree_gen {
-            big_tree.func_420_a(1.0, 1.0, 1.0);
+            big_tree.configure(1.0, 1.0, 1.0);
             big_tree.generate(&mut *accessor, &mut rand, tx, ty, tz);
         } else if let Some(ref mut normal_tree) = normal_tree_gen {
             normal_tree.generate(&mut *accessor, &mut rand, tx, ty, tz);

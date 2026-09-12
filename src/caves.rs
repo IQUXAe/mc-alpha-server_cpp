@@ -44,24 +44,24 @@ impl MapGenCaves {
             let var13 = (z * 16 + self.rand.next_int_bound(16)) as f64;
             let mut var15 = 1;
             if self.rand.next_int_bound(4) == 0 {
-                self.func_669_a(chunk_x, chunk_z, blocks, var9, var11, var13);
+                self.carve_room(chunk_x, chunk_z, blocks, var9, var11, var13);
                 var15 += self.rand.next_int_bound(4);
             }
             for _ in 0..var15 {
                 let var17 = self.rand.next_float() * std::f32::consts::PI * 2.0;
                 let var18 = (self.rand.next_float() - 0.5) * 2.0 / 8.0;
                 let var19 = self.rand.next_float() * 2.0 + self.rand.next_float();
-                self.func_668_a(chunk_x, chunk_z, blocks, var9, var11, var13, var19, var17, var18, 0, 0, 1.0);
+                self.carve_tunnel(chunk_x, chunk_z, blocks, var9, var11, var13, var19, var17, var18, 0, 0, 1.0);
             }
         }
     }
 
-    fn func_669_a(&mut self, var1: i32, var2: i32, var3: &mut [u8], var4: f64, var6: f64, var8: f64) {
+    fn carve_room(&mut self, var1: i32, var2: i32, var3: &mut [u8], var4: f64, var6: f64, var8: f64) {
         let var10 = 1.0 + self.rand.next_float() * 6.0;
-        self.func_668_a(var1, var2, var3, var4, var6, var8, var10, 0.0, 0.0, -1, -1, 0.5);
+        self.carve_tunnel(var1, var2, var3, var4, var6, var8, var10, 0.0, 0.0, -1, -1, 0.5);
     }
 
-    fn func_668_a(
+    fn carve_tunnel(
         &mut self,
         var1: i32,
         var2: i32,
@@ -120,7 +120,7 @@ impl MapGenCaves {
             var21 += (var23.next_float() - var23.next_float()) * var23.next_float() * 4.0;
 
             if !var52 && var13 == var25 && var10 > 1.0 {
-                self.func_668_a(
+                self.carve_tunnel(
                     var1,
                     var2,
                     var3,
@@ -134,7 +134,7 @@ impl MapGenCaves {
                     var14,
                     1.0,
                 );
-                self.func_668_a(
+                self.carve_tunnel(
                     var1,
                     var2,
                     var3,

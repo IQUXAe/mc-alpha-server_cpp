@@ -13,7 +13,7 @@ fn grad(hash: i32, x: f64, y: f64, z: f64) -> f64 {
     res_u + res_v
 }
 
-fn func_4102_a(hash: i32, x: f64, z: f64) -> f64 {
+fn grad2(hash: i32, x: f64, z: f64) -> f64 {
     let h = hash & 15;
     let u = (1.0 - ((h & 8) >> 3) as f64) * x;
     let v = if h < 4 { 0.0 } else if h != 12 && h != 14 { z } else { x };
@@ -113,14 +113,14 @@ impl NoiseGeneratorPerlin {
         self.noise(x + self.x_coord, y + self.y_coord, z + self.z_coord)
     }
 
-    /// 2D entry used by tree density (`NoiseGeneratorOctaves.func_647_a` →
-    /// `Perlin.func_642_a(x,z)` → `generateNoise(x,z,0)`): samples the XY
+    /// 2D entry used by tree density (`NoiseGeneratorOctaves.sample2_octaves` →
+    /// `Perlin.sample2(x,z)` → `generateNoise(x,z,0)`): samples the XY
     /// plane `noise(x+xo, z+yo, zo)`, NOT the XZ plane.
-    pub fn func_642_a(&self, x: f64, z: f64) -> f64 {
+    pub fn sample2(&self, x: f64, z: f64) -> f64 {
         self.noise(x + self.x_coord, z + self.y_coord, self.z_coord)
     }
 
-    pub fn func_646_a(
+    pub fn fill3(
         &self,
         arr: &mut [f64],
         x_base: f64,
@@ -161,7 +161,7 @@ impl NoiseGeneratorPerlin {
                     let ba = self.permutations[b] as usize + z_idx;
                     let res1 = lerp(
                         u,
-                        func_4102_a(self.permutations[aa], x_frac, z_frac),
+                        grad2(self.permutations[aa], x_frac, z_frac),
                         grad(self.permutations[ba], x_frac - 1.0, 0.0, z_frac),
                     );
                     let res2 = lerp(
@@ -295,7 +295,7 @@ impl NoiseGeneratorOctaves {
         result
     }
 
-    pub fn func_648_a(
+    pub fn fill3_octaves(
         &self,
         arr: &mut [f64],
         x: f64,
@@ -314,7 +314,7 @@ impl NoiseGeneratorOctaves {
 
         let mut amp = 1.0;
         for i in 0..self.octaves {
-            self.generator_collection[i].func_646_a(
+            self.generator_collection[i].fill3(
                 arr,
                 x,
                 y,
@@ -331,7 +331,7 @@ impl NoiseGeneratorOctaves {
         }
     }
 
-    pub fn func_4103_a(
+    pub fn fill_slice(
         &self,
         arr: &mut [f64],
         x: i32,
@@ -341,7 +341,7 @@ impl NoiseGeneratorOctaves {
         x_scale: f64,
         z_scale: f64,
     ) {
-        self.func_648_a(
+        self.fill3_octaves(
             arr,
             x as f64,
             10.0,
@@ -355,11 +355,11 @@ impl NoiseGeneratorOctaves {
         );
     }
 
-    pub fn func_647_a(&self, x: f64, z: f64) -> f64 {
+    pub fn sample2_octaves(&self, x: f64, z: f64) -> f64 {
         let mut result = 0.0;
         let mut scale = 1.0;
         for i in 0..self.octaves {
-            result += self.generator_collection[i].func_642_a(x * scale, z * scale) / scale;
+            result += self.generator_collection[i].sample2(x * scale, z * scale) / scale;
             scale /= 2.0;
         }
         result
@@ -419,7 +419,7 @@ impl NoiseGenerator2 {
         }
     }
 
-    pub fn func_4115_a(
+    pub fn fill2_single(
         &self,
         arr: &mut [f64],
         x_base: f64,
@@ -511,7 +511,7 @@ impl NoiseGeneratorOctaves2 {
         }
     }
 
-    pub fn func_4101_a(
+    pub fn fill2_default(
         &self,
         arr: &mut [f64],
         x: f64,
@@ -522,10 +522,10 @@ impl NoiseGeneratorOctaves2 {
         y_scale: f64,
         amplitude: f64,
     ) {
-        self.func_4100_a(arr, x, y, x_size, y_size, x_scale, y_scale, amplitude, 0.5);
+        self.fill2_lacunar(arr, x, y, x_size, y_size, x_scale, y_scale, amplitude, 0.5);
     }
 
-    pub fn func_4100_a(
+    pub fn fill2_lacunar(
         &self,
         arr: &mut [f64],
         x: f64,
@@ -548,7 +548,7 @@ impl NoiseGeneratorOctaves2 {
         let mut freq_mul = 1.0;
 
         for i in 0..self.num_octaves {
-            self.generators[i].func_4115_a(
+            self.generators[i].fill2_single(
                 arr,
                 x,
                 y,

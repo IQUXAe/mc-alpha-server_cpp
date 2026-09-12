@@ -88,6 +88,6 @@ pub fn generate_big_tree(
 ) -> bool {
     let mut rand = JavaRandom::new(seed);
     let mut big_tree = crate::decorators::trees::WorldGenBigTree::new();
-    big_tree.func_420_a(1.0, 1.0, 1.0);
+    big_tree.configure(1.0, 1.0, 1.0);
     big_tree.generate(accessor, &mut rand, x, y, z)
 }
