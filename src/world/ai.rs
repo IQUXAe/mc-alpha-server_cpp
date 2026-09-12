@@ -527,9 +527,13 @@ impl World {
     }
 
     /// Heading integration for one creature row through the shared
-    /// [`living_heading_run`] core. Query and move closures share the world
-    /// through a raw pointer: each call reborrows for its own duration only
-    /// (the core never retains them), so the accesses never overlap.
+    /// [`living_heading_run`] core, with explicit borrows throughout.
+    /// The ladder grip is read up front (the core consults it exactly
+    /// once, before moving), and the pre-move fall distance mirrors the
+    /// core's ladder branch below (`ladder -> fall = 0.0`): the mover
+    /// syncs that exact value into the row ahead of `move_body`
+    /// (mirrors C++ where the zero lands on the entity field ahead of
+    /// `moveEntity` -> `updateFallState`).
     /// Returns the fall event distance when `onFall` must fire.
     fn move_creature_heading(&mut self, id: EntityId, strafe: f32, forward: f32) -> Option<f32> {
         let (jumping, on_ground, yaw, mut io) = match self.entities.get(id) {
@@ -560,34 +564,27 @@ impl World {
         let liquid = self.touching_liquid(id);
         let lava = self.touching_lava(id);
         let friction = self.ground_slipperiness(id);
-        let world = self as *mut World;
-        // SAFETY: re-entrant raw borrows, disjoint by construction:
-        // Raw back-channel so the pre-move leg can sync the heading core's
-        // fall state (ladder zeroing) into the row before `move_body` runs:
-        // mirrors C++ where the zero lands on the entity field ahead of
-        // `moveEntity` -> `updateFallState`. The core never touches `io`
-        // while the mover runs (motion crosses by value), so the accesses
-        // cannot overlap.
-        let io_ptr = &mut io as *mut HeadingIo;
-        let mut ladder = || unsafe { (*world).ladder_for(id) };
+        // Read once: `living_heading_run` consults the grip exactly once,
+        // before any movement, so an up-front read sees identical state.
+        let ladder_grip = self.ladder_for(id);
+        // Mirror of the core's ladder branch: gripped fall resets to zero.
+        let pre_move_fall = if ladder_grip { 0.0 } else { io.fall_distance };
         let mut fall_ev: Option<f32> = None;
         let mut mover = |dx: f64, dy: f64, dz: f64, fb: &mut MoveFeedback| {
-            unsafe {
-                let w = &mut *world;
-                if let Some(e) = w.entities.get_mut(id) {
-                    e.body_mut().fall_distance = (*io_ptr).fall_distance;
-                }
-                fall_ev = w.move_body(id, dx, dy, dz);
-                if let Some(e) = w.entities.get(id) {
-                    fb.on_ground = e.body().on_ground;
-                    fb.collided_vert = e.body().collided_vert;
-                    fb.collided_horiz = e.body().collided_horiz;
-                    fb.pos_y = e.body().pos[1];
-                }
+            let w = &mut *self;
+            if let Some(e) = w.entities.get_mut(id) {
+                e.body_mut().fall_distance = pre_move_fall;
+            }
+            fall_ev = w.move_body(id, dx, dy, dz);
+            if let Some(e) = w.entities.get(id) {
+                fb.on_ground = e.body().on_ground;
+                fb.collided_vert = e.body().collided_vert;
+                fb.collided_horiz = e.body().collided_horiz;
+                fb.pos_y = e.body().pos[1];
             }
             true
         };
-        living_heading_run(strafe, forward, jumping, on_ground, yaw, &mut io, liquid, lava, friction, &mut ladder, &mut mover);
+        living_heading_run(strafe, forward, jumping, on_ground, yaw, &mut io, liquid, lava, friction, &mut || ladder_grip, &mut mover);
         // Only motion round-trips through `io` now: fall state already
         // lives in the row (synced pre-move, accumulated by `move_body`).
         match self.entities.get_mut(id) {
