@@ -1,16 +1,15 @@
 //! Alpha 1.2.6 server in native Rust.
 //!
-//! No FFI remains: every module is plain safe Rust. The few `unsafe`
-//! blocks left sit behind documented guards around thread-local world
-//! shims (see `world.rs`), and `unsafe_code` stays visible in review
-//! until those are dissolved too.
-
+//! `repr(C)` structs are legacy FFI shapes kept for the packet/slot layout
+//! (no C++ bridge remains); the `unsafe` blocks left sit behind documented
+//! guards around thread-local world shims (see `world.rs`), and
+//! `unsafe_code` stays visible in review until those are dissolved too.
+//!
 //! Layout: `world/` (storage in `mod`, one responsibility per submodule:
 //! physics, living, AI, combat, spawning, blocks, gen, shims) +
 //! `session` (transport+play) + `server` (tick fan-out); packet builders
 //! live in `session_packets`, tile rows in `world::tiles`, and each
 //! god-object's tests in adjacent `tests` submodules.
-
 pub mod block;
 pub mod block_container;
 pub mod block_fire;
@@ -50,6 +49,7 @@ pub mod server;
 pub mod server_admin;
 pub mod tracker;
 pub mod session;
+pub mod session_packets;
 pub mod world;
 pub mod material;
 pub mod nibble;

@@ -521,10 +521,7 @@ pub fn decode_chunk_blob(bytes: &[u8], cx: i32, cz: i32) -> Option<DecodedChunk>
                     let mut s = crate::tile_entity_sign::sign_create();
                     for i in 0..SIGN_LINES {
                         let text = get_string(&c.map, &format!("Text{}", i + 1));
-                        let bytes = text.as_bytes();
-                        let len = bytes.len().min(15);
-                        s.lines[i][..len].copy_from_slice(&bytes[..len]);
-                        s.lines[i][len] = 0;
+                        crate::tile_entity_sign::sign_set_line(&mut s, i as i32, &text);
                     }
                     signs.push(((x, y, z), s));
                 }

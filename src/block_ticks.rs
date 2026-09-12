@@ -314,6 +314,10 @@ pub fn block_fluid_tick(
             }
         }
     }
+    // No self-reschedule: spread continues through the new cells' own
+    // added/neighbor ticks (apply_set_meta_notify → block_fluid_added).
+    // Self-perpetuating every 5 ticks would pin oceans/lakes in the
+    // scheduler forever (1000-tick cap stall).
 }
 
 // ---- flower ----
@@ -852,8 +856,7 @@ pub fn block_sapling_tick(
 
 // ---- crops ----
 
-fn crops_can_stay_here(w: &BlockTickWorld, crop_id: u8, x: i32, y: i32, z: i32) -> bool {
-    let _ = crop_id;
+fn crops_can_stay_here(w: &BlockTickWorld, _crop_id: u8, x: i32, y: i32, z: i32) -> bool {
     q_id(w, x, y - 1, z) == 60 && (q_light(w, x, y, z) >= 8 || q_sky(w, x, y, z))
 }
 
@@ -911,15 +914,13 @@ pub fn block_crops_neighbor(
 }
 
 fn block_crops_drop(w: &BlockTickWorld, wheat_id: i32, seeds_id: i32, x: i32, y: i32, z: i32, metadata: u8) {
-    // Mature crops drop one wheat (Java BlockCrops.idDropped: 7 -> wheat).
+    // Natural break (neighbor/tick → dropBlockAsItem): wheat only when
+    // mature. Seeds come only from player harvest
+    // (onBlockDestroyedByPlayer), handled in World::rolled_drop_ids.
+    // The old code dropped seeds here too, doubling them on tramples.
+    let _ = seeds_id;
     if metadata >= 7 {
         u_drop(w, wheat_id, 1, 0, x as f64 + 0.5, y as f64 + 0.5, z as f64 + 0.5, 0.05, 0.15);
-    }
-    // Seeds: 3 rolls of rand(15) <= meta (Java onBlockDestroyedByPlayer).
-    for _ in 0..3 {
-        if rng_int(w, 15) <= metadata as i32 {
-            u_drop(w, seeds_id, 1, 0, x as f64 + 0.5, y as f64 + 0.5, z as f64 + 0.5, 0.05, 0.15);
-        }
     }
 }
 
@@ -937,7 +938,7 @@ pub fn block_crops_drop_ffi(
     if rng_f01(w) > chance {
         return;
     }
-    // Same split as the neighbor/tick path (wheat + seed rolls).
+    // Player-harvest path (onBlockDestroyedByPlayer): wheat + 3 seed rolls.
     if metadata >= 7 {
         u_drop(w, wheat_id, 1, 0, x as f64 + 0.5, y as f64 + 0.5, z as f64 + 0.5, 0.05, 0.15);
     }

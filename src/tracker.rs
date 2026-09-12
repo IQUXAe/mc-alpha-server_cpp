@@ -383,6 +383,12 @@ impl Tracker {
         self.send_to_watchers(id, bytes, out);
     }
 
+    /// Generic status broadcast (creeper 4/5, etc.).
+    pub fn status_fx(&self, id: EntityId, status: i8, out: &mut Vec<Outbox>) {
+        let bytes = encode(RustPacket::EntityStatus { entity_id: id, status });
+        self.send_to_watchers(id, bytes, out);
+    }
+
     /// Per-entity per-tick update (mirrors `updateTracking` + `sendUpdates`).
     /// `chunk_visible(observer, entity)` answers the chunk-loaded check.
     pub fn tick_entity(
@@ -442,9 +448,6 @@ impl Tracker {
         let fz = alpha_tracker_encode_pos(e.pos[2]);
         let yaw = alpha_tracker_encode_rot(e.yaw);
         let pitch = alpha_tracker_encode_rot(e.pitch);
-        // Teleport packet angles use trunc (Packet34), unlike tracker deltas.
-        let tyaw = alpha_tracker_encode_rot_spawn(e.yaw);
-        let tpitch = alpha_tracker_encode_rot_spawn(e.pitch);
         let dx = fx - entry.last_fixed[0];
         let dy = fy - entry.last_fixed[1];
         let dz = fz - entry.last_fixed[2];
@@ -458,7 +461,7 @@ impl Tracker {
         ) {
             entry.last_motion = e.motion;
             let bytes = encode_velocity(e.id, e.motion);
-            drop(entry);
+            let _ = entry;
             self.send_to_watchers(e.id, bytes, out);
         }
 
@@ -479,13 +482,16 @@ impl Tracker {
                 dz: dz as i8,
             }),
             2 => encode(RustPacket::EntityLook { entity_id: e.id, yaw, pitch }),
+            // Tracker teleport (EntityTrackerEntry:86 → Packet34) reuses the
+            // floor-encoded yaw/pitch, NOT the spawn trunc form. Using trunc
+            // here skewed negative angles by 1 unit (0.35°).
             4 => encode(RustPacket::EntityTeleport {
                 entity_id: e.id,
                 x: fx,
                 y: fy,
                 z: fz,
-                yaw: tyaw,
-                pitch: tpitch,
+                yaw,
+                pitch,
             }),
             _ => encode(RustPacket::Entity { entity_id: e.id }),
         };
@@ -518,7 +524,10 @@ impl Tracker {
         if let Some(health) = e.health {
             let last = self.entries.get(&e.id).map(|en| en.last_health).unwrap_or(-1);
             if last >= 0 && health != last {
-                if health < last && health > 0 {
+                // Java EntityLiving:313 sends hurt (2) BEFORE the death check,
+                // so the killing blow flashes too. The old `health > 0` guard
+                // swallowed it (only 3 arrived).
+                if health < last {
                     self.send_to_watchers(
                         e.id,
                         encode(RustPacket::EntityStatus { entity_id: e.id, status: 2 }),

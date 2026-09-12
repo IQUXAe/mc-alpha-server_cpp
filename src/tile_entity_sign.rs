@@ -20,5 +20,8 @@ pub fn sign_set_line(state: &mut FfiSignState, line: i32, text: &str) {
     let len = bytes.len().min(15);
     let buf = &mut state.lines[line as usize];
     buf[..len].copy_from_slice(&bytes[..len]);
-    buf[len] = 0;
+    // Zero the tail so a short rewrite never leaves stale bytes visible.
+    for b in buf[len..].iter_mut() {
+        *b = 0;
+    }
 }

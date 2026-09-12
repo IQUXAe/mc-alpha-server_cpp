@@ -68,13 +68,6 @@ pub fn fuel_burn_time(item_id: i32) -> i32 {
     }
 }
 
-pub fn furnace_tick(
-    state: &mut FfiFurnaceState,
-    fuel_burn_time_from_cpp: i32,
-) -> FurnaceTickResult {
-    tick_core(state, fuel_burn_time_from_cpp)
-}
-
 /// Native tick (mirrors the `TileEntityFurnace::updateEntity` head): the
 /// fuel burn time is looked up from the fuel slot, then the shared core
 /// runs (C++ keeps passing it in from the Block/Item tables).

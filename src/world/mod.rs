@@ -501,3 +501,5 @@ pub fn is_replaceable(block_id: u8) -> bool {
 pub use self::tiles::TileData;
 pub(crate) use self::tiles::{animal_kind_of, animal_string_id, mob_kind_of, mob_string_id, pending_creature};
 
+#[cfg(test)]
+mod tests;

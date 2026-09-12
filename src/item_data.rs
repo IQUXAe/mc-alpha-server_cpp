@@ -148,7 +148,9 @@ pub fn alpha_item_is_valid(item_id: i32) -> bool {
 //   `if (level == 3) maxDamage *= 4`.
 //   Gold tools are built with `level == 0`, so they share wood values.
 // - `ItemSword` ctor: same formula.
-// - `ItemHoe` via `initItems`: 59/131/250/1561/64.
+// - `ItemHoe` ctor (Java `ItemHoe.java:4-8`): `maxDamage = 32 << level`
+//   with NO x4 for diamond: wood 32, stone/gold 64, steel 128,
+//   diamond 256. (The old 59/131/250/1561 table was Beta values.)
 // - `flintAndSteel` 64, `bow` 32 (default Item.maxDamage, only stackSize=1),
 //   `fishingRod` 64, saddle/sign/door/bucket/painting 64.
 // - armor via `setMaxDamage`, reused through `alpha_armor_max_damage`.
@@ -165,10 +167,10 @@ pub fn alpha_item_max_damage(item_id: i32) -> i32 {
         ITEM_SHOVEL_STONE | ITEM_PICKAXE_STONE | ITEM_AXE_STONE | ITEM_SWORD_STONE => 64,
         ITEM_SHOVEL_STEEL | ITEM_PICKAXE_STEEL | ITEM_AXE_STEEL | ITEM_SWORD_STEEL => 128,
         ITEM_SHOVEL_DIAMOND | ITEM_PICKAXE_DIAMOND | ITEM_AXE_DIAMOND | ITEM_SWORD_DIAMOND => 1024,
-        ITEM_HOE_WOOD => 59,
-        ITEM_HOE_STONE => 131,
-        ITEM_HOE_STEEL => 250,
-        ITEM_HOE_DIAMOND => 1561,
+        ITEM_HOE_WOOD => 32,
+        ITEM_HOE_STONE => 64,
+        ITEM_HOE_STEEL => 128,
+        ITEM_HOE_DIAMOND => 256,
         ITEM_HOE_GOLD => 64,
         ITEM_FLINT_AND_STEEL => 64,
         ITEM_BOW => 32,
@@ -622,10 +624,10 @@ mod tests {
         assert_eq!(alpha_item_max_damage(ITEM_FLINT_AND_STEEL), 64);
         assert_eq!(alpha_item_max_damage(ITEM_BOW), 32);
         assert_eq!(alpha_item_max_damage(ITEM_FISHING_ROD), 64);
-        assert_eq!(alpha_item_max_damage(ITEM_HOE_WOOD), 59);
-        assert_eq!(alpha_item_max_damage(ITEM_HOE_STONE), 131);
-        assert_eq!(alpha_item_max_damage(ITEM_HOE_STEEL), 250);
-        assert_eq!(alpha_item_max_damage(ITEM_HOE_DIAMOND), 1561);
+        assert_eq!(alpha_item_max_damage(ITEM_HOE_WOOD), 32);
+        assert_eq!(alpha_item_max_damage(ITEM_HOE_STONE), 64);
+        assert_eq!(alpha_item_max_damage(ITEM_HOE_STEEL), 128);
+        assert_eq!(alpha_item_max_damage(ITEM_HOE_DIAMOND), 256);
         assert_eq!(alpha_item_max_damage(ITEM_HOE_GOLD), 64);
         assert_eq!(alpha_item_max_damage(ITEM_HELMET_LEATHER), 33);
         assert_eq!(alpha_item_max_damage(ITEM_PLATE_DIAMOND), 384);

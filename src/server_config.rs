@@ -142,8 +142,11 @@ impl ServerConfig {
     }
 
     fn save(&self) {
-        // I/O errors are ignored, mirroring the unchecked C++ stream writes.
-        let _ = fs::write(&self.path, self.serialize());
+        // Surface save failures: silent loss of server.properties edits
+        // (motd, difficulty) is worse than a log line.
+        if let Err(e) = fs::write(&self.path, self.serialize()) {
+            crate::server_log::warning(&format!("cannot save {}: {e}", self.path.display()));
+        }
     }
 }
 

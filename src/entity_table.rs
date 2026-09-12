@@ -344,10 +344,15 @@ impl AnimalEnt {
         let mut living = LivingBody::new(id, w, h, 0.0);
         living.body.step_height = 0.5; // EntityLiving ctor (players stay 0.0 like EntityPlayerMP)
         living.max_hurt_resist = 20; // EntityLiving.java:6 (animals never change it)
-        // Java EntityChicken.java:16 — chickens have 4 HP, not 20.
+        // Java EntityLiving:28 — default 10 HP; EntityMobs raises to 20,
+        // EntityAnimals leaves it, EntityChicken sets 4.
+        // The old code gave every animal 20 (2x hits to kill).
         if kind == AnimalKind::Chicken {
             living.health = 4;
             living.max_health = 4;
+        } else {
+            living.health = 10;
+            living.max_health = 10;
         }
         Self {
             living,
@@ -522,10 +527,43 @@ impl EntityTable {
     /// the player row survives death for the respawn packet and is only
     /// dropped explicitly on logout.
     pub fn purge_dead(&mut self) -> Vec<EntityId> {
+        // Vanilla EntityLiving: death_time ticks to 20 before setEntityDead.
+        // Instant purge collapsed the corpse (status 3 + destroy in one tick).
+        // Hold dead mobs/animals 20 ticks for the death animation; players
+        // are never purged here.
+        for e in self.rows.values_mut() {
+            let dead = e.body().dead;
+            if !dead {
+                continue;
+            }
+            match e {
+                Entity::Mob(m) => {
+                    if m.living.death_time < 20 {
+                        m.living.death_time += 1;
+                    }
+                }
+                Entity::Animal(a) => {
+                    if a.living.death_time < 20 {
+                        a.living.death_time += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
         let mut dead: Vec<EntityId> = self
             .rows
             .iter()
-            .filter(|(_, e)| e.body().dead && !matches!(e, Entity::Player(_)))
+            .filter(|(_, e)| {
+                if !e.body().dead || matches!(e, Entity::Player(_)) {
+                    return false;
+                }
+                match e {
+                    Entity::Mob(m) => m.living.death_time >= 20,
+                    Entity::Animal(a) => a.living.death_time >= 20,
+                    // Items/arrows/boats/falling have no death_time: purge now.
+                    _ => true,
+                }
+            })
             .map(|(id, _)| *id)
             .collect();
         dead.sort_unstable();

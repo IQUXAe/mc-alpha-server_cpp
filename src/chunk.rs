@@ -310,6 +310,7 @@ impl Chunk {
 
     /// Bulk light/height import from blob layout (packed nibbles like the
     /// NBT arrays; even cell index is the low nibble). Length-checked.
+    /// Height map layout is `(z << 4) | x` like [`Chunk::height_index`].
     pub fn load_light_maps(&mut self, sky: &[u8], block: &[u8], height: &[u8]) -> bool {
         if sky.len() != CHUNK_NIBBLE_BYTES
             || block.len() != CHUNK_NIBBLE_BYTES
@@ -324,8 +325,9 @@ impl Chunk {
                     self.skylight.set_nibble(x, y, z, (sky[idx / 2] >> (4 * (idx % 2))) & 0xF);
                     self.blocklight.set_nibble(x, y, z, (block[idx / 2] >> (4 * (idx % 2))) & 0xF);
                 }
-                if let Some(slot) = self.height_map.get_mut((x * 16 + z) as usize) {
-                    *slot = height[(x * 16 + z) as usize];
+                let hi = (((z as usize) << 4) | (x as usize)) & (CHUNK_AREA - 1);
+                if let Some(slot) = self.height_map.get_mut(hi) {
+                    *slot = height[hi];
                 }
             }
         }
@@ -354,7 +356,8 @@ impl Chunk {
                         block[idx / 2] |= b << 4;
                     }
                 }
-                height[(x * 16 + z) as usize] = self.height_map[(x * 16 + z) as usize];
+                let hi = (((z as usize) << 4) | (x as usize)) & (CHUNK_AREA - 1);
+                height[hi] = self.height_map[hi];
             }
         }
     }

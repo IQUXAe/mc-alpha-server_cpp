@@ -32,13 +32,35 @@ pub struct FfiMovementResult {
     pub move_sq: f64,
 }
 
-pub const SOFT_MOVEMENT_REJECT_SQ: f64 = 225.0;
-pub const HARD_MOVEMENT_REJECT_SQ: f64 = 900.0;
+pub const SOFT_MOVEMENT_REJECT_SQ: f64 = 16.0;
+pub const HARD_MOVEMENT_REJECT_SQ: f64 = 100.0;
 pub const MAX_COORDINATE: f64 = 3.2e7;
+/// Vanilla residual tolerance (NetServerHandler: res² > 1/16 → moved wrongly).
+/// Used by the session layer after move_body; kept here for shared reference.
+pub const VANILLA_WRONGLY_SQ: f64 = 1.0 / 16.0;
 
 /// Validates movement packet inputs and updates fall distance / damage according to Alpha 1.2.6 rules.
 pub fn alpha_movement_validate(input: &FfiMovementInput) -> FfiMovementResult {
     let inp = input;
+
+    // 0. Non-finite coordinates poison pos (NaN passes every `>` check).
+    // Java has no guard here, but a single NaN offsets the whole body to
+    // NaN via move_body. Kick early as Illegal position.
+    if !inp.to_x.is_finite()
+        || !inp.to_y.is_finite()
+        || !inp.to_z.is_finite()
+        || !inp.stance.is_finite()
+        || !inp.from_x.is_finite()
+        || !inp.from_y.is_finite()
+        || !inp.from_z.is_finite()
+    {
+        return FfiMovementResult {
+            status: MovementValidationStatus::IllegalPosition as u8,
+            new_fall_distance: inp.fall_distance,
+            fall_damage: 0,
+            move_sq: 0.0,
+        };
+    }
 
     // 1. Check stance: stance - y must be within [0.1, 1.65]
     let stance_diff = inp.stance - inp.to_y;
@@ -85,14 +107,25 @@ pub fn alpha_movement_validate(input: &FfiMovementInput) -> FfiMovementResult {
         };
     }
 
-    // 4. Fall distance and damage calculations
+    // 4. Fall distance and damage calculations.
+    // Vanilla Entity.func_84_k: water resets fall unconditionally, even mid-air.
+    // The old code only reset on ground, so swimming down accumulated fall
+    // and dealt it on the next dry landing.
     let mut fall_distance = inp.fall_distance;
     let mut fall_damage = 0;
 
+    if inp.is_in_water {
+        fall_distance = 0.0;
+        return FfiMovementResult {
+            status: MovementValidationStatus::Ok as u8,
+            new_fall_distance: fall_distance,
+            fall_damage,
+            move_sq,
+        };
+    }
+
     if inp.on_ground {
-        if inp.is_in_water {
-            fall_distance = 0.0;
-        } else if fall_distance > 0.0 {
+        if fall_distance > 0.0 {
             let dmg = (fall_distance - 3.0).ceil() as i32;
             if dmg > 0 {
                 fall_damage = dmg;
@@ -191,23 +224,32 @@ mod tests {
 
     #[test]
     fn test_fall_damage() {
-        // Fall 10 blocks in air
-        let input_falling = FfiMovementInput {
-            from_x: 0.0,
-            from_y: 74.0,
-            from_z: 0.0,
-            to_x: 0.0,
-            to_y: 64.0,
-            to_z: 0.0,
-            stance: 65.62,
-            on_ground: false,
-            is_in_water: false,
-            fall_distance: 0.0,
-        };
-        let res1 = alpha_movement_validate(&input_falling);
-        assert_eq!(res1.status, MovementValidationStatus::Ok as u8);
-        assert_eq!(res1.new_fall_distance, 10.0);
-        assert_eq!(res1.fall_damage, 0);
+        // Fall 10 blocks in air, one realistic packet at a time (client
+        // sends ~20 packets/sec; a single 10-block jump would trip the
+        // 4-block soft reject, so step it like the real client).
+        let mut fall = 0.0f32;
+        let mut y: f64 = 74.0;
+        while y > 64.0 {
+            let ny = (y - 1.0).max(64.0);
+            let input = FfiMovementInput {
+                from_x: 0.0,
+                from_y: y,
+                from_z: 0.0,
+                to_x: 0.0,
+                to_y: ny,
+                to_z: 0.0,
+                stance: ny + 1.62,
+                on_ground: false,
+                is_in_water: false,
+                fall_distance: fall,
+            };
+            let res = alpha_movement_validate(&input);
+            assert_eq!(res.status, MovementValidationStatus::Ok as u8);
+            assert_eq!(res.fall_damage, 0);
+            fall = res.new_fall_distance;
+            y = ny;
+        }
+        assert_eq!(fall, 10.0);
 
         // Land on ground: damage = ceil(10.0 - 3.0) = 7
         let input_landing = FfiMovementInput {
@@ -220,7 +262,7 @@ mod tests {
             stance: 65.62,
             on_ground: true,
             is_in_water: false,
-            fall_distance: res1.new_fall_distance,
+            fall_distance: fall,
         };
         let res2 = alpha_movement_validate(&input_landing);
         assert_eq!(res2.status, MovementValidationStatus::Ok as u8);
@@ -246,5 +288,64 @@ mod tests {
         assert_eq!(res.status, MovementValidationStatus::Ok as u8);
         assert_eq!(res.fall_damage, 0);
         assert_eq!(res.new_fall_distance, 0.0);
+    }
+
+    #[test]
+    fn test_nan_rejected_as_illegal_position() {
+        let input = FfiMovementInput {
+            from_x: 0.0,
+            from_y: 64.0,
+            from_z: 0.0,
+            to_x: f64::NAN,
+            to_y: 64.0,
+            to_z: 0.0,
+            stance: 65.62,
+            on_ground: false,
+            is_in_water: false,
+            fall_distance: 0.0,
+        };
+        let res = alpha_movement_validate(&input);
+        assert_eq!(res.status, MovementValidationStatus::IllegalPosition as u8);
+    }
+
+    #[test]
+    fn test_water_resets_fall_midair() {
+        // Swimming down must not accumulate fall (vanilla func_84_k resets
+        // unconditionally in water; the old code only reset on ground).
+        let input = FfiMovementInput {
+            from_x: 0.0,
+            from_y: 64.0,
+            from_z: 0.0,
+            to_x: 0.0,
+            to_y: 60.0,
+            to_z: 0.0,
+            stance: 61.62,
+            on_ground: false,
+            is_in_water: true,
+            fall_distance: 5.0,
+        };
+        let res = alpha_movement_validate(&input);
+        assert_eq!(res.status, MovementValidationStatus::Ok as u8);
+        assert_eq!(res.new_fall_distance, 0.0);
+        assert_eq!(res.fall_damage, 0);
+    }
+
+    #[test]
+    fn test_soft_reject_at_four_blocks() {
+        // 5-block jump in one packet (25 sq > 16) → teleport-back, not kick.
+        let input = FfiMovementInput {
+            from_x: 0.0,
+            from_y: 64.0,
+            from_z: 0.0,
+            to_x: 5.0,
+            to_y: 64.0,
+            to_z: 0.0,
+            stance: 65.62,
+            on_ground: false,
+            is_in_water: false,
+            fall_distance: 0.0,
+        };
+        let res = alpha_movement_validate(&input);
+        assert_eq!(res.status, MovementValidationStatus::MovedWrongly as u8);
     }
 }

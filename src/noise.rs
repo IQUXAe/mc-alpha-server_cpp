@@ -113,6 +113,13 @@ impl NoiseGeneratorPerlin {
         self.noise(x + self.x_coord, y + self.y_coord, z + self.z_coord)
     }
 
+    /// 2D entry used by tree density (`NoiseGeneratorOctaves.func_647_a` →
+    /// `Perlin.func_642_a(x,z)` → `generateNoise(x,z,0)`): samples the XY
+    /// plane `noise(x+xo, z+yo, zo)`, NOT the XZ plane.
+    pub fn func_642_a(&self, x: f64, z: f64) -> f64 {
+        self.noise(x + self.x_coord, z + self.y_coord, self.z_coord)
+    }
+
     pub fn func_646_a(
         &self,
         arr: &mut [f64],
@@ -352,7 +359,7 @@ impl NoiseGeneratorOctaves {
         let mut result = 0.0;
         let mut scale = 1.0;
         for i in 0..self.octaves {
-            result += self.generator_collection[i].noise_shifted(x * scale, 0.0, z * scale) / scale;
+            result += self.generator_collection[i].func_642_a(x * scale, z * scale) / scale;
             scale /= 2.0;
         }
         result

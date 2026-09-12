@@ -22,8 +22,9 @@ pub fn alpha_inventory_max_stack_size(item_id: i32) -> i32 {
         267 | 268 | 272 | 276 | 283 => 1,
         // Hoes
         290 | 291 | 292 | 293 | 294 => 1,
-        // Flint and steel, Bow, Fishing rod
-        259 | 261 | 346 => 1,
+        // Flint and steel, Bow (ItemBow sets stackSize=1; fishing rod keeps
+        // the default 64 — Java ItemFishingRod only sets maxDamage=64).
+        259 | 261 => 1,
         // Armor (Leather, Chain, Iron, Diamond, Gold)
         298..=317 => 1,
         // Signs, Doors, Buckets, Minecarts, Boats, Saddle
