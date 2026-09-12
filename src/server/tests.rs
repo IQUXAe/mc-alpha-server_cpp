@@ -4,6 +4,8 @@
     use std::net::{TcpListener, TcpStream};
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::Duration;
+    use crate::entity_table::{Entity, MobEnt, MobKind};
+    use crate::server_config::ServerConfig;
 
     static TMP: AtomicU64 = AtomicU64::new(0);
 
