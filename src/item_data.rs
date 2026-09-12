@@ -144,15 +144,17 @@ pub fn alpha_item_is_valid(item_id: i32) -> bool {
 // ---------------------------------------------------------------------------
 //
 // C++ sources:
-// - `ItemTool` ctor (`Item.h:183-191`): `maxDamage = 32 << level`,
+// - `ItemTool` ctor (Java `ItemTool.java`): `maxDamage = 32 << level`,
 //   `if (level == 3) maxDamage *= 4`.
 //   Gold tools are built with `level == 0`, so they share wood values.
-// - `ItemSword` ctor (`Item.h:239-246`): same formula.
-// - `ItemHoe` via `initItems` (`Item.cpp:269-273`): 59/131/250/1561/64.
-// - `flintAndSteel` 64, `bow` 384, `fishingRod` 64 (`Item.cpp:238/240/325`).
-// - armor via `setMaxDamage` (`Item.cpp:277-296`), reused through
-//   `alpha_armor_max_damage`.
-// - everything else keeps the `Item` default `maxDamage = 0`.
+// - `ItemSword` ctor: same formula.
+// - `ItemHoe` via `initItems`: 59/131/250/1561/64.
+// - `flintAndSteel` 64, `bow` 32 (default Item.maxDamage, only stackSize=1),
+//   `fishingRod` 64, saddle/sign/door/bucket/painting 64.
+// - armor via `setMaxDamage`, reused through `alpha_armor_max_damage`.
+// - everything else keeps the `Item` default `maxDamage = 32`, but for
+//   non-damageable stacks the damage field is unused (vanilla still stores
+//   32 as the cap).
 
 /// Unified durability table. Armor range 298..=317 is served by the
 /// existing `alpha_armor_max_damage` helper (no second table here).
@@ -169,8 +171,11 @@ pub fn alpha_item_max_damage(item_id: i32) -> i32 {
         ITEM_HOE_DIAMOND => 1561,
         ITEM_HOE_GOLD => 64,
         ITEM_FLINT_AND_STEEL => 64,
-        ITEM_BOW => 384,
+        ITEM_BOW => 32,
         ITEM_FISHING_ROD => 64,
+        ITEM_SADDLE | ITEM_SIGN | ITEM_DOOR_WOOD | ITEM_DOOR_STEEL | ITEM_BUCKET_EMPTY
+        | ITEM_BUCKET_WATER | ITEM_BUCKET_LAVA | ITEM_BUCKET_MILK | ITEM_PAINTING
+        | ITEM_MINECART_EMPTY | ITEM_MINECART_CRATE | ITEM_MINECART_POWERED | ITEM_BOAT => 64,
         298..=317 => alpha_armor_max_damage(item_id),
         _ => 0,
     }
@@ -276,10 +281,11 @@ pub fn alpha_item_tool_speed(item_id: i32) -> f32 {
     }
 }
 
-/// Explicit effective-block lists from the `ItemPickaxe` / `ItemSpade` /
-/// `ItemAxe` ctors in `Item.h:206-231`.
-pub const PICKAXE_EFFECTIVE_BLOCKS: [i32; 13] =
-    [4, 43, 44, 1, 48, 15, 42, 7, 14, 56, 57, 79, 87];
+/// Explicit effective-block lists from `ItemPickaxe` / `ItemSpade` /
+/// `ItemAxe` ctors in Java (`ItemPickaxe.java`, `ItemSpade.java:4`,
+/// `ItemAxe.java:4`). Pick: [4,43,44,1,48,15,42,16,41,14,56,57,79,87].
+pub const PICKAXE_EFFECTIVE_BLOCKS: [i32; 14] =
+    [4, 43, 44, 1, 48, 15, 42, 16, 41, 14, 56, 57, 79, 87];
 pub const SPADE_EFFECTIVE_BLOCKS: [i32; 7] = [2, 3, 12, 13, 78, 80, 82];
 pub const AXE_EFFECTIVE_BLOCKS: [i32; 4] = [5, 47, 17, 54];
 
@@ -589,7 +595,7 @@ mod tests {
         assert_eq!(alpha_inventory_max_stack_size(264), 64);
         assert_eq!(alpha_inventory_max_stack_size(325), 1);
         assert_eq!(alpha_inventory_max_stack_size(332), 16);
-        assert_eq!(alpha_inventory_max_stack_size(344), 16);
+        assert_eq!(alpha_inventory_max_stack_size(344), 64);
         assert_eq!(alpha_inventory_max_stack_size(276), 1);
     }
 
@@ -614,7 +620,7 @@ mod tests {
     #[test]
     fn max_damage_special_and_armor() {
         assert_eq!(alpha_item_max_damage(ITEM_FLINT_AND_STEEL), 64);
-        assert_eq!(alpha_item_max_damage(ITEM_BOW), 384);
+        assert_eq!(alpha_item_max_damage(ITEM_BOW), 32);
         assert_eq!(alpha_item_max_damage(ITEM_FISHING_ROD), 64);
         assert_eq!(alpha_item_max_damage(ITEM_HOE_WOOD), 59);
         assert_eq!(alpha_item_max_damage(ITEM_HOE_STONE), 131);

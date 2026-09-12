@@ -1648,9 +1648,12 @@ mod tests {
         assert_eq!(World::native_drop_ids(56), (264, 1, 0));
         assert_eq!(World::native_drop_ids(39), (39, 1, 0));
         assert_eq!(World::native_drop_ids(40), (40, 1, 0));
-        for bid in [20, 47, 52, 78, 79, 80] {
+        for bid in [20, 47, 52, 79] {
             assert_eq!(World::native_drop_ids(bid).1, 0, "block {bid} drops nothing");
         }
+        // Snow harvest: layer -> 1 snowball, block -> 4 snowballs.
+        assert_eq!(World::native_drop_ids(78), (332, 1, 0));
+        assert_eq!(World::native_drop_ids(80), (332, 4, 0));
     }
 
     #[test]

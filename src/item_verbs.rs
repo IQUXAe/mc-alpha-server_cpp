@@ -38,23 +38,9 @@ pub struct ItemUseWorld {
         Option<fn(sx: f64, sy: f64, sz: f64, ex: f64, ey: f64, ez: f64, out_x: &mut i32, out_y: &mut i32, out_z: &mut i32) -> bool>,
 }
 
-const FACE_DX: [i32; 6] = [1, -1, 0, 0, 0, 0];
-const FACE_DY: [i32; 6] = [0, 0, 1, -1, 0, 0];
-const FACE_DZ: [i32; 6] = [0, 0, 0, 0, 1, -1];
-
-/// ItemBlock placement faces: 0=bottom, 1=top, 2=north, 3=south, 4=west,
-/// 5=east (mirrors the switch in `ItemBlock::onItemUse`).
 const PLACE_DX: [i32; 6] = [0, 0, 0, 0, -1, 1];
 const PLACE_DY: [i32; 6] = [-1, 1, 0, 0, 0, 0];
 const PLACE_DZ: [i32; 6] = [0, 0, -1, 1, 0, 0];
-
-fn face_offset(side: i32) -> Option<(i32, i32, i32)> {
-    if side < 0 || side > 5 {
-        return None;
-    }
-    let s = side as usize;
-    Some((FACE_DX[s], FACE_DY[s], FACE_DZ[s]))
-}
 
 fn place_offset(side: i32) -> Option<(i32, i32, i32)> {
     if side < 0 || side > 5 {
@@ -140,6 +126,11 @@ pub struct FlintOut {
     pub broke: bool,
 }
 
+/// Flint and steel (mirrors Java `ItemFlintAndSteel.onItemUse`): side offset
+/// 0=y-1,1=y+1,2=z-1,3=z+1,4=x-1,5=x+1; if the target cell is air, ignite it.
+/// Always damages the stack by 1 and always consumes the event (returns true),
+/// even when nothing ignited. `broke` follows `ItemStack.damageItem`: strict
+/// `new_damage > max_damage` (65 uses at max 64).
 pub fn item_flint_use(
     world: &ItemUseWorld,
     damage_in: i32,
@@ -151,37 +142,20 @@ pub fn item_flint_use(
     out: &mut FlintOut,
 ) -> bool {
     let w = world;
-    let fail = FlintOut { placed: false, new_damage: damage_in, broke: false };
-    let Some((dx, dy, dz)) = face_offset(side) else {
-        *out = fail;
-        return false;
+    let Some((dx, dy, dz)) = place_offset(side) else {
+        // Invalid side: vanilla would still damage, but without a target cell
+        // there is nothing to do — report no placement with damage applied.
+        let new_damage = damage_in + 1;
+        *out = FlintOut { placed: false, new_damage, broke: new_damage > max_damage };
+        return true;
     };
     let (fx, fy, fz) = (x + dx, y + dy, z + dz);
-    if q_id(w, fx, fy, fz) != 0 {
-        *out = fail;
-        return false;
-    }
-    let supported = w.does_attach.map(|f| f(fx, fy - 1, fz)).unwrap_or(false);
-    if !supported && q_id(w, fx, fy - 1, fz) != 87 {
-        let mut fuel = false;
-        for (cx, cy, cz) in [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)] {
-            if w.material_burning.map(|f| f(fx + cx, fy + cy, fz + cz)).unwrap_or(false) {
-                fuel = true;
-                break;
-            }
-        }
-        if !fuel {
-            *out = fail;
-            return false;
-        }
-    }
-    let placed = w.set_block_notify.map(|f| f(fx, fy, fz, 51)).unwrap_or(false);
-    if !placed {
-        *out = fail;
-        return false;
+    let mut placed = false;
+    if q_id(w, fx, fy, fz) == 0 {
+        placed = w.set_block_notify.map(|f| f(fx, fy, fz, 51)).unwrap_or(false);
     }
     let new_damage = damage_in + 1;
-    *out = FlintOut { placed: true, new_damage, broke: new_damage >= max_damage };
+    *out = FlintOut { placed, new_damage, broke: new_damage > max_damage };
     true
 }
 
@@ -567,27 +541,25 @@ mod tests {
         assert!(logs().contains(&"metanotify 0 65 0 59 0".to_string()), "{:?}", logs());
         assert!(!item_seeds_use(tp, 0, 64, 0, 2));
 
-        // 4. Flint lights supported air (side 4 faces +z); refuses fuel-less voids.
+        // 4. Flint: vanilla side map (3 => +z), always damages, always consumes.
         reset();
-        let _ = fake().as_mut().map(|f| {
-            let _ = f.solid.insert((0, 63, 1), true);
-        });
         let mut out = FlintOut { placed: false, new_damage: 0, broke: false };
-        assert!(item_flint_use(tp, 3, 64, 0, 64, 0, 4, &mut out));
+        assert!(item_flint_use(tp, 3, 64, 0, 64, 0, 3, &mut out));
         assert!(out.placed && out.new_damage == 4 && !out.broke);
         assert!(logs().contains(&"notify 0 64 1 51".to_string()), "{:?}", logs());
-        // Breaks at max damage (fresh cell: the first call lit this one).
+        // Breaks strictly above max (65 uses at max 64).
+        reset();
+        let mut out = FlintOut { placed: false, new_damage: 0, broke: false };
+        assert!(item_flint_use(tp, 64, 64, 0, 64, 0, 3, &mut out));
+        assert!(out.broke && out.new_damage == 65);
+        // Occupied target: no placement but still damages + consumes.
         reset();
         let _ = fake().as_mut().map(|f| {
-            let _ = f.solid.insert((0, 63, 1), true);
+            let _ = f.blocks.insert((0, 64, 1), (1, 0));
         });
         let mut out = FlintOut { placed: false, new_damage: 0, broke: false };
-        assert!(item_flint_use(tp, 63, 64, 0, 64, 0, 4, &mut out));
-        assert!(out.broke);
-        // No support, no fuel: fail.
-        reset();
-        let mut out = FlintOut { placed: false, new_damage: 0, broke: false };
-        assert!(!item_flint_use(tp, 0, 64, 0, 64, 0, 4, &mut out));
+        assert!(item_flint_use(tp, 0, 64, 0, 64, 0, 3, &mut out));
+        assert!(!out.placed && out.new_damage == 1);
 
         // 5. Sign post on solid ground takes yaw metadata; wall sign takes side.
         reset();

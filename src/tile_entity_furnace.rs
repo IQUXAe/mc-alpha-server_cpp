@@ -199,7 +199,8 @@ mod tests {
     #[test]
     fn fuel_table_matches_cpp() {
         // Wood-material blocks burn 300 (planks, log, bookshelf, workbench...).
-        for id in [5, 17, 25, 47, 53, 54, 58, 63, 64, 65, 68, 72, 84, 85] {
+        // 25 is null in vanilla (no fuel).
+        for id in [5, 17, 47, 53, 54, 58, 63, 64, 65, 68, 72, 84, 85] {
             assert_eq!(fuel_burn_time(id), 300, "wood block {id}");
         }
         // Ordinary blocks and air burn nothing.

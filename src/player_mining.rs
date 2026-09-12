@@ -48,8 +48,14 @@ pub fn alpha_mining_can_harvest(block_id: i32, held_item_id: i32) -> bool {
         return tier >= 2;
     }
 
-    // Iron (15, 42) and Redstone (73, 74): stone pickaxe or better (tier >= 1)
-    if block_id == 15 || block_id == 42 || block_id == 73 || block_id == 74 {
+    // Redstone (73, 74): iron pickaxe or better (tier >= 2) — Java nests
+    // redstone under a separate >=2 check (ItemPickaxe.java:13).
+    if block_id == 73 || block_id == 74 {
+        return tier >= 2;
+    }
+
+    // Iron (15, 42): stone pickaxe or better (tier >= 1)
+    if block_id == 15 || block_id == 42 {
         return tier >= 1;
     }
 
@@ -68,9 +74,6 @@ pub fn alpha_mining_get_str_vs_block(block_id: i32, held_item_id: i32) -> f32 {
         return 1.5;
     }
 
-    let props = alpha_block_properties_get(block_id as u32);
-    let mat = props.material;
-
     // Pickaxes
     let pick_speed = match held_item_id {
         270 | 285 => Some(2.0), // Wood, Gold
@@ -81,12 +84,13 @@ pub fn alpha_mining_get_str_vs_block(block_id: i32, held_item_id: i32) -> f32 {
     };
 
     if let Some(speed) = pick_speed {
-        let is_effective = mat == BlockMaterial::Rock as u8
-            || mat == BlockMaterial::Iron as u8
-            || matches!(
-                block_id,
-                1 | 4 | 7 | 14 | 15 | 42 | 43 | 44 | 48 | 56 | 57 | 79 | 87
-            );
+        // Java ItemTool.getStrVsBlock: only the explicit ctor list, else 1.0.
+        // No material fallback (a furnace/obsidian/brick is 1.0x without the
+        // right pick in vanilla).
+        let is_effective = matches!(
+            block_id,
+            4 | 43 | 44 | 1 | 48 | 15 | 42 | 16 | 41 | 14 | 56 | 57 | 79 | 87
+        );
         if is_effective {
             return speed;
         }
@@ -102,11 +106,8 @@ pub fn alpha_mining_get_str_vs_block(block_id: i32, held_item_id: i32) -> f32 {
     };
 
     if let Some(speed) = spade_speed {
-        let is_effective = mat == BlockMaterial::Ground as u8
-            || mat == BlockMaterial::Sand as u8
-            || mat == BlockMaterial::Snow as u8
-            || mat == BlockMaterial::BuiltSnow as u8
-            || matches!(block_id, 2 | 3 | 12 | 13 | 78 | 80 | 82);
+        // Java: explicit list only — soil (60) is NOT spade-effective.
+        let is_effective = matches!(block_id, 2 | 3 | 12 | 13 | 78 | 80 | 82);
         if is_effective {
             return speed;
         }
@@ -122,8 +123,8 @@ pub fn alpha_mining_get_str_vs_block(block_id: i32, held_item_id: i32) -> f32 {
     };
 
     if let Some(speed) = axe_speed {
-        let is_effective = mat == BlockMaterial::Wood as u8
-            || matches!(block_id, 5 | 17 | 47 | 54);
+        // Java: explicit list only — doors etc. are 1.0x.
+        let is_effective = matches!(block_id, 5 | 47 | 17 | 54);
         if is_effective {
             return speed;
         }

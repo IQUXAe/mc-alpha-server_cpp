@@ -30,8 +30,8 @@ pub fn alpha_inventory_max_stack_size(item_id: i32) -> i32 {
         323 | 324 | 325 | 326 | 327 | 328 | 329 | 330 | 333 | 335 | 342 | 343 => 1,
         // Food (ItemFood sets maxStackSize = 1; unstackable in Alpha)
         260 | 282 | 297 | 319 | 320 | 322 | 349 | 350 => 1,
-        // Stack of 16
-        332 | 344 => 16, // Snowball, Egg
+        // Stack of 16: snowball only (ItemSnowball sets 16; egg stays 64).
+        332 => 16,
         // Default stack size for items
         _ => 64,
     }
@@ -352,10 +352,11 @@ pub fn alpha_inventory_craft_2x2(grid: &[FfiItemStack; 4]) -> FfiItemStack {
             };
         }
 
-        // Flint & Steel: iron ingot (265) + flint (318) shapeless
-        let has_iron = (0..4).any(|i| id(i) == 265);
-        let has_flint = (0..4).any(|i| id(i) == 318);
-        if has_iron && has_flint {
+        // Flint & Steel: diagonal only ("A "/" B" + mirror) — Java CraftingManager.
+        // Valid: [iron,_,_,flint] or [_,iron,flint,_].
+        if (id(0) == 265 && id(1) == 0 && id(2) == 0 && id(3) == 318)
+            || (id(0) == 0 && id(1) == 265 && id(2) == 318 && id(3) == 0)
+        {
             return FfiItemStack {
                 item_id: 259,
                 stack_size: 1,
@@ -364,29 +365,9 @@ pub fn alpha_inventory_craft_2x2(grid: &[FfiItemStack; 4]) -> FfiItemStack {
             };
         }
 
-        // Wooden pressure plate: 2 planks horizontal
-        if (id(0) == 5 && id(1) == 5 && id(2) == 0 && id(3) == 0)
-            || (id(2) == 5 && id(3) == 5 && id(0) == 0 && id(1) == 0)
-        {
-            return FfiItemStack {
-                item_id: 72,
-                stack_size: 1,
-                item_damage: 0,
-                animations_to_go: 0,
-            };
-        }
-
-        // Stone pressure plate: 2 stone (1) horizontal
-        if (id(0) == 1 && id(1) == 1 && id(2) == 0 && id(3) == 0)
-            || (id(2) == 1 && id(3) == 1 && id(0) == 0 && id(1) == 0)
-        {
-            return FfiItemStack {
-                item_id: 70,
-                stack_size: 1,
-                item_damage: 0,
-                animations_to_go: 0,
-            };
-        }
+        // NOTE: pressure plates ("###") and buttons need a 3x3 workbench in
+        // vanilla and are NOT craftable in the 2x2 inventory. No 2x2 recipe
+        // here (old 2-plank/2-stone shortcuts removed).
 
         // Stone button: 2 stone (1) vertical
         if (id(0) == 1 && id(2) == 1 && id(1) == 0 && id(3) == 0)

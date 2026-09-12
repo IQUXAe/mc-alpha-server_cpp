@@ -880,13 +880,15 @@ mod tests {
 
     #[test]
     fn blocklight_without_emitters_stays_zero() {
-        // Current block table carries no light_value emitters, so a plain
-        // chunk must produce zero blocklight (documents the table state;
-        // emission itself still flows through the shared BFS rules).
+        // Plain air chunk must produce zero blocklight; a torch must seed
+        // emission (light_value 14) through the shared BFS rules.
         let mut chunk = Chunk::new(0, 0);
         chunk.generate_skylight_map();
         assert_eq!(chunk.get_blocklight(8, 64, 8), 0);
         assert_eq!(chunk.get_blocklight(0, 127, 0), 0);
+        chunk.set_block_id(8, 64, 8, 50);
+        chunk.generate_skylight_map();
+        assert_eq!(chunk.get_blocklight(8, 64, 8), 14);
     }
 
     #[test]
