@@ -6,8 +6,7 @@
 //! - durability (`maxDamage`),
 //! - tool tier / base dig speed / explicit effective-block lists
 //!   (`ItemTool`, `ItemPickaxe`, `ItemSpade`, `ItemAxe`, `ItemSword`),
-//! - food heal amounts (`ItemFood`, `ItemSoup`),
-//! - a small pure stack value (`PureItemStack`) with world-free helpers.
+//! - food heal amounts (`ItemFood`, `ItemSoup`).
 //!
 //! Reused, not duplicated:
 //! - `ItemStack` comes from `crate::inventory`,
@@ -25,8 +24,7 @@
 //! hoe/seed/flint/sign/block placement, soup/food healing via player,
 //! `hitEntity` via entity) are NOT ported here.
 
-use crate::inventory::ItemStack;
-use crate::player::inventory::{armor_max_damage, inventory_max_stack_size};
+use crate::player::inventory::armor_max_damage;
 
 // ---------------------------------------------------------------------------
 // Id table (final `itemID` values, see `Item::initItems` in Item.cpp)
@@ -315,218 +313,12 @@ pub fn item_is_effective_explicit(item_id: i32, block_id: i32) -> bool {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Pure stack value (`ItemStack` fields without world access)
-// ---------------------------------------------------------------------------
-//
-// Mirrors the data layout of `ItemStack` (`ItemStack.h:14-17`):
-// `stackSize / animationsToGo / itemID / itemDamage`.
-// `animationsToGo` is a client render timer and is not modelled here;
-// `ItemStack.animations_to_go` is the client render timer, unused here.
-//
-// C++ has no split/merge/can-stack helpers on `ItemStack` itself, so the
-// helpers below are new pure utilities built on the reused
-// `inventory_max_stack_size` table (same match rule as
-// `inventory_add_item`: same id + same damage + room left).
-
-/// World-free copy of `ItemStack` fields.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PureItemStack {
-    pub item_id: i32,
-    pub count: i32,
-    pub damage: i32,
-}
-
-impl PureItemStack {
-    pub const fn new(item_id: i32, count: i32, damage: i32) -> Self {
-        Self {
-            item_id,
-            count,
-            damage,
-        }
-    }
-
-    pub const fn empty() -> Self {
-        Self {
-            item_id: 0,
-            count: 0,
-            damage: 0,
-        }
-    }
-
-    pub const fn is_empty(self) -> bool {
-        self.item_id <= 0 || self.count <= 0
-    }
-
-    /// Mirrors `ItemStack::copy()` (`ItemStack.h:120-122`).
-    pub const fn copy(self) -> Self {
-        Self {
-            item_id: self.item_id,
-            count: self.count,
-            damage: self.damage,
-        }
-    }
-
-    pub fn clear(&mut self) {
-        self.item_id = 0;
-        self.count = 0;
-        self.damage = 0;
-    }
-
-    pub fn from_stack(s: &ItemStack) -> Self {
-        Self {
-            item_id: s.item_id,
-            count: s.stack_size,
-            damage: s.item_damage,
-        }
-    }
-
-    pub fn to_stack(self) -> ItemStack {
-        ItemStack::new(self.item_id, self.count, self.damage)
-    }
-
-    fn max_for(self) -> i32 {
-        inventory_max_stack_size(self.item_id)
-    }
-
-    /// Stacking rule used by inventory filling: same item, same damage,
-    /// both non-empty, and the shared limit is above 1.
-    pub fn can_stack_with(self, other: Self) -> bool {
-        if self.is_empty() || other.is_empty() {
-            return false;
-        }
-        if self.item_id != other.item_id {
-            return false;
-        }
-        if self.damage != other.damage {
-            return false;
-        }
-        self.max_for() > 1 && other.max_for() > 1
-    }
-
-    /// Alias kept for the `can_merge` name used in the task brief.
-    pub fn can_merge_with(self, other: Self) -> bool {
-        self.can_stack_with(other)
-    }
-
-    /// Take up to `amount` units out of `self`, shrinking `self`.
-    /// Non-positive `amount`, empty `self`, or invalid ids yield an empty
-    /// stack and leave `self` untouched.
-    pub fn split(&mut self, amount: i32) -> Self {
-        if amount <= 0 || self.is_empty() {
-            return Self::empty();
-        }
-        let mut take = amount;
-        if take > self.count {
-            take = self.count;
-        }
-        self.count -= take;
-        let out = Self {
-            item_id: self.item_id,
-            count: take,
-            damage: self.damage,
-        };
-        if self.count <= 0 {
-            self.clear();
-        }
-        out
-    }
-
-    /// Move units from `other` into `self` while ids/damage match and
-    /// room is left under the shared stack limit. Leftover stays in `other`.
-    pub fn merge_from(&mut self, other: &mut Self) {
-        if other.is_empty() {
-            return;
-        }
-        if self.is_empty() {
-            // Empty slot adopts the incoming kind, capped by the limit.
-            let limit = other.max_for();
-            if limit <= 0 {
-                return;
-            }
-            let mut take = other.count;
-            if take > limit {
-                take = limit;
-            }
-            self.item_id = other.item_id;
-            self.damage = other.damage;
-            self.count = take;
-            other.count -= take;
-            if other.count <= 0 {
-                other.clear();
-            }
-            return;
-        }
-        if !self.can_stack_with(*other) {
-            return;
-        }
-        let limit = self.max_for();
-        let other_limit = other.max_for();
-        let mut cap = limit;
-        if other_limit < cap {
-            cap = other_limit;
-        }
-        if cap <= 0 {
-            return;
-        }
-        let mut room = cap - self.count;
-        if room <= 0 {
-            return;
-        }
-        if other.count < room {
-            room = other.count;
-        }
-        self.count += room;
-        other.count -= room;
-        if other.count <= 0 {
-            other.clear();
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::inventory::item_stack_damage;
+    use crate::inventory::{ItemStack, item_stack_damage};
+    use crate::player::inventory::inventory_max_stack_size;
     use crate::player::mining::{mining_can_harvest, mining_get_str_vs_block};
-
-    fn pure(id: i32, count: i32, damage: i32) -> PureItemStack {
-        PureItemStack::new(id, count, damage)
-    }
-
-    #[test]
-    fn default_constructor_is_empty() {
-        let s = PureItemStack::empty();
-        assert_eq!(s.count, 0);
-        assert_eq!(s.item_id, 0);
-        assert!(s.is_empty());
-    }
-
-    #[test]
-    fn construct_from_block_ids() {
-        // Mirrors TestItemStack.ConstructFromBlock (stone id 1, count 4).
-        let s = pure(1, 4, 0);
-        assert_eq!(s.item_id, 1);
-        assert_eq!(s.count, 4);
-    }
-
-    #[test]
-    fn construct_from_item_diamond() {
-        // Mirrors ConstructFromItem (diamond id 264, count 2).
-        let s = pure(ITEM_DIAMOND, 2, 0);
-        assert_eq!(s.item_id, 264);
-        assert_eq!(s.count, 2);
-    }
-
-    #[test]
-    fn construct_from_id_and_damage() {
-        // Mirrors ConstructFromId / ConstructFromIdDamage.
-        let a = pure(264, 3, 0);
-        assert_eq!(a.item_id, 264);
-        assert_eq!(a.count, 3);
-        let b = pure(264, 1, 5);
-        assert_eq!(b.damage, 5);
-    }
 
     #[test]
     fn valid_and_invalid_ids() {
@@ -566,23 +358,6 @@ mod tests {
         assert_eq!(ITEM_FISH_COOKED, 350);
         assert_eq!(FIRST_ITEM_ID, 256);
         assert_eq!(LAST_ITEM_ID, 350);
-    }
-
-    #[test]
-    fn copy_preserves_fields() {
-        // Mirrors TestItemStack.Copy + NBTRoundTrip field mapping.
-        let s = pure(264, 5, 2);
-        let c = s.copy();
-        assert_eq!(c.item_id, 264);
-        assert_eq!(c.count, 5);
-        assert_eq!(c.damage, 2);
-        // Stack round trip keeps id/count/damage.
-        let ffi = s.to_stack();
-        assert_eq!(ffi.item_id, 264);
-        assert_eq!(ffi.stack_size, 5);
-        assert_eq!(ffi.item_damage, 2);
-        let back = PureItemStack::from_stack(&ffi);
-        assert_eq!(back, s);
     }
 
     #[test]
@@ -755,84 +530,5 @@ mod tests {
         assert_eq!(mining_get_str_vs_block(0, ITEM_PICKAXE_STEEL), 1.0);
         assert_eq!(mining_get_str_vs_block(9999, ITEM_PICKAXE_STEEL), 1.0);
         assert_eq!(mining_get_str_vs_block(256, ITEM_PICKAXE_STEEL), 1.0);
-    }
-
-    #[test]
-    fn use_right_click_returns_copy_semantics() {
-        // Mirrors UseItemRightClickReturnsCopy for the base item path.
-        let s = pure(264, 1, 0);
-        let r = s.copy();
-        assert_eq!(r.item_id, 264);
-        assert_eq!(r.count, 1);
-    }
-
-    #[test]
-    fn can_stack_rules() {
-        let a = pure(ITEM_DIAMOND, 10, 0);
-        let b = pure(ITEM_DIAMOND, 5, 0);
-        assert!(a.can_stack_with(b));
-        assert!(a.can_merge_with(b));
-        // Different damage blocks stacking (matches inventory fill rule).
-        let c = pure(ITEM_DIAMOND, 5, 1);
-        assert!(!a.can_stack_with(c));
-        // Different id blocks stacking.
-        let d = pure(ITEM_COAL, 5, 0);
-        assert!(!a.can_stack_with(d));
-        // Non-stackable tools never stack.
-        let t1 = pure(ITEM_SWORD_DIAMOND, 1, 0);
-        let t2 = pure(ITEM_SWORD_DIAMOND, 1, 0);
-        assert!(!t1.can_stack_with(t2));
-        // Empty never stacks.
-        assert!(!PureItemStack::empty().can_stack_with(a));
-        assert!(!a.can_stack_with(PureItemStack::empty()));
-    }
-
-    #[test]
-    fn split_takes_and_shrinks() {
-        let mut s = pure(ITEM_DIAMOND, 10, 0);
-        let part = s.split(4);
-        assert_eq!(part, pure(ITEM_DIAMOND, 4, 0));
-        assert_eq!(s, pure(ITEM_DIAMOND, 6, 0));
-        // Over-take clamps and clears the source.
-        let rest = s.split(99);
-        assert_eq!(rest.count, 6);
-        assert!(s.is_empty());
-        // Non-positive take leaves source alone.
-        let mut t = pure(ITEM_DIAMOND, 5, 0);
-        let none = t.split(0);
-        assert!(none.is_empty());
-        assert_eq!(t.count, 5);
-        let neg = t.split(-3);
-        assert!(neg.is_empty());
-        assert_eq!(t.count, 5);
-    }
-
-    #[test]
-    fn merge_respects_limit() {
-        // 60 + 10 with limit 64 -> 64 + 6 left.
-        let mut dst = pure(ITEM_DIAMOND, 60, 0);
-        let mut src = pure(ITEM_DIAMOND, 10, 0);
-        dst.merge_from(&mut src);
-        assert_eq!(dst.count, 64);
-        assert_eq!(src.count, 6);
-        // Mismatched damage does not move.
-        let mut d2 = pure(ITEM_DIAMOND, 10, 0);
-        let mut s2 = pure(ITEM_DIAMOND, 10, 1);
-        d2.merge_from(&mut s2);
-        assert_eq!(d2.count, 10);
-        assert_eq!(s2.count, 10);
-        // Empty slot adopts kind capped by limit (snowball limit 16).
-        let mut e = PureItemStack::empty();
-        let mut snow = pure(ITEM_SNOWBALL, 20, 0);
-        e.merge_from(&mut snow);
-        assert_eq!(e.item_id, ITEM_SNOWBALL);
-        assert_eq!(e.count, 16);
-        assert_eq!(snow.count, 4);
-        // Full slot keeps source intact.
-        let mut full = pure(ITEM_DIAMOND, 64, 0);
-        let mut extra = pure(ITEM_DIAMOND, 1, 0);
-        full.merge_from(&mut extra);
-        assert_eq!(full.count, 64);
-        assert_eq!(extra.count, 1);
     }
 }
