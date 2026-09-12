@@ -12,7 +12,6 @@ use crate::world::ai::CreatureSnap;
 /// Creeper blast radius (mirrors the Alpha inline `explode`).
 const CREEPER_BLAST_RADIUS: f32 = 3.0;
 /// Fire block id placed by explosions.
-
 impl World {
     /// Line of sight (mirrors `canEntitySee` → `rayTraceBlocks` with
     /// `includeLiquids = false`): the same DDA walk, blocked by any
@@ -733,8 +732,8 @@ impl World {
         }
         // Stuck handling.
         let stuck_outcome = match self.entities.get(id) {
-            Some(Entity::Arrow(a)) if a.in_ground => {
-                if self.get_block_id(a.tile[0], a.tile[1], a.tile[2]) as i32 == a.in_tile {
+            Some(Entity::Arrow(a)) if a.in_ground
+                && self.get_block_id(a.tile[0], a.tile[1], a.tile[2]) as i32 == a.in_tile => {
                     let old = a.ticks_in_ground;
                     if let Some(Entity::Arrow(x)) = self.entities.get_mut(id) {
                         x.ticks_in_ground = old + 1;
@@ -745,10 +744,7 @@ impl World {
                         }
                     }
                     true // stay (dead or still stuck)
-                } else {
-                    false // popped out below
                 }
-            }
             _ => false,
         };
         if stuck_outcome {
@@ -770,7 +766,7 @@ impl World {
             a.ticks_in_air += 1;
         }
         let (pos, motion, bbox) = match self.entities.get(id) {
-            Some(Entity::Arrow(a)) => (a.body.pos, a.body.motion, a.body.bounding_box.clone()),
+            Some(Entity::Arrow(a)) => (a.body.pos, a.body.motion, a.body.bounding_box),
             _ => return,
         };
         let start = Vec3D::new(pos[0], pos[1], pos[2]);

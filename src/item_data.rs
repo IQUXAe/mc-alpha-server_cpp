@@ -134,7 +134,7 @@ pub const ITEM_FISH_COOKED: i32 = 350;
 /// True for ids that can appear in `Item::itemsList` after `initItems`:
 /// block ids 1..=255 plus item ids 256..=350.
 pub fn item_is_valid(item_id: i32) -> bool {
-    item_id >= 1 && item_id <= LAST_ITEM_ID
+    (1..=LAST_ITEM_ID).contains(&item_id)
 }
 
 // ---------------------------------------------------------------------------
@@ -261,10 +261,7 @@ fn tool_tier_opt(item_id: i32) -> Option<i32> {
 /// Gold tools were built with level 0 in `Item.cpp`, so they yield 0.
 /// Returns -1 for non-tiered ids (hoes, armor, misc).
 pub fn item_tool_tier(item_id: i32) -> i32 {
-    match tool_tier_opt(item_id) {
-        Some(t) => t,
-        None => -1,
-    }
+    tool_tier_opt(item_id).unwrap_or(-1)
 }
 
 /// Base dig speed from `ItemTool` ctor: `(level + 1) * 2.0`.

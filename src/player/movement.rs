@@ -62,7 +62,7 @@ pub fn movement_validate(input: &MovementInput) -> MovementResult {
 
     // 1. Check stance: stance - y must be within [0.1, 1.65]
     let stance_diff = inp.stance - inp.to_y;
-    if stance_diff < 0.1 || stance_diff > 1.65 {
+    if !(0.1..=1.65).contains(&stance_diff) {
         return MovementResult {
             status: MovementValidationStatus::IllegalStance as u8,
             new_fall_distance: inp.fall_distance,

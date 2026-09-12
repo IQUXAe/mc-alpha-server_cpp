@@ -27,7 +27,7 @@ const PLACE_DY: [i32; 6] = [-1, 1, 0, 0, 0, 0];
 const PLACE_DZ: [i32; 6] = [0, 0, -1, 1, 0, 0];
 
 fn place_offset(side: i32) -> Option<(i32, i32, i32)> {
-    if side < 0 || side > 5 {
+    if !(0..=5).contains(&side) {
         return None;
     }
     let s = side as usize;
@@ -88,11 +88,13 @@ fn placement_clear(u: &mut ItemUseWorld, id: u8, x: i32, y: i32, z: i32) -> bool
         z as f64 + props.max_z as f64,
     );
     for oid in u.world.entities.alive_ids() {
-        let blocks = match u.world.entities.get(oid) {
-            Some(Entity::Boat(_)) | Some(Entity::Mob(_)) | Some(Entity::Animal(_))
-            | Some(Entity::Player(_)) => true,
-            _ => false,
-        };
+        let blocks = matches!(
+            u.world.entities.get(oid),
+            Some(Entity::Boat(_))
+                | Some(Entity::Mob(_))
+                | Some(Entity::Animal(_))
+                | Some(Entity::Player(_))
+        );
         if blocks {
             if let Some(e) = u.world.entities.get(oid) {
                 if mask.intersects_with(&e.body().bounding_box) {
@@ -267,7 +269,7 @@ pub fn item_sign_use(
         5 => tx += 1,
         _ => return false,
     }
-    if ty < 0 || ty >= 128 || q_id(w, tx, ty, tz) != 0 {
+    if !(0..128).contains(&ty) || q_id(w, tx, ty, tz) != 0 {
         return false;
     }
     if side == 1 {
@@ -306,7 +308,7 @@ pub fn item_block_use(
         ty += dy;
         tz += dz;
     }
-    if stack_count == 0 || ty < 0 || ty >= 128 {
+    if stack_count == 0 || !(0..128).contains(&ty) {
         return false;
     }
     let target = q_id(w, tx, ty, tz);

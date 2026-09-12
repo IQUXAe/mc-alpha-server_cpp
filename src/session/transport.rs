@@ -61,7 +61,7 @@ impl Conn {
                 }
                 let _ = tx_in.send(ConnEvent::Dropped);
             })
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
 
         thread::Builder::new()
             .name(format!("conn-write-{remote}"))
@@ -91,7 +91,7 @@ impl Conn {
                     }
                 }
             })
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
 
         Ok(Self { inbound, outbound, closer, release, remote })
     }

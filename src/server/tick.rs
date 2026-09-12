@@ -216,7 +216,7 @@ impl Server {
             return;
         }
         self.tick_count += 1;
-        if self.tick_count % TICKS_PER_SECOND as u64 == 0 {
+        if self.tick_count.is_multiple_of(TICKS_PER_SECOND as u64) {
             let bytes = pkt_time(self.world.time);
             let cids: Vec<ConnId> = self.sessions.keys().copied().collect();
             for cid in cids {
@@ -232,7 +232,7 @@ impl Server {
         self.drain_death_events();
         self.push_health_changes();
         if self.settings.auto_save_interval > 0
-            && self.tick_count % self.settings.auto_save_interval as u64 == 0
+            && self.tick_count.is_multiple_of(self.settings.auto_save_interval as u64)
         {
             self.save_players();
         }

@@ -102,7 +102,7 @@ impl<'a> CanvasAccess<'a> {
     fn canvas_slot(&self, x: i32, z: i32) -> Option<(usize, usize, usize, usize)> {
         let rel_x = x - self.chunk_x * 16;
         let rel_z = z - self.chunk_z * 16;
-        if rel_x < 0 || rel_x >= 32 || rel_z < 0 || rel_z >= 32 {
+        if !(0..32).contains(&rel_x) || !(0..32).contains(&rel_z) {
             return None;
         }
         Some((
@@ -117,7 +117,7 @@ impl<'a> CanvasAccess<'a> {
 impl<'a> BlockAccess for CanvasAccess<'a> {
     fn get_block_id(&mut self, x: i32, y: i32, z: i32) -> u8 {
         match self.canvas_slot(x, z) {
-            Some((dx, dz, lx, lz)) if y >= 0 && y < 128 => {
+            Some((dx, dz, lx, lz)) if (0..128).contains(&y) => {
                 self.blocks[dx][dz][(lx << 11) | (lz << 7) | (y as usize)]
             }
             _ => self.fallback.get_block_id(x, y, z),
@@ -130,7 +130,7 @@ impl<'a> BlockAccess for CanvasAccess<'a> {
             return;
         }
         match self.canvas_slot(x, z) {
-            Some((dx, dz, lx, lz)) if y >= 0 && y < 128 => {
+            Some((dx, dz, lx, lz)) if (0..128).contains(&y) => {
                 self.blocks[dx][dz][(lx << 11) | (lz << 7) | (y as usize)] = id;
             }
             _ => self.fallback.set_block_id(x, y, z, id),
@@ -138,7 +138,7 @@ impl<'a> BlockAccess for CanvasAccess<'a> {
     }
     fn get_block_meta(&mut self, x: i32, y: i32, z: i32) -> u8 {
         match self.canvas_slot(x, z) {
-            Some((dx, dz, lx, lz)) if y >= 0 && y < 128 => {
+            Some((dx, dz, lx, lz)) if (0..128).contains(&y) => {
                 let idx = (lx << 11) | (lz << 7) | (y as usize);
                 let byte = self.metadata[dx][dz][idx >> 1];
                 if (idx & 1) != 0 {
@@ -152,7 +152,7 @@ impl<'a> BlockAccess for CanvasAccess<'a> {
     }
     fn set_block_meta(&mut self, x: i32, y: i32, z: i32, meta: u8) {
         match self.canvas_slot(x, z) {
-            Some((dx, dz, lx, lz)) if y >= 0 && y < 128 => {
+            Some((dx, dz, lx, lz)) if (0..128).contains(&y) => {
                 let idx = (lx << 11) | (lz << 7) | (y as usize);
                 let cell = &mut self.metadata[dx][dz][idx >> 1];
                 if (idx & 1) != 0 {

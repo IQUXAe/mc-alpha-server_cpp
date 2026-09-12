@@ -45,7 +45,7 @@ pub fn tracker_move_kind(
     moved: bool,
     turned: bool,
 ) -> u8 {
-    if dx >= -128 && dx < 128 && dy >= -128 && dy < 128 && dz >= -128 && dz < 128 {
+    if (-128..128).contains(&dx) && (-128..128).contains(&dy) && (-128..128).contains(&dz) {
         if moved && turned {
             3
         } else if moved {

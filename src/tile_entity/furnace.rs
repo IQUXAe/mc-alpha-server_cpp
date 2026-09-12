@@ -49,11 +49,10 @@ pub fn furnace_create() -> FurnaceState {
 /// the `id >= 0` guard hardens the C++ `blocksList[-1]` read for the
 /// empty-slot id, which observably yields 0 there too.)
 pub fn fuel_burn_time(item_id: i32) -> i32 {
-    if item_id >= 0 && item_id < 256 {
-        if block_properties_get(item_id as u32).material == BlockMaterial::Wood as u8 {
+    if (0..256).contains(&item_id)
+        && block_properties_get(item_id as u32).material == BlockMaterial::Wood as u8 {
             return 300;
         }
-    }
     match item_id {
         280 => 100,
         263 => 1600,
@@ -79,8 +78,8 @@ fn tick_core(state: &mut FurnaceState, fuel: i32) -> FurnaceTickResult {
     }
 
     // Try to start burning new fuel
-    if state.burn_time == 0 && can_smelt(state) {
-        if fuel > 0 {
+    if state.burn_time == 0 && can_smelt(state)
+        && fuel > 0 {
             state.current_item_burn_time = fuel as i16;
             state.burn_time = fuel as i16;
             changed = true;
@@ -92,7 +91,6 @@ fn tick_core(state: &mut FurnaceState, fuel: i32) -> FurnaceTickResult {
                 fuel_slot.damage = 0;
             }
         }
-    }
 
     // Cook
     if state.burn_time > 0 && can_smelt(state) {
@@ -120,7 +118,7 @@ fn can_smelt(state: &FurnaceState) -> bool {
     }
     let result_id = get_smelting_result(input.item_id);
     // Matches C++ Item::itemsList[32000] — reject out-of-range item IDs
-    if result_id < 0 || result_id >= 32000 {
+    if !(0..32000).contains(&result_id) {
         return false;
     }
     let output = &state.slots[SLOT_OUTPUT];

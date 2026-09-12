@@ -58,7 +58,7 @@
     fn pair(srv: &mut Server) -> (TcpStream, ConnId) {
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = l.local_addr().unwrap();
-        let mut client = TcpStream::connect(addr).unwrap();
+        let client = TcpStream::connect(addr).unwrap();
         client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         let (stream, _) = l.accept().unwrap();
         let cid = srv.accept(stream).unwrap();

@@ -183,13 +183,13 @@ pub fn generate_chunk(
         for var12 in 0..var6 {
             for var13 in 0..16 {
                 let var14 = 0.125;
-                let mut var16 = density_field[(((var11 + 0) * var10 + var12 + 0) * var9 + var13 + 0) as usize];
-                let mut var18 = density_field[(((var11 + 0) * var10 + var12 + 1) * var9 + var13 + 0) as usize];
-                let mut var20 = density_field[(((var11 + 1) * var10 + var12 + 0) * var9 + var13 + 0) as usize];
-                let mut var22 = density_field[(((var11 + 1) * var10 + var12 + 1) * var9 + var13 + 0) as usize];
-                let var24 = (density_field[(((var11 + 0) * var10 + var12 + 0) * var9 + var13 + 1) as usize] - var16) * var14;
-                let var26 = (density_field[(((var11 + 0) * var10 + var12 + 1) * var9 + var13 + 1) as usize] - var18) * var14;
-                let var28 = (density_field[(((var11 + 1) * var10 + var12 + 0) * var9 + var13 + 1) as usize] - var20) * var14;
+                let mut var16 = density_field[((var11 * var10 + var12) * var9 + var13) as usize];
+                let mut var18 = density_field[((var11 * var10 + var12 + 1) * var9 + var13) as usize];
+                let mut var20 = density_field[(((var11 + 1) * var10 + var12) * var9 + var13) as usize];
+                let mut var22 = density_field[(((var11 + 1) * var10 + var12 + 1) * var9 + var13) as usize];
+                let var24 = (density_field[((var11 * var10 + var12) * var9 + var13 + 1) as usize] - var16) * var14;
+                let var26 = (density_field[((var11 * var10 + var12 + 1) * var9 + var13 + 1) as usize] - var18) * var14;
+                let var28 = (density_field[(((var11 + 1) * var10 + var12) * var9 + var13 + 1) as usize] - var20) * var14;
                 let var30 = (density_field[(((var11 + 1) * var10 + var12 + 1) * var9 + var13 + 1) as usize] - var22) * var14;
 
                 for var32 in 0..8 {

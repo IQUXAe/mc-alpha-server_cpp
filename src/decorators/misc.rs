@@ -181,6 +181,12 @@ fn flower_soil_ok(accessor: &mut dyn BlockAccess, plant_id: u8, x: i32, y: i32, 
 // ============================================
 pub struct WorldGenReed;
 
+impl Default for WorldGenReed {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WorldGenReed {
     pub fn new() -> Self {
         Self
@@ -232,6 +238,12 @@ impl WorldGenReed {
 // ============================================
 pub struct WorldGenCactus;
 
+impl Default for WorldGenCactus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WorldGenCactus {
     pub fn new() -> Self {
         Self
@@ -279,6 +291,12 @@ impl WorldGenCactus {
 // WorldGenPumpkin
 // ============================================
 pub struct WorldGenPumpkin;
+
+impl Default for WorldGenPumpkin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl WorldGenPumpkin {
     pub fn new() -> Self {
@@ -341,6 +359,12 @@ impl WorldGenLiquids {
 // ============================================
 pub struct WorldGenDungeons;
 
+impl Default for WorldGenDungeons {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WorldGenDungeons {
     pub fn new() -> Self {
         Self
@@ -369,7 +393,7 @@ impl WorldGenDungeons {
             }
         }
 
-        if solid_count >= 1 && solid_count <= 5 {
+        if (1..=5).contains(&solid_count) {
             // Hollow out and place walls
             for dx in (x - half_x - 1)..=(x + half_x + 1) {
                 for dy in (y - 1..=y + height).rev() {

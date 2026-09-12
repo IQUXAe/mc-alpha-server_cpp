@@ -294,7 +294,7 @@ impl World {
     /// can borrow the map while the RNG field is borrowed mutably elsewhere
     /// (disjoint field borrows; same formula, one flow).
     pub(crate) fn block_id_in(chunks: &HashMap<(i32, i32), Chunk>, x: i32, y: i32, z: i32) -> u8 {
-        if y < 0 || y >= WORLD_HEIGHT {
+        if !(0..WORLD_HEIGHT).contains(&y) {
             return 0;
         }
         let (cx, cz, lx, lz) = Self::chunk_of(x, z);
@@ -304,7 +304,7 @@ impl World {
     /// Chunk-map half of [`World::get_block_meta`] (same split as
     /// `block_id_in`; also reused by the decorator tree accessor).
     pub(crate) fn block_meta_in(chunks: &HashMap<(i32, i32), Chunk>, x: i32, y: i32, z: i32) -> u8 {
-        if y < 0 || y >= WORLD_HEIGHT {
+        if !(0..WORLD_HEIGHT).contains(&y) {
             return 0;
         }
         let (cx, cz, lx, lz) = Self::chunk_of(x, z);
@@ -320,7 +320,7 @@ impl World {
         z: i32,
         meta: u8,
     ) -> bool {
-        if y < 0 || y >= WORLD_HEIGHT {
+        if !(0..WORLD_HEIGHT).contains(&y) {
             return false;
         }
         let (cx, cz, lx, lz) = Self::chunk_of(x, z);
@@ -347,7 +347,7 @@ impl World {
         z: i32,
         id: u8,
     ) -> bool {
-        if y < 0 || y >= WORLD_HEIGHT {
+        if !(0..WORLD_HEIGHT).contains(&y) {
             return false;
         }
         let (cx, cz, lx, lz) = Self::chunk_of(x, z);
@@ -364,13 +364,13 @@ impl World {
     /// Chunk-map half of [`World::is_solid`] (same split; the id list
     /// mirrors `isBlockSolidNoChunkLoad` exactly).
     pub(crate) fn is_solid_in(chunks: &HashMap<(i32, i32), Chunk>, x: i32, y: i32, z: i32) -> bool {
-        if y < 0 || y >= WORLD_HEIGHT {
+        if !(0..WORLD_HEIGHT).contains(&y) {
             return false;
         }
-        match Self::block_id_in(chunks, x, y, z) {
-            0 | 8 | 9 | 10 | 11 | 78 | 37 | 38 | 39 | 40 | 83 | 51 | 6 => false,
-            _ => true,
-        }
+        !matches!(
+            Self::block_id_in(chunks, x, y, z),
+            0 | 8 | 9 | 10 | 11 | 78 | 37 | 38 | 39 | 40 | 83 | 51 | 6
+        )
     }
 
     /// Chunk-map half of [`World::get_height_value`] (same split).
@@ -455,7 +455,7 @@ impl World {
 
     /// Chunk-map half of [`World::block_light_value`] (see `block_id_in`).
     pub(crate) fn block_light_in(chunks: &HashMap<(i32, i32), Chunk>, x: i32, y: i32, z: i32) -> u8 {
-        if y < 0 || y >= WORLD_HEIGHT {
+        if !(0..WORLD_HEIGHT).contains(&y) {
             return 0;
         }
         Self::saved_light_in(chunks, 0, x, y, z).max(Self::saved_light_in(chunks, 1, x, y, z))

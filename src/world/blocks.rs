@@ -53,7 +53,7 @@ impl World {
     /// Id+meta placement write (mirrors `setBlockAndMetadataWithNotify`
     /// the same way).
     pub(crate) fn apply_set_meta_notify(&mut self, x: i32, y: i32, z: i32, id: u8, meta: u8) -> bool {
-        if y < 0 || y >= WORLD_HEIGHT {
+        if !(0..WORLD_HEIGHT).contains(&y) {
             return false;
         }
         let old = self.get_block_id(x, y, z);
@@ -111,7 +111,7 @@ impl World {
         }
         match bid {
             12 | 13 => block_sand_added(&mut *self, bid, x, y, z),
-            8 | 9 | 10 | 11 => {
+            8..=11 => {
                 let rate = if self.material_at(x, y, z) == Material::LAVA {
                     30
                 } else {
@@ -142,7 +142,7 @@ impl World {
         let _meta = self.get_block_meta(x, y, z);
         match bid {
             12 | 13 => block_sand_neighbor(&mut *self, bid, x, y, z),
-            8 | 9 | 10 | 11 => {
+            8..=11 => {
                 let rate = if self.material_at(x, y, z) == Material::LAVA {
                     30
                 } else {
@@ -369,7 +369,7 @@ impl World {
         }
         match bid {
             12 | 13 => block_sand_tick(&mut *self, bid, x, y, z),
-            8 | 9 | 10 | 11 => {
+            8..=11 => {
                 let lava = self.material_at(x, y, z) == Material::LAVA;
                 block_fluid_tick(&mut *self, bid, lava, x, y, z);
             }
@@ -399,38 +399,32 @@ impl World {
                 if action.kind == 1 {
                     self.grow_sapling(x, y, z, bid, action.seed);
                 }
-                return;
             }
             59 => block_crops_tick(&mut *self, bid, bid, WHEAT_ITEM_ID, SEEDS_ITEM_ID, x, y, z),
             60 => block_soil_tick(&mut *self, bid, x, y, z),
             51 => block_fire_tick(&mut *self, bid, 10, x, y, z),
-            50 => {
+            50
                 // Torch re-seats meta 0 (Java BlockTorch.updateTick).
-                if self.get_block_meta(x, y, z) == 0 {
+                if self.get_block_meta(x, y, z) == 0 => {
                     block_torch_added(&mut *self, bid, x, y, z);
-                    return;
                 }
-            }
             2 => self.grass_tick(x, y, z),
-            78 => {
+            78
                 // Snow melts under strong block light (Java BlockSnow).
-                if self.saved_light_value(1, x, y, z) > 11 {
+                if self.saved_light_value(1, x, y, z) > 11 => {
                     self.drop_block_for(78, 0, x, y, z);
                     self.apply_set_notify(x, y, z, 0);
                 }
-            }
-            79 => {
+            79
                 // Ice melts to flowing water (Java BlockIce: light > 11-3).
-                if self.saved_light_value(1, x, y, z) > 8 {
+                if self.saved_light_value(1, x, y, z) > 8 => {
                     self.apply_set_notify(x, y, z, 9);
                 }
-            }
-            80 => {
-                if self.saved_light_value(1, x, y, z) > 11 {
+            80
+                if self.saved_light_value(1, x, y, z) > 11 => {
                     self.drop_block_for(80, 0, x, y, z);
                     self.apply_set_notify(x, y, z, 0);
                 }
-            }
             74 => {
                 // Glowing redstone cools back to idle (Java BlockRedstoneOre).
                 self.apply_set_notify(x, y, z, 73);

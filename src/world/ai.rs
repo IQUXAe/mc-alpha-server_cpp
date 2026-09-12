@@ -55,7 +55,7 @@ impl World {
     /// 24000-tick day).
     pub fn is_daytime(&self) -> bool {
         let t = self.time % 24000;
-        t >= 0 && t < 12000
+        (0..12000).contains(&t)
     }
 
     /// Sky visibility (mirrors `World::canBlockSeeSky`: at/above the height
@@ -288,7 +288,7 @@ impl World {
     /// half a block like the C++ `createEntityPathTo` int overload).
     pub(crate) fn path_block_points(&self, id: EntityId, dst: [i32; 3], max_dist: f32) -> Vec<[i32; 3]> {
         let (bb, width, height) = match self.entities.get(id) {
-            Some(e) => (e.body().bounding_box.clone(), e.body().width, e.body().height),
+            Some(e) => (e.body().bounding_box, e.body().width, e.body().height),
             None => return Vec::new(),
         };
         self.path_points(
@@ -304,7 +304,7 @@ impl World {
     /// target feet plus eye height, not the bounding-box floor).
     fn path_target_points(&self, id: EntityId, target: EntityId, max_dist: f32) -> Vec<[i32; 3]> {
         let (bb, width, height) = match self.entities.get(id) {
-            Some(e) => (e.body().bounding_box.clone(), e.body().width, e.body().height),
+            Some(e) => (e.body().bounding_box, e.body().width, e.body().height),
             None => return Vec::new(),
         };
         let tp = match self.entities.get(target) {

@@ -27,7 +27,6 @@ pub struct Settings {
 
 /// Leading-integer seed parse (mirrors `std::stoll`: optional `-`,
 /// digits, trailing garbage ignored, emptyjunk is an error).
-
 fn parse_seed_int(s: &str) -> Option<i64> {
     let b = s.as_bytes();
     let mut i = 0;

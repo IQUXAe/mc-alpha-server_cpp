@@ -536,16 +536,14 @@ impl EntityTable {
                 continue;
             }
             match e {
-                Entity::Mob(m) => {
-                    if m.living.death_time < 20 {
+                Entity::Mob(m)
+                    if m.living.death_time < 20 => {
                         m.living.death_time += 1;
                     }
-                }
-                Entity::Animal(a) => {
-                    if a.living.death_time < 20 {
+                Entity::Animal(a)
+                    if a.living.death_time < 20 => {
                         a.living.death_time += 1;
                     }
-                }
                 _ => {}
             }
         }

@@ -25,7 +25,7 @@ impl PlaySession {
             let n = slots.len().min(bank.len());
             for i in 0..n {
                 let id = slots[i].item_id as i32;
-                if id >= 0 && id < 32000 {
+                if (0..32000).contains(&id) {
                     let dmg = if crate::item_data::item_max_damage(id) > 0 {
                         slots[i].damage as i32
                     } else {

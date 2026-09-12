@@ -6,6 +6,12 @@ pub struct MapGenCaves {
     rand: JavaRandom,
 }
 
+impl Default for MapGenCaves {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MapGenCaves {
     pub fn new() -> Self {
         Self {
@@ -200,7 +206,7 @@ impl MapGenCaves {
                                     break;
                                 }
                                 let var43 = ((var40 * 16 + var41) * 128 + var42) as usize;
-                                if var42 >= 0 && var42 < 128 {
+                                if (0..128).contains(&var42) {
                                     if var3[var43] == 9 || var3[var43] == 8 {
                                         var56 = true;
                                     }

@@ -36,14 +36,12 @@ impl NoiseGeneratorPerlin {
         let y_coord = rand.next_double() * 256.0;
         let z_coord = rand.next_double() * 256.0;
         let mut permutations = [0i32; 512];
-        for i in 0..256 {
-            permutations[i] = i as i32;
+        for (i, p) in permutations.iter_mut().enumerate().take(256) {
+            *p = i as i32;
         }
         for i in 0..256 {
             let j = rand.next_int_bound(256 - i as i32) + i as i32;
-            let temp = permutations[i];
-            permutations[i] = permutations[j as usize];
-            permutations[j as usize] = temp;
+            permutations.swap(i, j as usize);
             permutations[i + 256] = permutations[i];
         }
         Self {
@@ -401,14 +399,12 @@ impl NoiseGenerator2 {
         let y_coord = rand.next_double() * 256.0;
         let z_coord = rand.next_double() * 256.0;
         let mut perm = [0i32; 512];
-        for i in 0..256 {
-            perm[i] = i as i32;
+        for (i, p) in perm.iter_mut().enumerate().take(256) {
+            *p = i as i32;
         }
         for i in 0..256 {
             let j = rand.next_int_bound(256 - i as i32) + i as i32;
-            let temp = perm[i];
-            perm[i] = perm[j as usize];
-            perm[j as usize] = temp;
+            perm.swap(i, j as usize);
             perm[i + 256] = perm[i];
         }
         Self {

@@ -70,8 +70,7 @@ impl PlaySession {
                         Some(Entity::Player(p)) => p.inventory.current,
                         _ => -1,
                     };
-                    let bucket = cur >= 0
-                        && cur < 36
+                    let bucket = (0..36).contains(&cur)
                         && matches!(
                             ctx.world.entities.get(me),
                             Some(Entity::Player(p)) if p.inventory.main[cur as usize]
@@ -165,7 +164,7 @@ impl PlaySession {
                                 Some(Entity::Player(p)) => p.inventory.current,
                                 _ => -1,
                             };
-                            if cur >= 0 && cur < 36 {
+                            if (0..36).contains(&cur) {
                                 if let Some(Entity::Player(p)) =
                                     ctx.world.entities.get_mut(me)
                                 {
@@ -184,7 +183,7 @@ impl PlaySession {
                                 Some(Entity::Player(p)) => p.inventory.current,
                                 _ => -1,
                             };
-                            if cur >= 0 && cur < 36 {
+                            if (0..36).contains(&cur) {
                                 if let Some(Entity::Player(p)) = ctx.world.entities.get_mut(me) {
                                     p.inventory.main[cur as usize] = Some(s);
                                 }

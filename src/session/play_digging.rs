@@ -24,7 +24,7 @@ impl PlaySession {
         _face: i8,
     ) -> Option<SessionOutcome> {
         self.sync_held(ctx.world);
-        if y < 0 || y >= crate::world::WORLD_HEIGHT {
+        if !(0..crate::world::WORLD_HEIGHT).contains(&y) {
             return None;
         }
         let me = self.player;
@@ -71,11 +71,10 @@ impl PlaySession {
                     self.harvest(ctx, x, y, z);
                 }
             }
-        } else if status == 3 {
-            if dist_sq < 256.0 {
+        } else if status == 3
+            && dist_sq < 256.0 {
                 self.send_block_change(ctx.world, x, y, z);
             }
-        }
         None
     }
 
@@ -110,7 +109,7 @@ impl PlaySession {
             Some(Entity::Player(p)) => p.inventory.current,
             _ => -1,
         };
-        if cur >= 0 && cur < 36 {
+        if (0..36).contains(&cur) {
             let mut slot = match ctx.world.entities.get(self.player) {
                 Some(Entity::Player(p)) => p.inventory.main[cur as usize],
                 _ => None,

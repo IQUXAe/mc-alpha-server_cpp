@@ -98,9 +98,7 @@ pub fn get_biome_from_lookup(temp: f64, humid: f64) -> MobSpawnerBase {
     let table = init_biome_lookup();
     let mut t = (temp as f32 * 63.0) as i32;
     let mut h = (humid as f32 * 63.0) as i32;
-    if t < 0 { t = 0; }
-    if t > 63 { t = 63; }
-    if h < 0 { h = 0; }
-    if h > 63 { h = 63; }
+    t = t.clamp(0, 63);
+    h = h.clamp(0, 63);
     table[(t + h * 64) as usize]
 }

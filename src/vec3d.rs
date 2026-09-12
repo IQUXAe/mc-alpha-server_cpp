@@ -99,7 +99,7 @@ impl Vec3D {
             return None;
         }
         let t = (x - self.x_coord) / dx;
-        if t >= 0.0 && t <= 1.0 {
+        if (0.0..=1.0).contains(&t) {
             Some(Vec3D::new(
                 self.x_coord + dx * t,
                 self.y_coord + dy * t,
@@ -118,7 +118,7 @@ impl Vec3D {
             return None;
         }
         let t = (y - self.y_coord) / dy;
-        if t >= 0.0 && t <= 1.0 {
+        if (0.0..=1.0).contains(&t) {
             Some(Vec3D::new(
                 self.x_coord + dx * t,
                 self.y_coord + dy * t,
@@ -137,7 +137,7 @@ impl Vec3D {
             return None;
         }
         let t = (z - self.z_coord) / dz;
-        if t >= 0.0 && t <= 1.0 {
+        if (0.0..=1.0).contains(&t) {
             Some(Vec3D::new(
                 self.x_coord + dx * t,
                 self.y_coord + dy * t,

@@ -278,9 +278,9 @@ impl World {
 
     /// Death scatter (mirrors `EntityPlayerMP::onDeath` drops): every
     /// non-empty main/armor/crafting stack becomes an item entity at feet
-    /// + 0.5 with drop velocity (3 world-RNG draws per stack, like the C++
-    /// `playerDropVelocity` call) and a 40-tick pickup delay; all banks
-    /// clear. The inventory-resend packet is the network slice's.
+    /// + 0.5 with drop velocity (3 world-RNG draws per stack) and a 40-tick
+    /// pickup delay; all banks clear. The inventory-resend packet is the
+    /// network slice's.
     fn scatter_player_inventory(&mut self, id: EntityId, px: f64, py: f64, pz: f64) {
         use crate::entity::player::player_drop_velocity;
         let stacks: Vec<crate::inventory::ItemStack> = match self.entities.get(id) {

@@ -12,7 +12,6 @@
 /// player 512/1, item 64/20+velocity, arrow 64/5+velocity, boat 160/5+
 /// velocity, mobs via their range/rate/velocity params. Falling sand and
 /// anything else is not tracked (Alpha client behavior).
-
 use std::collections::{HashMap, HashSet};
 
 use crate::entity::table::{Entity, EntityId, MobKind, NO_ENTITY, animal_type_id, mob_type_id};
@@ -599,7 +598,7 @@ mod tests {
     #[test]
     fn test_spawn_and_despawn_cycle() {
         let mut t = Tracker::new();
-        let mut mob = TrackedEntity::mob(7, MobKind::Zombie, [10.5, 64.0, 10.5]);
+        let mob = TrackedEntity::mob(7, MobKind::Zombie, [10.5, 64.0, 10.5]);
         t.add(&mob);
         let obs = vec![observer(1, 12.0, 12.0)];
         let mut out = Vec::new();

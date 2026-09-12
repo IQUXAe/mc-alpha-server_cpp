@@ -127,7 +127,7 @@ pub fn parse_console_command(cmd: &str) -> ParsedCommand {
         arg2 = id_str;
         if !count_str.is_empty() {
             if let Ok(c) = count_str.parse::<i32>() {
-                count = std::cmp::max(1, std::cmp::min(64, c));
+                count = c.clamp(1, 64);
             }
         }
     } else if lower.starts_with("summon ") {
@@ -142,7 +142,7 @@ pub fn parse_console_command(cmd: &str) -> ParsedCommand {
                 let is_number = arg1_str.chars().all(|c| c.is_ascii_digit());
                 if is_number {
                     if let Ok(c) = arg1_str.parse::<i32>() {
-                        count = std::cmp::max(1, std::cmp::min(64, c));
+                        count = c.clamp(1, 64);
                     }
                     arg2 = arg2_str;
                 } else {

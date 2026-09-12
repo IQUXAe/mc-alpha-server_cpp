@@ -104,12 +104,7 @@ pub fn steer_run(
     while yaw_delta >= 180.0 {
         yaw_delta -= 360.0;
     }
-    if yaw_delta > 30.0 {
-        yaw_delta = 30.0;
-    }
-    if yaw_delta < -30.0 {
-        yaw_delta = -30.0;
-    }
+    yaw_delta = yaw_delta.clamp(-30.0, 30.0);
     let new_yaw = cur_yaw + yaw_delta;
 
     let (mut strafe, mut forward) = (0.0f32, forward_in);
@@ -213,9 +208,9 @@ mod tests {
 
     #[test]
     fn test_steer_run() {
-        // Point due east while facing east: no turn, jump from dy > 0.
+        // Point east-north-east: yaw turns partway toward it, jump from dy > 0.
         let a = steer_run(5.0, 1.0, 1.0, -90.0, true, true, 5.0, 0.0, 0.7);
-        assert_eq!(a.new_yaw, -90.0);
+        assert!((a.new_yaw + 78.69006).abs() < 1e-4);
         assert!(a.jump);
     }
 

@@ -174,16 +174,13 @@ impl Chunk {
     }
 
     fn in_bounds(x: i32, y: i32, z: i32) -> bool {
-        x >= 0
-            && x < CHUNK_SIZE_X
-            && y >= 0
-            && y < CHUNK_SIZE_Y
-            && z >= 0
-            && z < CHUNK_SIZE_Z
+        (0..CHUNK_SIZE_X).contains(&x)
+            && (0..CHUNK_SIZE_Y).contains(&y)
+            && (0..CHUNK_SIZE_Z).contains(&z)
     }
 
     fn column_in_bounds(x: i32, z: i32) -> bool {
-        x >= 0 && x < CHUNK_SIZE_X && z >= 0 && z < CHUNK_SIZE_Z
+        (0..CHUNK_SIZE_X).contains(&x) && (0..CHUNK_SIZE_Z).contains(&z)
     }
 
     fn block_index(x: i32, y: i32, z: i32) -> Option<usize> {

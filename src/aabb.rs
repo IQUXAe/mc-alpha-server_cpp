@@ -345,11 +345,7 @@ impl AxisAlignedBB {
             }
             i += 1;
         }
-        if let Some(h) = hit {
-            Some(MovingObjectPosition::new(0, 0, 0, face, h))
-        } else {
-            None
-        }
+        hit.map(|h| MovingObjectPosition::new(0, 0, 0, face, h))
     }
 
     fn is_vec_in_yz(&self, v: &Vec3D) -> bool {

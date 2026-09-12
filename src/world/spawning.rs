@@ -105,7 +105,7 @@ impl World {
     /// dry.
     fn spawner_mob_ok(&mut self, id: EntityId) -> bool {
         let (px, min_y, pz, bbox) = match self.entities.get(id) {
-            Some(e) => (e.body().pos[0], e.body().bounding_box.min_y, e.body().pos[2], e.body().bounding_box.clone()),
+            Some(e) => (e.body().pos[0], e.body().bounding_box.min_y, e.body().pos[2], e.body().bounding_box),
             None => return false,
         };
         let (x, y, z) = (floor_double(px), floor_double(min_y), floor_double(pz));
@@ -122,7 +122,7 @@ impl World {
     /// grass below, bright, collision-free, and dry. No RNG draws.
     fn spawner_animal_ok(&mut self, id: EntityId) -> bool {
         let (px, min_y, pz, bbox) = match self.entities.get(id) {
-            Some(e) => (e.body().pos[0], e.body().bounding_box.min_y, e.body().pos[2], e.body().bounding_box.clone()),
+            Some(e) => (e.body().pos[0], e.body().bounding_box.min_y, e.body().pos[2], e.body().bounding_box),
             None => return false,
         };
         let (x, y, z) = (floor_double(px), floor_double(min_y), floor_double(pz));

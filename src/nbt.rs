@@ -451,7 +451,7 @@ pub fn tag_type_name(tag_type: u8) -> &'static str {
 }
 
 pub fn is_gzip_magic(data: &[u8]) -> bool {
-    match (data.get(0), data.get(1)) {
+    match (data.first(), data.get(1)) {
         (Some(&a), Some(&b)) => a == 0x1F && b == 0x8B,
         _ => false,
     }

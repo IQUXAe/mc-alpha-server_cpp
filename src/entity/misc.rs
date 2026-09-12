@@ -86,7 +86,7 @@ pub fn falling_land(
         return 3;
     }
     if on_ground {
-        if by >= 0 && by < 128 && (land_id == 0 || land_replaceable) && have_block {
+        if (0..128).contains(&by) && (land_id == 0 || land_replaceable) && have_block {
             return 1;
         }
         return 2;
@@ -145,7 +145,7 @@ pub fn boat_water_fraction(
     let Some(is_water) = is_water else {
         return 0.0;
     };
-    water_fraction_scan(min_x, min_y, min_z, max_x, max_y, max_z, |x, y, z| is_water(x, y, z))
+    water_fraction_scan(min_x, min_y, min_z, max_x, max_y, max_z, is_water)
 }
 
 /// Boat yaw steering (mirrors the yaw block in `EntityBoat::tick`).
@@ -164,12 +164,7 @@ pub fn boat_steer(delta_x: f64, delta_z: f64, cur_yaw: f32, out_yaw: &mut f32) -
     while delta < -180.0 {
         delta += 360.0;
     }
-    if delta > 20.0 {
-        delta = 20.0;
-    }
-    if delta < -20.0 {
-        delta = -20.0;
-    }
+    delta = delta.clamp(-20.0, 20.0);
     *out_yaw = cur_yaw + delta;
     true
 }

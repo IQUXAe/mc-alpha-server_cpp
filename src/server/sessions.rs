@@ -33,7 +33,6 @@ pub enum SessionState {
 }
 
 /// The native server (mirrors `MinecraftServer` + friends; see module docs).
-
 fn ip_of(remote: &str) -> &str {
     match remote.rfind(':') {
         Some(i) => &remote[..i],
@@ -378,12 +377,9 @@ impl Server {
                     broadcast: &mut bcast,
                 };
                 for p in packets {
-                    match play.pump(&mut ctx, p) {
-                        Some(o) => {
-                            outcome = Some(o);
-                            break;
-                        }
-                        None => {}
+                    if let Some(o) = play.pump(&mut ctx, p) {
+                        outcome = Some(o);
+                        break;
                     }
                 }
                 if outcome.is_none() {

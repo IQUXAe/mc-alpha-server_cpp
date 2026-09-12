@@ -88,10 +88,7 @@ pub fn clear_console_line_provider() {
 
 fn current_console_line() -> Option<String> {
     let slot = lock_slot();
-    match slot.as_ref() {
-        Some(provider) => Some(provider()),
-        None => None,
-    }
+    slot.as_ref().map(|provider| provider())
 }
 
 fn stdout_is_tty() -> bool {

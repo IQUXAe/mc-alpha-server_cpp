@@ -43,8 +43,7 @@ pub struct ChunkStore {
 impl ChunkStore {
     /// Open (creating) the database at `path` (the `db` directory itself).
     pub fn open(path: &str) -> Result<Self, String> {
-        let mut opts = rusty_leveldb::Options::default();
-        opts.create_if_missing = true;
+        let opts = rusty_leveldb::Options { create_if_missing: true, ..Default::default() };
         rusty_leveldb::DB::open(path, opts)
             .map(|db| Self { db })
             .map_err(|e| e.to_string())

@@ -372,7 +372,6 @@ fn torch_attached(w: &mut World, x: i32, y: i32, z: i32) -> bool {
 
 /// Java BlockTorch.onBlockPlaced metadata from the clicked face.
 /// Takes the torch position; side: 1=floor(default 5),2,3,4,5 wall faces.
-
 pub fn block_torch_attach_meta(w: &mut World, side: i32, x: i32, y: i32, z: i32) -> u8 {
     if side == 2 && torch_attached(w, x, y, z + 1) {
         4

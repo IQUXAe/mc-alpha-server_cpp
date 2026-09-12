@@ -154,10 +154,7 @@ impl PlaySession {
         // Remember pre-move collision state for the wasFree check.
         let was_free = {
             use crate::aabb::AxisAlignedBB;
-            let e = match ctx.world.entities.get(me) {
-                Some(e) => e,
-                None => return None,
-            };
+            let e = ctx.world.entities.get(me)?;
             let b = e.body();
             let probe = AxisAlignedBB::get_bounding_box(
                 b.bounding_box.min_x + 0.0625,
@@ -199,10 +196,7 @@ impl PlaySession {
         }
         let dest_free = {
             use crate::aabb::AxisAlignedBB;
-            let e = match ctx.world.entities.get(me) {
-                Some(e) => e,
-                None => return None,
-            };
+            let e = ctx.world.entities.get(me)?;
             // Test the current body box shrunk by 0.0625 (vanilla func_694_e).
             let cur = &e.body().bounding_box;
             let shrunk = AxisAlignedBB::get_bounding_box(

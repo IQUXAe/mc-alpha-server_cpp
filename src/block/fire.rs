@@ -127,7 +127,7 @@ pub fn block_fire_tick(
         && rng_int(w, 4) == 0
     {
         u_set_notify(w, x, y, z, 0);
-    } else if meta % 2 == 0 && meta > 2 {
+    } else if meta.is_multiple_of(2) && meta > 2 {
         try_catch_fire(w, fire_id, x + 1, y, z, 300);
         try_catch_fire(w, fire_id, x - 1, y, z, 300);
         try_catch_fire(w, fire_id, x, y - 1, z, 250);

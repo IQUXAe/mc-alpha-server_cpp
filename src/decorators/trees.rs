@@ -3,6 +3,12 @@ use super::BlockAccess;
 
 pub struct WorldGenTrees;
 
+impl Default for WorldGenTrees {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WorldGenTrees {
     pub fn new() -> Self {
         Self
@@ -12,7 +18,7 @@ impl WorldGenTrees {
         let var6 = rand.next_int_bound(3) + 4;
         let mut var7 = true;
 
-        if y >= 1 && y + var6 + 1 <= 128 {
+        if y >= 1 && y + var6 < 128 {
             for var8 in y..=(y + 1 + var6) {
                 let mut var9 = 1;
                 if var8 == y {
@@ -24,7 +30,7 @@ impl WorldGenTrees {
 
                 for var10 in (x - var9)..=(x + var9) {
                     for var11 in (z - var9)..=(z + var9) {
-                        if var8 >= 0 && var8 < 128 {
+                        if (0..128).contains(&var8) {
                             let var12 = accessor.get_block_id(var10, var8, var11);
                             if var12 != 0 && var12 != 18 { // air, leaves
                                 var7 = false;
@@ -98,6 +104,12 @@ pub struct WorldGenBigTree {
 }
 
 const OTHER_COORD_PAIRS: [i8; 6] = [2, 0, 0, 1, 2, 1];
+
+impl Default for WorldGenBigTree {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl WorldGenBigTree {
     pub fn new() -> Self {

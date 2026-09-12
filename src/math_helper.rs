@@ -134,13 +134,13 @@ mod tests {
     #[test]
     fn sin_pi_half() {
         init();
-        assert!(approx_eq_f32(sin(3.14159265_f32 / 2.0), 1.0, 1e-4));
+        assert!(approx_eq_f32(sin(3.141_592_7_f32 / 2.0), 1.0, 1e-4));
     }
 
     #[test]
     fn sin_pi() {
         init();
-        assert!(approx_eq_f32(sin(3.14159265_f32), 0.0, 1e-4));
+        assert!(approx_eq_f32(sin(3.141_592_7_f32), 0.0, 1e-4));
     }
 
     #[test]
@@ -152,13 +152,13 @@ mod tests {
     #[test]
     fn cos_pi() {
         init();
-        assert!(approx_eq_f32(cos(3.14159265_f32), -1.0, 1e-4));
+        assert!(approx_eq_f32(cos(3.141_592_7_f32), -1.0, 1e-4));
     }
 
     #[test]
     fn cos_pi_half() {
         init();
-        assert!(approx_eq_f32(cos(3.14159265_f32 / 2.0), 0.0, 1e-4));
+        assert!(approx_eq_f32(cos(3.141_592_7_f32 / 2.0), 0.0, 1e-4));
     }
 
     #[test]
@@ -188,7 +188,7 @@ mod tests {
     #[test]
     fn sqrt_float_cases() {
         assert!(approx_eq_f32(sqrt_float(25.0), 5.0, 1e-6));
-        assert!(approx_eq_f32(sqrt_float(2.0), 1.41421356, 1e-5));
+        assert!(approx_eq_f32(sqrt_float(2.0), 1.414_213_5, 1e-5));
     }
 
     #[test]
@@ -196,7 +196,7 @@ mod tests {
         let a = sqrt_double(25.0);
         let b = sqrt_double(2.0);
         assert!(((a - 5.0) as f64).abs() < 1e-6);
-        assert!(((b - 1.41421356) as f64).abs() < 1e-6);
+        assert!(((b - 1.414_213_5) as f64).abs() < 1e-6);
     }
 
     #[test]
@@ -266,7 +266,7 @@ mod tests {
         // Quarter turn in table units: PI/2 * 10430.378 ~= 16384.
         let v = 0.7_f32;
         let c = cos(v);
-        let s_shifted = sin(v + 3.14159265_f32 / 2.0);
+        let s_shifted = sin(v + 3.141_592_7_f32 / 2.0);
         assert!(approx_eq_f32(c, s_shifted, 2e-4));
     }
 

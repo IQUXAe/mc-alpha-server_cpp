@@ -27,7 +27,7 @@ impl PlaySession {
             Some(Entity::Player(p)) => p.inventory.current,
             _ => return,
         };
-        if cur < 0 || cur >= 36 {
+        if !(0..36).contains(&cur) {
             return;
         }
         if let Some(Entity::Player(p)) = ctx.world.entities.get_mut(self.player) {
@@ -58,7 +58,7 @@ impl PlaySession {
             }
             return None;
         }
-        if y < 0 || y >= crate::world::WORLD_HEIGHT {
+        if !(0..crate::world::WORLD_HEIGHT).contains(&y) {
             return None;
         }
         let dir = (direction as u8) as i32;
@@ -85,7 +85,7 @@ impl PlaySession {
                     stack_slot = match ctx.world.entities.get(me) {
                         Some(Entity::Player(p)) => {
                             let cur = p.inventory.current;
-                            (cur >= 0 && cur < 36).then_some(cur as usize)
+                            (0..36).contains(&cur).then_some(cur as usize)
                         }
                         _ => None,
                     };
@@ -240,9 +240,7 @@ impl PlaySession {
                 }
             }
             295 => {
-                if side != 1 {
-                    false
-                } else if !item_seeds_use(&mut u, x, y, z, side) {
+                if side != 1 || !item_seeds_use(&mut u, x, y, z, side) {
                     false
                 } else {
                     if s.count > 0 {

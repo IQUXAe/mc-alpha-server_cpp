@@ -36,7 +36,7 @@ impl World {
                     _ => false,
                 };
                 (
-                    b.bounding_box.clone(),
+                    b.bounding_box,
                     b.no_clip,
                     b.step_height,
                     b.on_ground,
@@ -55,7 +55,7 @@ impl World {
         if was_ground && sneaking {
             let mut nx = mx;
             while nx != 0.0 && self.colliding_boxes(&orig.get_offset_bounding_box(nx, -1.0, 0.0)).is_empty() {
-                if nx < 0.05 && nx >= -0.05 {
+                if (-0.05..0.05).contains(&nx) {
                     nx = 0.0;
                 } else if nx > 0.0 {
                     nx -= 0.05;
@@ -66,7 +66,7 @@ impl World {
             mx = nx;
             let mut nz = mz;
             while nz != 0.0 && self.colliding_boxes(&orig.get_offset_bounding_box(0.0, -1.0, nz)).is_empty() {
-                if nz < 0.05 && nz >= -0.05 {
+                if (-0.05..0.05).contains(&nz) {
                     nz = 0.0;
                 } else if nz > 0.0 {
                     nz -= 0.05;
@@ -76,7 +76,7 @@ impl World {
             }
             mz = nz;
         }
-        let mut work = orig.clone();
+        let mut work = orig;
         if no_clip {
             if let Some(e) = self.entities.get_mut(id) {
                 let b = e.body_mut();
@@ -101,7 +101,7 @@ impl World {
             if step > 0.0 && (was_ground || (old_y != my && old_y < 0.0)) && (old_x != mx || old_z != mz) {
                 let boxes = self.colliding_boxes(&orig.add_coord(old_x, step as f64, old_z));
                 let (mut sx, mut sy, mut sz) = (old_x, step as f64, old_z);
-                let mut sbox = orig.clone();
+                let mut sbox = orig;
                 for cb in &boxes {
                     sy = cb.calculate_y_offset(&sbox, sy);
                 }
@@ -125,7 +125,7 @@ impl World {
             let falling = {
                 let e = self.entities.get_mut(id)?;
                 let b = e.body_mut();
-                b.bounding_box = work.clone();
+                b.bounding_box = work;
                 b.pos[0] = (work.min_x + work.max_x) / 2.0;
                 b.pos[1] = work.min_y + b.y_offset as f64;
                 b.pos[2] = (work.min_z + work.max_z) / 2.0;

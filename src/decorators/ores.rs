@@ -45,11 +45,10 @@ impl WorldGenMinable {
                         let var35 = ((var32 as f64) + 0.5 - var20) / (var28 / 2.0);
                         let var37 = ((var33 as f64) + 0.5 - var22) / (var30 / 2.0);
                         let var39 = ((var34 as f64) + 0.5 - var24) / (var28 / 2.0);
-                        if var35 * var35 + var37 * var37 + var39 * var39 < 1.0 {
-                            if accessor.get_block_id(var32, var33, var34) == 1 { // stone
+                        if var35 * var35 + var37 * var37 + var39 * var39 < 1.0
+                            && accessor.get_block_id(var32, var33, var34) == 1 { // stone
                                 accessor.set_block_id(var32, var33, var34, self.minable_block_id);
                             }
-                        }
                     }
                 }
             }
@@ -106,11 +105,10 @@ impl WorldGenClay {
                         let var35 = ((var32 as f64) + 0.5 - var20) / (var28 / 2.0);
                         let var37 = ((var33 as f64) + 0.5 - var22) / (var30 / 2.0);
                         let var39 = ((var34 as f64) + 0.5 - var24) / (var28 / 2.0);
-                        if var35 * var35 + var37 * var37 + var39 * var39 < 1.0 {
-                            if accessor.get_block_id(var32, var33, var34) == 12 { // sand
+                        if var35 * var35 + var37 * var37 + var39 * var39 < 1.0
+                            && accessor.get_block_id(var32, var33, var34) == 12 { // sand
                                 accessor.set_block_id(var32, var33, var34, self.clay_block_id);
                             }
-                        }
                     }
                 }
             }

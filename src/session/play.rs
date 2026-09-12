@@ -15,7 +15,6 @@ use crate::world::World;
 // ---- play session state ----
 
 /// Reach for melee (mirrors `kMaxAttackReach`).
-
 /// An authenticated player connection: packet dispatch against the world
 /// (mirrors the `NetServerHandler` handlers). Chunk streaming, entity
 /// tracking fan-out, and saves belong to the server tick.
@@ -222,7 +221,7 @@ impl PlaySession {
             return None;
         }
         self.keepalive_tick += 1;
-        if self.keepalive_tick % 20 == 0 {
+        if self.keepalive_tick.is_multiple_of(20) {
             self.outbox.push(pkt_keepalive());
         }
         None

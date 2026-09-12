@@ -15,7 +15,6 @@ pub struct PlayStream {
 }
 
 /// One connection: socket plus login/play state and idle accounting.
-
 impl Server {
     /// Initial chunk queue: the view square sorted center-out (Java
     /// `PlayerManager` sends the view, not padding — the 3x3 populate

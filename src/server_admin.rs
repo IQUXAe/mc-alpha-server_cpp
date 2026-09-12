@@ -166,7 +166,7 @@ pub fn chat_command(
     // Vanilla player commands (Java NetServerHandler.func_4010_d): /me
     // emotes to everyone, /kill suicides, /tell whispers. These need no op.
     if cmd.eq_ignore_ascii_case("me") {
-        let text = body.splitn(2, char::is_whitespace).nth(1).unwrap_or("").trim();
+        let text = body.split_once(char::is_whitespace).map(|x| x.1).unwrap_or("").trim();
         let username = match world.entities.get(sess.player) {
             Some(Entity::Player(p)) => p.username.clone(),
             _ => return,
@@ -187,8 +187,8 @@ pub fn chat_command(
             _ => return,
         };
         // Re-split to keep the raw message (whitespace-preserved).
-        let rest = body.splitn(2, char::is_whitespace).nth(1).unwrap_or("");
-        let message = rest.splitn(2, char::is_whitespace).nth(1).unwrap_or("").trim();
+        let rest = body.split_once(char::is_whitespace).map(|x| x.1).unwrap_or("");
+        let message = rest.split_once(char::is_whitespace).map(|x| x.1).unwrap_or("").trim();
         broadcast.push(SessionBroadcast::Tell {
             target: args[1].to_string(),
             text: format!("§7{username} whispers {message}"),
