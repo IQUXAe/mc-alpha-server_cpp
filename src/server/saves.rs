@@ -1,7 +1,7 @@
 //! Player/world persistence and shutdown.
 //! Split out of `server.rs`; behavior unchanged.
 
-use crate::entity_table::{Entity, EntityId};
+use crate::entity::table::{Entity, EntityId};
 use crate::server::sessions::{Session, SessionState};
 use crate::server::{ConnId, Server};
 use crate::server_log as log;
@@ -21,12 +21,12 @@ impl Server {
         };
         let (riding, ridden_by) = match self.world.entities.get(eid) {
             Some(e) => (e.body().riding, e.body().ridden_by),
-            None => (crate::entity_table::NO_ENTITY, crate::entity_table::NO_ENTITY),
+            None => (crate::entity::table::NO_ENTITY, crate::entity::table::NO_ENTITY),
         };
-        if riding != crate::entity_table::NO_ENTITY {
+        if riding != crate::entity::table::NO_ENTITY {
             self.world.entities.mount(eid, None);
         }
-        if ridden_by != crate::entity_table::NO_ENTITY {
+        if ridden_by != crate::entity::table::NO_ENTITY {
             self.world.entities.mount(ridden_by, None);
         }
         let mut out = Vec::new();

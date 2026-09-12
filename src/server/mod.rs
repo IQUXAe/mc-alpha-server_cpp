@@ -34,7 +34,7 @@
 //! by `main`); everything else is module-tree-internal.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
-use crate::entity_table::EntityId;
+use crate::entity::table::EntityId;
 use crate::persist::ChunkStore;
 use crate::world::World;
 

@@ -1,7 +1,7 @@
 //! Body movement, loose items, falling blocks and boats on [`World`].
 //! Split out of `world.rs`; behavior unchanged.
 
-use crate::entity_table::{Body, Entity, EntityId};
+use crate::entity::table::{Body, Entity, EntityId};
 use crate::math_helper::floor_double;
 use crate::world::{World, is_replaceable};
 
@@ -9,7 +9,7 @@ impl World {
     /// Spawn a loose item into the table (mirrors the common drop shape:
     /// default 10-tick pickup delay).
     pub fn spawn_item_entity(&mut self, item_id: i32, count: i32, damage: i32, x: f64, y: f64, z: f64) -> EntityId {
-        use crate::entity_table::ItemEnt;
+        use crate::entity::table::ItemEnt;
         let id = self.entities.alloc_id();
         let mut b = Body::new(id, 0.25, 0.25, 0.125);
         b.set_position(x, y, z);
@@ -154,7 +154,7 @@ impl World {
             if !suppress {
                 let mut ev = -1.0f32;
                 let nd =
-                    crate::entity_physics::alpha_entity_fall_step(falling.0, falling.1, fall, &mut ev);
+                    crate::entity::physics::alpha_entity_fall_step(falling.0, falling.1, fall, &mut ev);
                 if let Some(e) = self.entities.get_mut(id) {
                     e.body_mut().fall_distance = nd;
                 }
@@ -260,7 +260,7 @@ impl World {
         if !self.is_solid(ix, iy, iz) {
             return;
         }
-        let side = crate::entity_misc::alpha_item_push_side(
+        let side = crate::entity::misc::alpha_item_push_side(
             !self.is_solid(ix - 1, iy, iz),
             !self.is_solid(ix + 1, iy, iz),
             !self.is_solid(ix, iy - 1, iz),
@@ -308,8 +308,8 @@ impl World {
         self.item_push_out(id);
         self.move_body(id, alive.0, alive.1, alive.2);
         if let Some(Entity::Item(e)) = self.entities.get_mut(id) {
-            let mut m = crate::entity_misc::ItemMotion { mx: e.body.motion[0], my: e.body.motion[1], mz: e.body.motion[2] };
-            crate::entity_misc::alpha_item_damp(e.body.on_ground, &mut m);
+            let mut m = crate::entity::misc::ItemMotion { mx: e.body.motion[0], my: e.body.motion[1], mz: e.body.motion[2] };
+            crate::entity::misc::alpha_item_damp(e.body.on_ground, &mut m);
             e.body.motion = [m.mx, m.my, m.mz];
         }
     }
@@ -347,7 +347,7 @@ impl World {
             Some(Entity::Falling(e)) => e.fall_time,
             _ => return,
         };
-        let action = crate::entity_misc::alpha_falling_land(
+        let action = crate::entity::misc::alpha_falling_land(
             block_id, on_ground, by, land_id,
             is_replaceable(land_id as u8),
             (1..256).contains(&block_id),
@@ -449,7 +449,7 @@ impl World {
             }
             None => return,
         };
-        let fraction = crate::entity_misc::water_fraction_scan(min_x, min_y, min_z, max_x, max_y, max_z, |x, y, z| {
+        let fraction = crate::entity::misc::water_fraction_scan(min_x, min_y, min_z, max_x, max_y, max_z, |x, y, z| {
             self.is_water(x, y, z)
         });
         // Rider drive.
@@ -530,7 +530,7 @@ impl World {
         // from this tick's tick_base, which matches because C++ compares
         // post-move pos against the same pre-move snapshot.
         let mut new_yaw = yaw;
-        crate::entity_misc::alpha_boat_steer(dx, dz, yaw, &mut new_yaw);
+        crate::entity::misc::alpha_boat_steer(dx, dz, yaw, &mut new_yaw);
         if let Some(Entity::Boat(b)) = self.entities.get_mut(id) {
             b.body.yaw = new_yaw;
             b.body.pitch = 0.0;
@@ -549,8 +549,8 @@ impl World {
                 (Some(a), Some(b)) => (a.body().pos[0], a.body().pos[2], b.body().pos[0], b.body().pos[2]),
                 _ => continue,
             };
-            let mut push = crate::entity_physics::PushOut { dvx1: 0.0, dvz1: 0.0, dvx2: 0.0, dvz2: 0.0 };
-            let ok = crate::entity_physics::alpha_entity_push(ax, az, bx, bz, true, true, &mut push);
+            let mut push = crate::entity::physics::PushOut { dvx1: 0.0, dvz1: 0.0, dvx2: 0.0, dvz2: 0.0 };
+            let ok = crate::entity::physics::alpha_entity_push(ax, az, bx, bz, true, true, &mut push);
             if !ok {
                 continue;
             }

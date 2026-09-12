@@ -1,7 +1,7 @@
 //! Position/look validation on `PlaySession` (mirrors processMovement).
 //! Split out of `session.rs`; behavior unchanged.
 
-use crate::player_movement::{FfiMovementInput, alpha_movement_validate};
+use crate::player::movement::{FfiMovementInput, alpha_movement_validate};
 use crate::session::play::PlaySession;
 use crate::session::{SessionCtx, SessionOutcome};
 
@@ -187,7 +187,7 @@ impl PlaySession {
             rdy = 0.0;
         }
         let res_sq = rdx * rdx + rdy * rdy + rdz * rdz;
-        let moved_wrongly = res_sq > crate::player_movement::VANILLA_WRONGLY_SQ;
+        let moved_wrongly = res_sq > crate::player::movement::VANILLA_WRONGLY_SQ;
         // Force client position like vanilla (setPositionAndRotation(want)),
         // then verify the destination is free when we started free.
         if !moved_wrongly {

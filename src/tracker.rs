@@ -15,7 +15,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::entity_table::{Entity, EntityId, MobKind, NO_ENTITY, animal_type_id, mob_type_id};
+use crate::entity::table::{Entity, EntityId, MobKind, NO_ENTITY, animal_type_id, mob_type_id};
 use crate::network::{RustPacket, encode_packet};
 use crate::tracker_math::{
     alpha_tracker_encode_pos, alpha_tracker_encode_rot, alpha_tracker_encode_rot_spawn,
@@ -728,11 +728,11 @@ mod tests {
 
     #[test]
     fn test_from_entity_kinds() {
-        let mut table = crate::entity_table::EntityTable::new();
+        let mut table = crate::entity::table::EntityTable::new();
         let id = table.alloc_id();
-        let mut l = crate::entity_table::LivingBody::new(id, 0.6, 1.9, 0.0);
+        let mut l = crate::entity::table::LivingBody::new(id, 0.6, 1.9, 0.0);
         l.body.set_position(0.0, 64.0, 0.0);
-        table.insert(crate::entity_table::Entity::Mob(crate::entity_table::MobEnt {
+        table.insert(crate::entity::table::Entity::Mob(crate::entity::table::MobEnt {
             living: l,
             kind: MobKind::Creeper,
             target: None,
@@ -751,11 +751,11 @@ mod tests {
         assert_eq!(tracked.health, Some(20));
         // Animals map to their pig-90-family ids.
         let id2 = table.alloc_id();
-        let mut l2 = crate::entity_table::LivingBody::new(id2, 0.6, 1.3, 0.0);
+        let mut l2 = crate::entity::table::LivingBody::new(id2, 0.6, 1.3, 0.0);
         l2.body.set_position(0.0, 64.0, 0.0);
-        table.insert(crate::entity_table::Entity::Animal(crate::entity_table::AnimalEnt {
+        table.insert(crate::entity::table::Entity::Animal(crate::entity::table::AnimalEnt {
             living: l2,
-            kind: crate::entity_table::AnimalKind::Cow,
+            kind: crate::entity::table::AnimalKind::Cow,
             sheared: false,
             saddled: false,
             egg_timer: 6000,

@@ -1,7 +1,7 @@
 
     use super::*;
     use std::collections::HashSet;
-    use crate::entity_table::{AnimalEnt, AnimalKind, MobEnt, MobKind, PlayerEnt};
+    use crate::entity::table::{AnimalEnt, AnimalKind, MobEnt, MobKind, PlayerEnt};
     use crate::session::SessionBroadcast;
     use crate::session_packets::{pkt_map_chunk, pkt_pre_chunk};
     use crate::world::World;
@@ -307,9 +307,9 @@
         let ops = no_ops();
         let player = spawn_player(&mut w, "Steve", 3.5, 64.0, 4.5);
         let bid = w.entities.alloc_id();
-        let mut b = crate::entity_table::Body::new(bid, 1.5, 0.6, 0.3);
+        let mut b = crate::entity::table::Body::new(bid, 1.5, 0.6, 0.3);
         b.set_position(4.5, 64.0, 4.5);
-        w.entities.insert(Entity::Boat(crate::entity_table::BoatEnt {
+        w.entities.insert(Entity::Boat(crate::entity::table::BoatEnt {
             body: b, time_since_hit: 0, damage_taken: 0, forward_dir: 1,
         }));
         let mut sess = PlaySession::new(player);
@@ -332,7 +332,7 @@
 
     #[test]
     fn test_saddled_pig_mounts_on_interact() {
-        use crate::entity_table::{AnimalEnt, AnimalKind};
+        use crate::entity::table::{AnimalEnt, AnimalKind};
         let mut w = floor_world();
         let ops = no_ops();
         let player = spawn_player(&mut w, "Steve", 3.5, 64.0, 4.5);
@@ -619,7 +619,7 @@
         w.set_block_id(3, 64, 4, 63);
         w.tiles.insert(
             (3, 64, 4),
-            TileData::Sign(crate::tile_entity_sign::sign_create()),
+            TileData::Sign(crate::tile_entity::sign::sign_create()),
         );
         // Client sends gzipped sign NBT.
         let mut map = BTreeMap::new();

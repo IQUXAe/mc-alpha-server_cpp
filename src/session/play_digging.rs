@@ -1,10 +1,10 @@
 //! Block dig + harvest on `PlaySession` (mirrors handleBlockDig).
 //! Split out of `session.rs`; behavior unchanged.
 
-use crate::entity_table::Entity;
+use crate::entity::table::Entity;
 use crate::item_data::{alpha_item_max_damage, alpha_item_tool_kind};
-use crate::player_digging::{FfiDigInput, alpha_dig_on_click, alpha_dig_on_tick};
-use crate::player_mining::alpha_mining_can_harvest;
+use crate::player::digging::{FfiDigInput, alpha_dig_on_click, alpha_dig_on_tick};
+use crate::player::mining::alpha_mining_can_harvest;
 use crate::session::play::PlaySession;
 use crate::session::{SessionCtx, SessionOutcome};
 use crate::session_packets::tile_packet;
@@ -47,7 +47,7 @@ impl PlaySession {
                 // Clear client-side chest prediction before digging starts.
                 if ctx.world.get_block_id(x, y, z) == 54 {
                     if let Some(TileData::Chest(_)) = ctx.world.tiles.get(&(x, y, z)) {
-                        use crate::tile_entity_chest::chest_create;
+                        use crate::tile_entity::chest::chest_create;
                         self.outbox.push(tile_packet(x, y, z, &TileData::Chest(chest_create())));
                     }
                 }
@@ -61,7 +61,7 @@ impl PlaySession {
                 }
             }
         } else if status == 2 {
-            crate::player_digging::alpha_dig_cancel(&mut self.dig);
+            crate::player::digging::alpha_dig_cancel(&mut self.dig);
         } else if status == 1 {
             if !protected || self.is_op(ctx) {
                 let bid = ctx.world.get_block_id(x, y, z);

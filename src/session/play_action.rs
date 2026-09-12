@@ -1,10 +1,10 @@
 //! Entity use, chat, respawn, held-switch and arm swing on `PlaySession`.
 //! Split out of `session.rs`; behavior unchanged.
 
-use crate::entity_table::{AnimalKind, Entity};
+use crate::entity::table::{AnimalKind, Entity};
 use crate::inventory::FfiItemStack;
 use crate::item_data::{alpha_item_max_damage, alpha_item_tool_kind};
-use crate::player_combat::alpha_combat_get_weapon_damage;
+use crate::player::combat::alpha_combat_get_weapon_damage;
 use crate::server_admin::chat_command;
 use crate::session::play::PlaySession;
 use crate::session::{SessionBroadcast, SessionCtx, SessionOutcome};

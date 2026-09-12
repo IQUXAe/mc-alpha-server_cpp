@@ -30,9 +30,9 @@ pub mod tiles;
 
 use std::collections::{BTreeMap, HashMap};
 use crate::aabb::AxisAlignedBB;
-use crate::block::{BlockMaterial, BlockType, alpha_block_properties_get};
+use crate::block::table::{BlockMaterial, BlockType, alpha_block_properties_get};
 use crate::chunk::Chunk;
-use crate::entity_table::{EntityId, EntityTable};
+use crate::entity::table::{EntityId, EntityTable};
 use crate::material::Material;
 use crate::random::JavaRandom;
 use crate::tracker::Tracker;
@@ -507,7 +507,7 @@ impl World {
         ids.sort_unstable();
         for id in ids {
             let e = self.entities.get(id)?;
-            if !matches!(e, crate::entity_table::Entity::Player(_)) {
+            if !matches!(e, crate::entity::table::Entity::Player(_)) {
                 continue;
             }
             let d = e.body().distance_sq(x, y, z);

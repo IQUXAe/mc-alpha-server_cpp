@@ -1,9 +1,9 @@
 //! Block placement, neighbor updates, drops and tick scheduling on [`World`].
 //! Split out of `world.rs`; behavior unchanged.
 
-use crate::block::alpha_block_properties_get;
-use crate::block_fire::{block_fire_added, block_fire_neighbor, block_fire_tick};
-use crate::block_ticks::{
+use crate::block::table::alpha_block_properties_get;
+use crate::block::fire::{block_fire_added, block_fire_neighbor, block_fire_tick};
+use crate::block::ticks::{
      block_base_drop, block_cactus_added, block_cactus_neighbor, block_cactus_tick,
      block_crops_added, block_crops_neighbor, block_crops_tick, block_flower_neighbor,
      block_flower_tick, block_fluid_added, block_fluid_neighbor, block_fluid_tick,
@@ -12,7 +12,7 @@ use crate::block_ticks::{
      block_sand_tick, block_sapling_added, block_sapling_neighbor, block_sapling_tick,
      block_soil_added, block_soil_neighbor, block_soil_tick, block_torch_added, block_torch_neighbor,
 };
-use crate::entity_table::{Body, Entity, EntityId};
+use crate::entity::table::{Body, Entity, EntityId};
 use crate::material::Material;
 use crate::world::{
     TileData, WORLD_HEIGHT, World, animal_kind_of, animal_string_id, is_air_material, material_of,
@@ -94,17 +94,17 @@ impl World {
         match bid {
             54 => {
                 self.tiles.entry((x, y, z)).or_insert_with(|| {
-                    TileData::Chest(crate::tile_entity_chest::chest_create())
+                    TileData::Chest(crate::tile_entity::chest::chest_create())
                 });
             }
             61 | 62 => {
                 self.tiles.entry((x, y, z)).or_insert_with(|| {
-                    TileData::Furnace(crate::tile_entity_furnace::furnace_create())
+                    TileData::Furnace(crate::tile_entity::furnace::furnace_create())
                 });
             }
             63 | 68 => {
                 self.tiles.entry((x, y, z)).or_insert_with(|| {
-                    TileData::Sign(crate::tile_entity_sign::sign_create())
+                    TileData::Sign(crate::tile_entity::sign::sign_create())
                 });
             }
             _ => {}
@@ -298,7 +298,7 @@ impl World {
     /// `onBlockRemoval` halves, including the tile-row removal).
     /// Tile-less cells are a no-op.
     pub(crate) fn scatter_container_tile(&mut self, x: i32, y: i32, z: i32) {
-        use crate::block_container::{block_chest_scatter_stack, block_furnace_scatter_stack};
+        use crate::block::container::{block_chest_scatter_stack, block_furnace_scatter_stack};
         let tile = match self.tiles.get(&(x, y, z)) {
             Some(t) => *t,
             None => return,
@@ -730,7 +730,7 @@ impl World {
             let id = self.entities.alloc_id();
             let mut b = Body::new(id, 0.25, 0.25, 0.125);
             b.set_position(it.pos[0], it.pos[1], it.pos[2]);
-            self.entities.insert(Entity::Item(crate::entity_table::ItemEnt {
+            self.entities.insert(Entity::Item(crate::entity::table::ItemEnt {
                 body: b,
                 item_id: it.item_id,
                 count: it.count,
@@ -742,7 +742,7 @@ impl World {
         for an in animals {
             if let Some(kind) = animal_kind_of(&an.string_id) {
                 let id = self.entities.alloc_id();
-                let mut a = crate::entity_table::AnimalEnt::new(id, kind);
+                let mut a = crate::entity::table::AnimalEnt::new(id, kind);
                 a.living.body.set_position(an.pos[0], an.pos[1], an.pos[2]);
                 a.living.body.motion = an.motion;
                 a.living.body.yaw = an.yaw;
@@ -758,7 +758,7 @@ impl World {
         for mo in monsters {
             if let Some(kind) = mob_kind_of(&mo.string_id) {
                 let id = self.entities.alloc_id();
-                let mut m = crate::entity_table::MobEnt::new(id, kind);
+                let mut m = crate::entity::table::MobEnt::new(id, kind);
                 m.living.body.set_position(mo.pos[0], mo.pos[1], mo.pos[2]);
                 m.living.body.motion = mo.motion;
                 m.living.body.yaw = mo.yaw;
@@ -775,7 +775,7 @@ impl World {
             b.motion = bt.motion;
             b.yaw = bt.yaw;
             b.pitch = bt.pitch;
-            self.entities.insert(Entity::Boat(crate::entity_table::BoatEnt {
+            self.entities.insert(Entity::Boat(crate::entity::table::BoatEnt {
                 body: b,
                 time_since_hit: bt.time_since_hit,
                 damage_taken: bt.damage_taken,

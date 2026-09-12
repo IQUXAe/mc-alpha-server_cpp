@@ -3,7 +3,7 @@
 //! `mob_spawning::SpawnerWorld` trait directly (explicit borrows, no bridge).
 //!
 
-use crate::entity_table::{AnimalKind, Entity, EntityId, MobKind};
+use crate::entity::table::{AnimalKind, Entity, EntityId, MobKind};
 use crate::math_helper::floor_double;
 use crate::world::{GRASS_BLOCK_ID, WORLD_HEIGHT, World, is_air_material};
 use crate::world::tiles::TileData;
@@ -54,7 +54,7 @@ impl crate::mob_spawning::SpawnerWorld for World {
                 2 => MobKind::Skeleton,
                 _ => MobKind::Creeper,
             };
-            let mut m = crate::entity_table::MobEnt::new(id, mkind);
+            let mut m = crate::entity::table::MobEnt::new(id, mkind);
             m.living.body.set_position(fx as f64, fy as f64, fz as f64);
             m.living.body.yaw = yaw;
             self.entities.insert(Entity::Mob(m));
@@ -69,7 +69,7 @@ impl crate::mob_spawning::SpawnerWorld for World {
                 2 => AnimalKind::Chicken,
                 _ => AnimalKind::Cow,
             };
-            let mut a = crate::entity_table::AnimalEnt::new(id, akind);
+            let mut a = crate::entity::table::AnimalEnt::new(id, akind);
             a.living.body.set_position(fx as f64, fy as f64, fz as f64);
             a.living.body.yaw = yaw;
             // The C++ chicken ctor rolls the egg clock at construction,
@@ -92,7 +92,7 @@ impl crate::mob_spawning::SpawnerWorld for World {
             return false;
         }
         let id = self.entities.alloc_id();
-        let mut m = crate::entity_table::MobEnt::new(id, MobKind::Skeleton);
+        let mut m = crate::entity::table::MobEnt::new(id, MobKind::Skeleton);
         m.living.body.set_position(fx as f64, fy as f64, fz as f64);
         m.living.body.yaw = yaw;
         self.entities.insert(Entity::Mob(m));
@@ -311,7 +311,7 @@ impl World {
         for (x, y, z) in cells {
             let ticked = match self.tiles.get_mut(&(x, y, z)) {
                 Some(TileData::Furnace(state)) => {
-                    crate::tile_entity_furnace::furnace_tick_native(state)
+                    crate::tile_entity::furnace::furnace_tick_native(state)
                 }
                 _ => continue,
             };

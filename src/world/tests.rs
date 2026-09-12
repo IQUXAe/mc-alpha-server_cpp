@@ -1,6 +1,6 @@
 
     use super::*;
-    use crate::entity_table::{Body, LivingBody, MobEnt, PlayerEnt};
+    use crate::entity::table::{Body, LivingBody, MobEnt, PlayerEnt};
 
     fn world_with_floor() -> World {
         let mut w = World::new(1234);
@@ -20,7 +20,7 @@
         let mut p = PlayerEnt::new(id, name);
         p.living.body.set_position(x, y, z);
         p.respawn_ticks = 0; // tests fight immediately; spawns get immunity
-        w.entities.insert(crate::entity_table::Entity::Player(p));
+        w.entities.insert(crate::entity::table::Entity::Player(p));
         id
     }
 
@@ -166,7 +166,7 @@
         }
         assert!(w.entities.get(id).unwrap().body().on_ground);
         // Age-out kills at 6000 regardless of rest.
-        if let Some(crate::entity_table::Entity::Item(e)) = w.entities.get_mut(id) {
+        if let Some(crate::entity::table::Entity::Item(e)) = w.entities.get_mut(id) {
             e.age = 5999;
         }
         w.tick_item(id);
@@ -175,12 +175,12 @@
 
     #[test]
     fn test_tick_falling_places_on_landing() {
-        use crate::entity_table::{Body, FallingEnt};
+        use crate::entity::table::{Body, FallingEnt};
         let mut w = world_with_floor();
         let id = w.entities.alloc_id();
         let mut b = Body::new(id, 0.98, 0.98, 0.49);
         b.set_position(3.5, 70.0, 4.5);
-        w.entities.insert(crate::entity_table::Entity::Falling(FallingEnt {
+        w.entities.insert(crate::entity::table::Entity::Falling(FallingEnt {
             body: b,
             block_id: 12,
             fall_time: 0,
@@ -207,13 +207,13 @@
     }
 
     fn add_zombie(w: &mut World, x: f64, y: f64, z: f64) -> EntityId {
-    use crate::entity_table::{LivingBody, MobEnt};
+    use crate::entity::table::{LivingBody, MobEnt};
         let id = w.entities.alloc_id();
         let mut l = LivingBody::new(id, 0.6, 1.9, 0.0);
         l.body.set_position(x, y, z);
-        w.entities.insert(crate::entity_table::Entity::Mob(MobEnt {
+        w.entities.insert(crate::entity::table::Entity::Mob(MobEnt {
             living: l,
-            kind: crate::entity_table::MobKind::Zombie,
+            kind: crate::entity::table::MobKind::Zombie,
             target: None,
             attack_cooldown: 0,
             target_timer: 0,
@@ -243,7 +243,7 @@
             }
             assert!(matches!(
                 w.entities.get(oid).unwrap(),
-                crate::entity_table::Entity::Item(_)
+                crate::entity::table::Entity::Item(_)
             ));
         }
     }
@@ -255,7 +255,7 @@
         let atk = add_zombie(&mut w, 8.5, 65.0, 4.5);
         w.attack_living(id, 6, Some(atk));
         let l = match w.entities.get(id).unwrap() {
-            crate::entity_table::Entity::Mob(m) => m.living.clone(),
+            crate::entity::table::Entity::Mob(m) => m.living.clone(),
             _ => unreachable!(),
         };
         assert_eq!((l.health, l.last_damage, l.hurt_time), (14, 6, 10));
@@ -272,27 +272,27 @@
         }
         let id = add_zombie(&mut w, 3.5, 65.0, 4.5);
         // Force air to the edge: one tick must drown for 2 damage.
-        if let Some(crate::entity_table::Entity::Mob(m)) = w.entities.get_mut(id) {
+        if let Some(crate::entity::table::Entity::Mob(m)) = w.entities.get_mut(id) {
             m.living.body.air = -19;
         }
         let hp_before = match w.entities.get(id).unwrap() {
-            crate::entity_table::Entity::Mob(m) => m.living.health,
+            crate::entity::table::Entity::Mob(m) => m.living.health,
             _ => unreachable!(),
         };
         w.tick_living(id);
         let hp_after = match w.entities.get(id).unwrap() {
-            crate::entity_table::Entity::Mob(m) => m.living.health,
+            crate::entity::table::Entity::Mob(m) => m.living.health,
             _ => unreachable!(),
         };
         assert_eq!(hp_before - hp_after, 2);
     }
 
     fn add_boat(w: &mut World, x: f64, y: f64, z: f64) -> EntityId {
-        use crate::entity_table::BoatEnt;
+        use crate::entity::table::BoatEnt;
         let id = w.entities.alloc_id();
         let mut b = Body::new(id, 1.5, 0.6, 0.3);
         b.set_position(x, y, z);
-        w.entities.insert(crate::entity_table::Entity::Boat(BoatEnt {
+        w.entities.insert(crate::entity::table::Entity::Boat(BoatEnt {
             body: b,
             time_since_hit: 0,
             damage_taken: 0,
@@ -332,7 +332,7 @@
         }
         // Motion clamps to ±0.4 before moving: start close enough to hit.
         let id = add_boat(&mut w, 9.0, 65.0, 8.0);
-        if let Some(crate::entity_table::Entity::Boat(b)) = w.entities.get_mut(id) {
+        if let Some(crate::entity::table::Entity::Boat(b)) = w.entities.get_mut(id) {
             b.body.motion = [3.0, 0.0, 3.0];
         }
         let before = w.entities.len();
@@ -349,7 +349,7 @@
         assert!(!w.damage_boat(id, 3));
         let b = w.entities.get(id).unwrap();
         let (dir, time) = match b {
-            crate::entity_table::Entity::Boat(b) => (b.forward_dir, b.time_since_hit),
+            crate::entity::table::Entity::Boat(b) => (b.forward_dir, b.time_since_hit),
             _ => unreachable!(),
         };
         assert_eq!((dir, time), (-1, 10));
@@ -357,13 +357,13 @@
         assert!(w.entities.get(id).unwrap().body().dead);
     }
 
-    use crate::entity_table::{AnimalEnt, AnimalKind, MobKind};
+    use crate::entity::table::{AnimalEnt, AnimalKind, MobKind};
 
     fn add_mob(w: &mut World, kind: MobKind, x: f64, y: f64, z: f64) -> EntityId {
         let id = w.entities.alloc_id();
         let mut m = MobEnt::new(id, kind);
         m.living.body.set_position(x, y, z);
-        w.entities.insert(crate::entity_table::Entity::Mob(m));
+        w.entities.insert(crate::entity::table::Entity::Mob(m));
         id
     }
 
@@ -371,7 +371,7 @@
         let id = w.entities.alloc_id();
         let mut a = AnimalEnt::new(id, kind);
         a.living.body.set_position(x, y, z);
-        w.entities.insert(crate::entity_table::Entity::Animal(a));
+        w.entities.insert(crate::entity::table::Entity::Animal(a));
         id
     }
 
@@ -394,7 +394,7 @@
 
     fn mob_health(w: &World, id: EntityId) -> i16 {
         match w.entities.get(id).unwrap() {
-            crate::entity_table::Entity::Mob(m) => m.living.health,
+            crate::entity::table::Entity::Mob(m) => m.living.health,
             _ => unreachable!(),
         }
     }
@@ -430,7 +430,7 @@
         w.tick_mob(zombie);
         assert_eq!(
             match w.entities.get(zombie).unwrap() {
-                crate::entity_table::Entity::Mob(m) => m.target,
+                crate::entity::table::Entity::Mob(m) => m.target,
                 _ => unreachable!(),
             },
             Some(player)
@@ -459,12 +459,12 @@
     fn test_mob_burn_schedule_and_small_fire_rule() {
         let mut w = world_with_floor();
         let zombie = add_mob(&mut w, MobKind::Zombie, 3.5, 64.0, 4.5);
-        if let Some(crate::entity_table::Entity::Mob(m)) = w.entities.get_mut(zombie) {
+        if let Some(crate::entity::table::Entity::Mob(m)) = w.entities.get_mut(zombie) {
             m.burn_ticks = 21;
         }
         w.tick_mob(zombie);
         let (burn, fire) = match w.entities.get(zombie).unwrap() {
-            crate::entity_table::Entity::Mob(m) => (m.burn_ticks, m.living.body.fire),
+            crate::entity::table::Entity::Mob(m) => (m.burn_ticks, m.living.body.fire),
             _ => unreachable!(),
         };
         assert_eq!((burn, fire), (20, 20));
@@ -472,14 +472,14 @@
         w.tick_mob(zombie);
         assert_eq!(mob_health(&w, zombie), 19); // 20 % 20 == 0: one burn damage
         // Small fires go out once the burn ends.
-        if let Some(crate::entity_table::Entity::Mob(m)) = w.entities.get_mut(zombie) {
+        if let Some(crate::entity::table::Entity::Mob(m)) = w.entities.get_mut(zombie) {
             m.burn_ticks = 0;
             m.living.body.fire = 10;
         }
         w.tick_mob(zombie);
         assert_eq!(
             match w.entities.get(zombie).unwrap() {
-                crate::entity_table::Entity::Mob(m) => m.living.body.fire,
+                crate::entity::table::Entity::Mob(m) => m.living.body.fire,
                 _ => unreachable!(),
             },
             0
@@ -495,12 +495,12 @@
         for _ in 0..500 {
             // Pin to the lit column: untethered it wanders off into the
             // dark, which is correct AI but a useless ignition test.
-            if let Some(crate::entity_table::Entity::Mob(m)) = w.entities.get_mut(zombie) {
+            if let Some(crate::entity::table::Entity::Mob(m)) = w.entities.get_mut(zombie) {
                 m.living.body.set_position(3.5, 64.0, 4.5);
             }
             w.tick_mob(zombie);
             let burn = match w.entities.get(zombie).unwrap() {
-                crate::entity_table::Entity::Mob(m) => m.burn_ticks,
+                crate::entity::table::Entity::Mob(m) => m.burn_ticks,
                 _ => unreachable!(),
             };
             if burn > 0 {
@@ -519,7 +519,7 @@
         w.tick_mob(spider);
         assert_eq!(
             match w.entities.get(spider).unwrap() {
-                crate::entity_table::Entity::Mob(m) => m.target,
+                crate::entity::table::Entity::Mob(m) => m.target,
                 _ => unreachable!(),
             },
             None
@@ -531,7 +531,7 @@
         }
         assert!(
             match w.entities.get(spider).unwrap() {
-                crate::entity_table::Entity::Mob(m) => m.target,
+                crate::entity::table::Entity::Mob(m) => m.target,
                 _ => unreachable!(),
             }
             .is_some()
@@ -556,7 +556,7 @@
     fn test_chicken_lays_eggs_and_ignores_fall() {
         let mut w = world_with_floor();
         let chicken = add_animal(&mut w, AnimalKind::Chicken, 8.5, 70.0, 8.5);
-        if let Some(crate::entity_table::Entity::Animal(a)) = w.entities.get_mut(chicken) {
+        if let Some(crate::entity::table::Entity::Animal(a)) = w.entities.get_mut(chicken) {
             a.egg_timer = 2;
         }
         for _ in 0..200 {
@@ -570,7 +570,7 @@
         // (chicken max HP is 4 per Java EntityChicken.java:16).
         assert_eq!(
             match w.entities.get(chicken).unwrap() {
-                crate::entity_table::Entity::Animal(a) => a.living.health,
+                crate::entity::table::Entity::Animal(a) => a.living.health,
                 _ => unreachable!(),
             },
             4
@@ -583,14 +583,14 @@
             .filter(|oid| {
                 matches!(
                     w.entities.get(*oid).unwrap(),
-                    crate::entity_table::Entity::Item(e) if e.item_id == 344
+                    crate::entity::table::Entity::Item(e) if e.item_id == 344
                 )
             })
             .count();
         assert!(eggs >= 1);
         assert!(
             match w.entities.get(chicken).unwrap() {
-                crate::entity_table::Entity::Animal(a) => a.egg_timer,
+                crate::entity::table::Entity::Animal(a) => a.egg_timer,
                 _ => unreachable!(),
             } >= 6000
         );
@@ -636,7 +636,7 @@
         let mut w = world_with_floor();
         let player = add_player(&mut w, "steve", 3.5, 64.0, 4.5);
         let item = w.spawn_item_entity(3, 5, 0, 3.5, 64.2, 4.5);
-        if let Some(crate::entity_table::Entity::Item(e)) = w.entities.get_mut(item) {
+        if let Some(crate::entity::table::Entity::Item(e)) = w.entities.get_mut(item) {
             e.pickup_delay = 0;
         }
         let zombie = add_mob(&mut w, MobKind::Zombie, 8.5, 64.0, 4.5);
@@ -649,7 +649,7 @@
             Some((3, 5))
         );
         let dirt: i32 = match w.entities.get(player).unwrap() {
-            crate::entity_table::Entity::Player(p) => {
+            crate::entity::table::Entity::Player(p) => {
                 p.inventory.main.iter().filter_map(|s| *s).map(|s| s.stack_size).sum()
             }
             _ => unreachable!(),
@@ -676,14 +676,14 @@
         let pig = add_animal(&mut w, AnimalKind::Pig, 3.5, 64.0, 4.5);
         w.attack_living(pig, 1, Some(player));
         let motion = match w.entities.get(pig).unwrap() {
-            crate::entity_table::Entity::Animal(a) => a.living.body.motion,
+            crate::entity::table::Entity::Animal(a) => a.living.body.motion,
             _ => unreachable!(),
         };
         assert!(motion[0] < -0.3, "westward shove, got {motion:?}");
         assert_eq!(motion[1], 0.4);
         w.tick_world();
         let after = match w.entities.get(pig).unwrap() {
-            crate::entity_table::Entity::Animal(a) => a.living.body.pos[0],
+            crate::entity::table::Entity::Animal(a) => a.living.body.pos[0],
             _ => unreachable!(),
         };
         assert!(after < 3.5 - 0.15, "pig displaced west, now at {after}");
@@ -738,7 +738,7 @@
         w.set_block_id(3, 64, 4, 81);
         w.move_body(player, 0.0, 0.0, 0.0);
         let hp = match w.entities.get(player).unwrap() {
-            crate::entity_table::Entity::Player(p) => p.living.health,
+            crate::entity::table::Entity::Player(p) => p.living.health,
             _ => unreachable!(),
         };
         assert_eq!(hp, 19);
@@ -746,7 +746,7 @@
 
     fn furnace_tile_with(input: (i32, i32), fuel: (i32, i32)) -> TileData {
         use crate::inventory::FfiItemStack;
-        let mut s = crate::tile_entity_furnace::furnace_create();
+        let mut s = crate::tile_entity::furnace::furnace_create();
         s.slots[0] = FfiItemStack {
             stack_size: input.1,
             animations_to_go: 0,
@@ -803,7 +803,7 @@
         w.set_block_id(2, 64, 2, 54);
         w.tiles.insert(
             (2, 64, 2),
-            TileData::Chest(crate::tile_entity_chest::chest_create()),
+            TileData::Chest(crate::tile_entity::chest::chest_create()),
         );
         w.tick_furnaces();
         assert_eq!(w.get_block_id(2, 64, 2), 54);
@@ -824,13 +824,13 @@
     fn test_tick_player_decays_respawn() {
         let mut w = world_with_floor();
         let player = add_player(&mut w, "steve", 3.5, 64.0, 4.5);
-        if let Some(crate::entity_table::Entity::Player(p)) = w.entities.get_mut(player) {
+        if let Some(crate::entity::table::Entity::Player(p)) = w.entities.get_mut(player) {
             p.respawn_ticks = 5;
         }
         w.tick_player(player);
         assert_eq!(
             match w.entities.get(player).unwrap() {
-                crate::entity_table::Entity::Player(p) => p.respawn_ticks,
+                crate::entity::table::Entity::Player(p) => p.respawn_ticks,
                 _ => unreachable!(),
             },
             4
@@ -857,10 +857,10 @@
         }
         assert!(spawned > 0, "dark pens should yield hostile spawns");
         for oid in w.entities.alive_ids() {
-            if !matches!(w.entities.get(oid).unwrap(), crate::entity_table::Entity::Player(_)) {
+            if !matches!(w.entities.get(oid).unwrap(), crate::entity::table::Entity::Player(_)) {
                 assert!(matches!(
                     w.entities.get(oid).unwrap(),
-                    crate::entity_table::Entity::Mob(_)
+                    crate::entity::table::Entity::Mob(_)
                 ));
             }
         }
@@ -914,7 +914,7 @@
         assert_eq!(w.get_block_id(3, 66, 4), 0);
         assert!(w.entities.alive_ids().into_iter().any(|oid| matches!(
             w.entities.get(oid).unwrap(),
-            crate::entity_table::Entity::Falling(f) if f.block_id == 12
+            crate::entity::table::Entity::Falling(f) if f.block_id == 12
         )));
     }
 
@@ -976,7 +976,7 @@
         assert_eq!(w.get_block_id(3, 64, 4), 0);
         assert!(w.entities.alive_ids().into_iter().any(|oid| matches!(
             w.entities.get(oid).unwrap(),
-            crate::entity_table::Entity::Item(e) if e.item_id == 50
+            crate::entity::table::Entity::Item(e) if e.item_id == 50
         )));
     }
 
@@ -991,7 +991,7 @@
         assert_eq!(w.get_block_id(3, 65, 4), 0);
         assert!(w.entities.alive_ids().into_iter().any(|oid| matches!(
             w.entities.get(oid).unwrap(),
-            crate::entity_table::Entity::Item(e) if e.item_id == 323
+            crate::entity::table::Entity::Item(e) if e.item_id == 323
         )));
         // Supported post sign stays.
         w.set_block_id(5, 64, 5, 63);
@@ -1086,7 +1086,7 @@
             .filter(|oid| {
                 matches!(
                     w.entities.get(*oid).unwrap(),
-                    crate::entity_table::Entity::Item(e) if e.item_id == 3 && e.count == 2
+                    crate::entity::table::Entity::Item(e) if e.item_id == 3 && e.count == 2
                 )
             })
             .count();
@@ -1097,7 +1097,7 @@
             .filter(|oid| {
                 matches!(
                     w.entities.get(*oid).unwrap(),
-                    crate::entity_table::Entity::Mob(m) if m.kind == MobKind::Zombie
+                    crate::entity::table::Entity::Mob(m) if m.kind == MobKind::Zombie
                 )
             })
             .count();
@@ -1160,7 +1160,7 @@
 
     fn player_health(w: &World, id: EntityId) -> i16 {
         match w.entities.get(id).unwrap() {
-            crate::entity_table::Entity::Player(p) => p.living.health,
+            crate::entity::table::Entity::Player(p) => p.living.health,
             _ => unreachable!(),
         }
     }
@@ -1194,7 +1194,7 @@
         assert_eq!(player_health(&w, player), 15);
         assert_eq!(
             match w.entities.get(zombie).unwrap() {
-                crate::entity_table::Entity::Mob(m) => m.attack_cooldown,
+                crate::entity::table::Entity::Mob(m) => m.attack_cooldown,
                 _ => unreachable!(),
             },
             20
@@ -1214,11 +1214,11 @@
             .entities
             .alive_ids()
             .into_iter()
-            .filter(|oid| matches!(w.entities.get(*oid).unwrap(), crate::entity_table::Entity::Arrow(_)))
+            .filter(|oid| matches!(w.entities.get(*oid).unwrap(), crate::entity::table::Entity::Arrow(_)))
             .collect();
         assert_eq!(arrows.len(), 1);
         let (shooter, start) = match w.entities.get(arrows[0]).unwrap() {
-            crate::entity_table::Entity::Arrow(a) => (a.shooter_id, a.body.pos),
+            crate::entity::table::Entity::Arrow(a) => (a.shooter_id, a.body.pos),
             _ => unreachable!(),
         };
         assert_eq!(shooter, skel);
@@ -1234,7 +1234,7 @@
         let mut w = world_with_floor();
         let player = add_player(&mut w, "steve", 7.5, 64.0, 4.5);
         let spider = add_mob(&mut w, MobKind::Spider, 3.5, 64.0, 4.5);
-        if let Some(crate::entity_table::Entity::Mob(m)) = w.entities.get_mut(spider) {
+        if let Some(crate::entity::table::Entity::Mob(m)) = w.entities.get_mut(spider) {
             m.living.body.on_ground = true;
         }
         let mut snap = w.creature_snapshot(spider).unwrap();
@@ -1284,7 +1284,7 @@
         // Stocked chest with the creeper inside its cell (d=0 destroys
         // with chance 1, no RNG involved).
         w.set_block_id(4, 64, 4, 54);
-        let mut ch = crate::tile_entity_chest::chest_create();
+        let mut ch = crate::tile_entity::chest::chest_create();
         ch.slots[0] = stk(3, 7, 0);
         w.tiles.insert((4, 64, 4), TileData::Chest(ch));
         let creeper = add_mob(&mut w, MobKind::Creeper, 4.5, 64.0, 4.5);
@@ -1295,13 +1295,13 @@
         assert!(w.tiles.get(&(4, 64, 4)).is_none());
         assert!(w.entities.alive_ids().iter().any(|oid| matches!(
             w.entities.get(*oid),
-            Some(crate::entity_table::Entity::Item(e)) if e.item_id == 3
+            Some(crate::entity::table::Entity::Item(e)) if e.item_id == 3
         )));
     }
 
     #[test]
     fn test_arrow_sticks_in_wall_and_pops_out() {
-        use crate::entity_table::{ArrowEnt, Body};
+        use crate::entity::table::{ArrowEnt, Body};
         let mut w = world_with_floor();
         for y in 64..67 {
             w.set_block_id(10, y, 8, 1);
@@ -1310,7 +1310,7 @@
         let mut b = Body::new(id, 0.5, 0.5, 0.0);
         b.set_position(8.5, 65.0, 8.5);
         b.motion = [1.0, 0.0, 0.0];
-        w.entities.insert(crate::entity_table::Entity::Arrow(ArrowEnt {
+        w.entities.insert(crate::entity::table::Entity::Arrow(ArrowEnt {
             body: b,
             in_ground: false,
             shake: 0,
@@ -1323,7 +1323,7 @@
         w.tick_arrow(id);
         w.tick_arrow(id);
         let (stuck, tile, shake) = match w.entities.get(id).unwrap() {
-            crate::entity_table::Entity::Arrow(a) => (a.in_ground, a.tile, a.shake),
+            crate::entity::table::Entity::Arrow(a) => (a.in_ground, a.tile, a.shake),
             _ => unreachable!(),
         };
         assert!(stuck);
@@ -1335,7 +1335,7 @@
         w.tick_arrow(id);
         assert!(!matches!(
             w.entities.get(id).unwrap(),
-            crate::entity_table::Entity::Arrow(a) if a.in_ground
+            crate::entity::table::Entity::Arrow(a) if a.in_ground
         ));
     }
 
@@ -1347,7 +1347,7 @@
         w.attack_living(sheep, 3, Some(zombie));
         assert!(matches!(
             w.entities.get(sheep).unwrap(),
-            crate::entity_table::Entity::Animal(a) if a.sheared
+            crate::entity::table::Entity::Animal(a) if a.sheared
         ));
         let wool = w
             .entities
@@ -1356,7 +1356,7 @@
             .filter(|oid| {
                 matches!(
                     w.entities.get(*oid).unwrap(),
-                    crate::entity_table::Entity::Item(e) if e.item_id == 35
+                    crate::entity::table::Entity::Item(e) if e.item_id == 35
                 )
             })
             .count();
@@ -1366,7 +1366,7 @@
         w.attack_living(sheep2, 3, None);
         assert!(matches!(
             w.entities.get(sheep2).unwrap(),
-            crate::entity_table::Entity::Animal(a) if !a.sheared
+            crate::entity::table::Entity::Animal(a) if !a.sheared
         ));
     }
 
@@ -1394,7 +1394,7 @@
     }
 
     fn set_slot(w: &mut World, id: EntityId, bank: u8, slot: usize, s: crate::inventory::FfiItemStack) {
-        if let Some(crate::entity_table::Entity::Player(p)) = w.entities.get_mut(id) {
+        if let Some(crate::entity::table::Entity::Player(p)) = w.entities.get_mut(id) {
             let bank = match bank {
                 0 => &mut p.inventory.main[..],
                 1 => &mut p.inventory.armor[..],
@@ -1411,7 +1411,7 @@
             .alive_ids()
             .into_iter()
             .filter_map(|oid| match w.entities.get(oid).unwrap() {
-                crate::entity_table::Entity::Item(e) => Some((e.item_id, e.count, e.pickup_delay)),
+                crate::entity::table::Entity::Item(e) => Some((e.item_id, e.count, e.pickup_delay)),
                 _ => None,
             })
             .collect();
@@ -1432,7 +1432,7 @@
         assert_eq!(player_items(&w), vec![(3, 10, 40), (280, 5, 40), (306, 1, 40)]);
         // Spawn height is feet + 0.5 with an upward toss.
         for oid in w.entities.alive_ids() {
-            if let crate::entity_table::Entity::Item(e) = w.entities.get(oid).unwrap() {
+            if let crate::entity::table::Entity::Item(e) = w.entities.get(oid).unwrap() {
                 assert_eq!(e.body.pos[1], 64.5);
                 assert!(e.body.motion[1] > 0.0);
             }
@@ -1440,7 +1440,7 @@
         // All banks cleared.
         assert!(matches!(
             w.entities.get(player).unwrap(),
-            crate::entity_table::Entity::Player(p)
+            crate::entity::table::Entity::Player(p)
                 if p.inventory.main.iter().all(|s| s.is_none())
                     && p.inventory.armor.iter().all(|s| s.is_none())
                     && p.inventory.crafting.iter().all(|s| s.is_none())
@@ -1452,7 +1452,7 @@
         let mut w = world_with_floor();
         let player = add_player(&mut w, "steve", 3.5, 64.0, 4.5);
         let zombie = add_mob(&mut w, MobKind::Zombie, 4.5, 64.0, 4.5);
-        if let Some(crate::entity_table::Entity::Player(p)) = w.entities.get_mut(player) {
+        if let Some(crate::entity::table::Entity::Player(p)) = w.entities.get_mut(player) {
             p.respawn_ticks = 10;
         }
         w.attack_living(player, 5, Some(zombie));
@@ -1474,7 +1474,7 @@
         assert_eq!(player_health(&w, player), 18);
         assert!(matches!(
             w.entities.get(player).unwrap(),
-            crate::entity_table::Entity::Player(p)
+            crate::entity::table::Entity::Player(p)
                 if p.armor_carry == 0
                     && p.inventory.armor.iter().all(|s| s.map(|x| x.item_damage) == Some(10))
         ));
@@ -1497,7 +1497,7 @@
         assert_eq!(w.player_add_item(player, stk(3, 10, 0)), 0);
         assert_eq!(w.player_add_item(player, stk(3, 60, 0)), 0);
         let main: Vec<Option<(i32, i32)>> = match w.entities.get(player).unwrap() {
-            crate::entity_table::Entity::Player(p) => {
+            crate::entity::table::Entity::Player(p) => {
                 p.inventory.main.iter().take(3).map(|s| s.map(|x| (x.item_id, x.stack_size))).collect()
             }
             _ => unreachable!(),
@@ -1515,11 +1515,11 @@
         let player = add_player(&mut w, "steve", 3.5, 64.0, 4.5);
         assert_eq!(w.player_held(player), None);
         set_slot(&mut w, player, 0, 2, stk(5, 3, 0));
-        if let Some(crate::entity_table::Entity::Player(p)) = w.entities.get_mut(player) {
+        if let Some(crate::entity::table::Entity::Player(p)) = w.entities.get_mut(player) {
             p.inventory.current = 2;
         }
         assert_eq!(w.player_held(player).map(|s| (s.item_id, s.stack_size)), Some((5, 3)));
-        if let Some(crate::entity_table::Entity::Player(p)) = w.entities.get_mut(player) {
+        if let Some(crate::entity::table::Entity::Player(p)) = w.entities.get_mut(player) {
             p.inventory.current = 99;
         }
         assert_eq!(w.player_held(player), None);

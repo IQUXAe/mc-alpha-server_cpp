@@ -1,15 +1,15 @@
 //! Block-entity rows and entity string-id helpers, split out of `world.rs`.
 //! Re-exported from `world` so `crate::world::TileData` keeps working.
 
-use crate::entity_table::{AnimalKind, LivingBody, MobKind};
+use crate::entity::table::{AnimalKind, LivingBody, MobKind};
 
 /// Block-entity data by cell (mirrors the C++ per-chunk `TileEntity`
 /// objects, stored flat until the tile tick slice needs behavior).
 #[derive(Clone, Copy, Debug)]
 pub enum TileData {
-    Furnace(crate::tile_entity_furnace::FfiFurnaceState),
-    Chest(crate::tile_entity_chest::FfiChestState),
-    Sign(crate::tile_entity_sign::FfiSignState),
+    Furnace(crate::tile_entity::furnace::FfiFurnaceState),
+    Chest(crate::tile_entity::chest::FfiChestState),
+    Sign(crate::tile_entity::sign::FfiSignState),
 }
 
 /// String id for spill/restore (mirrors `getEntityStringId`).

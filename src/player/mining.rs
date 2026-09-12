@@ -1,4 +1,4 @@
-use crate::block::{alpha_block_properties_get, BlockMaterial};
+use crate::block::table::{alpha_block_properties_get, BlockMaterial};
 
 /// Checks if a player holding `held_item_id` can harvest drops from `block_id`.
 /// Follows Minecraft Alpha 1.2.6 rules.

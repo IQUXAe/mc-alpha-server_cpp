@@ -53,7 +53,7 @@ fn emit(
         return;
     }
     let eid = w.spawn_item_entity(item_id, count, damage, fx, fy, fz);
-    if let Some(crate::entity_table::Entity::Item(e)) = w.entities.get_mut(eid) {
+    if let Some(crate::entity::table::Entity::Item(e)) = w.entities.get_mut(eid) {
         e.body.motion = [mx, my, mz];
     }
 }
@@ -159,7 +159,7 @@ pub fn block_chest_can_place(w: &World, chest_id: u8, x: i32, y: i32, z: i32) ->
 mod tests {
     use super::*;
     use crate::chunk::Chunk;
-    use crate::entity_table::Entity;
+    use crate::entity::table::Entity;
     use crate::world::World;
 
     fn harness(seed: i64) -> World {

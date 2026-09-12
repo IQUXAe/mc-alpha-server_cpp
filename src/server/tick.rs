@@ -2,7 +2,7 @@
 //! Split out of `server.rs`; behavior unchanged.
 
 use std::collections::{HashMap, HashSet};
-use crate::entity_table::{Entity, EntityId};
+use crate::entity::table::{Entity, EntityId};
 use crate::server::sessions::{Session, SessionState};
 use crate::server::{ConnId, Server, chunk_key};
 use crate::server_constants::TICKS_PER_SECOND;

@@ -9,7 +9,7 @@
 //! Face-offset tables, soil rules, and growth constants are centralized
 //! here so the six verbs share one tested source of truth.
 
-use crate::entity_table::Entity;
+use crate::entity::table::Entity;
 use crate::item_use::{alpha_item_furnace_facing, alpha_item_sign_yaw_meta};
 use crate::math_helper::{cos, sin};
 use crate::session::play::PlaySession;
@@ -53,9 +53,9 @@ fn rng_f64(u: &mut ItemUseWorld) -> f64 {
 /// block-type table).
 fn is_collidable(w: &World, x: i32, y: i32, z: i32) -> bool {
     let bid = w.get_block_id(x, y, z);
-    let props = crate::block::alpha_block_properties_get(bid as u32);
+    let props = crate::block::table::alpha_block_properties_get(bid as u32);
     bid != 0
-        && props.block_type != crate::block::BlockType::Fluid as u8
+        && props.block_type != crate::block::table::BlockType::Fluid as u8
         && crate::world::has_collision_box(props.block_type)
 }
 
@@ -64,13 +64,13 @@ fn is_collidable(w: &World, x: i32, y: i32, z: i32) -> bool {
 fn can_stay(u: &mut ItemUseWorld, id: u8, x: i32, y: i32, z: i32) -> bool {
     let w = &mut *u.world;
     match id {
-        37 | 38 => crate::block_ticks::block_flower_can_stay(w, x, y, z),
-        39 | 40 => crate::block_ticks::block_mushroom_can_stay(w, x, y, z),
-        50 => crate::block_ticks::block_torch_can_stay(w, x, y, z),
-        81 => crate::block_ticks::block_cactus_can_stay(w, x, y, z),
-        83 => crate::block_ticks::block_reed_can_stay(w, x, y, z),
-        6 => crate::block_ticks::block_sapling_can_stay(w, x, y, z),
-        59 => crate::block_ticks::block_crops_can_stay(w, id, x, y, z),
+        37 | 38 => crate::block::ticks::block_flower_can_stay(w, x, y, z),
+        39 | 40 => crate::block::ticks::block_mushroom_can_stay(w, x, y, z),
+        50 => crate::block::ticks::block_torch_can_stay(w, x, y, z),
+        81 => crate::block::ticks::block_cactus_can_stay(w, x, y, z),
+        83 => crate::block::ticks::block_reed_can_stay(w, x, y, z),
+        6 => crate::block::ticks::block_sapling_can_stay(w, x, y, z),
+        59 => crate::block::ticks::block_crops_can_stay(w, id, x, y, z),
         _ => true,
     }
 }
@@ -78,7 +78,7 @@ fn can_stay(u: &mut ItemUseWorld, id: u8, x: i32, y: i32, z: i32) -> bool {
 /// Placement volume check (mirrors `isPlacementVolumeClear`): no live
 /// boat/living intersecting the target box.
 fn placement_clear(u: &mut ItemUseWorld, id: u8, x: i32, y: i32, z: i32) -> bool {
-    let props = crate::block::alpha_block_properties_get(id as u32);
+    let props = crate::block::table::alpha_block_properties_get(id as u32);
     if !crate::world::has_collision_box(props.block_type) {
         return true;
     }
@@ -114,7 +114,7 @@ fn torch_placed(u: &mut ItemUseWorld, id: u8, x: i32, y: i32, z: i32, side: i32)
         return;
     }
     let w = &mut *u.world;
-    let meta = crate::block_ticks::block_torch_attach_meta(w, side, x, y, z);
+    let meta = crate::block::ticks::block_torch_attach_meta(w, side, x, y, z);
     w.set_block_id(x, y, z, id);
     w.set_block_meta(x, y, z, meta);
 }
@@ -440,7 +440,7 @@ pub fn item_boat_throw(
 mod tests {
     use super::*;
     use crate::chunk::Chunk;
-    use crate::entity_table::Entity;
+    use crate::entity::table::Entity;
     use crate::session::play::PlaySession;
     use crate::world::World;
 

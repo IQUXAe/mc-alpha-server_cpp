@@ -26,7 +26,7 @@
 //!   `TestChunk.cpp` — it is skipped, same as here where the caller decides)
 //! - `isTerrainPopulated` is stored but never acted on (needs generator).
 
-use crate::block::alpha_block_properties_get;
+use crate::block::table::alpha_block_properties_get;
 use crate::nibble::NibbleArray;
 use std::collections::VecDeque;
 

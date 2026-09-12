@@ -2,8 +2,8 @@
 //! Split out of `world.rs`; behavior unchanged.
 
 use crate::aabb::AxisAlignedBB;
-use crate::block::{BlockType, alpha_block_properties_get};
-use crate::entity_table::{Body, Entity, EntityId, MobKind};
+use crate::block::table::{BlockType, alpha_block_properties_get};
+use crate::entity::table::{Body, Entity, EntityId, MobKind};
 use crate::material::Material;
 use crate::math_helper::{floor_double, sqrt_float};
 use crate::world::{World, has_collision_box, has_collision_id, material_of};
@@ -342,7 +342,7 @@ impl World {
     /// (draws consumed like C++) with its result discarded unless the
     /// volley aim degenerates.
     fn spawn_skeleton_arrow(&mut self, id: EntityId, target: EntityId) {
-        use crate::entity_misc::arrow_shoot_run;
+        use crate::entity::misc::arrow_shoot_run;
         use crate::math_helper::{cos, sin};
         let (sp, yaw, pitch, eye) = match self.entities.get(id) {
             Some(e) => (e.body().pos, e.body().yaw, e.body().pitch, e.body().height as f64 * 0.85),
@@ -379,7 +379,7 @@ impl World {
         };
         let motion = motion.or(ctor_motion).unwrap_or([0.0, 0.0, 0.0]);
         let (mut fy, mut fp) = (yaw, pitch);
-        crate::entity_misc::alpha_arrow_face_velocity(motion[0], motion[1], motion[2], &mut fy, &mut fp);
+        crate::entity::misc::alpha_arrow_face_velocity(motion[0], motion[1], motion[2], &mut fy, &mut fp);
         let nid = self.entities.alloc_id();
         let mut b = Body::new(nid, 0.5, 0.5, 0.0);
         b.set_position(ax, ay, az);
@@ -388,7 +388,7 @@ impl World {
         b.prev_yaw = fy;
         b.prev_pitch = fp;
         b.motion = motion;
-        self.entities.insert(Entity::Arrow(crate::entity_table::ArrowEnt {
+        self.entities.insert(Entity::Arrow(crate::entity::table::ArrowEnt {
             body: b,
             in_ground: false,
             shake: 0,
@@ -716,7 +716,7 @@ impl World {
         if ppitch == 0.0 && pyaw == 0.0 {
             let (mut fy, mut fp) = (yaw, pitch);
             let faced =
-                crate::entity_misc::alpha_arrow_face_velocity(mx, my, mz, &mut fy, &mut fp);
+                crate::entity::misc::alpha_arrow_face_velocity(mx, my, mz, &mut fy, &mut fp);
             if faced {
                 if let Some(Entity::Arrow(a)) = self.entities.get_mut(id) {
                     a.body.prev_yaw = fy;

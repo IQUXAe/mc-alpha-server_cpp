@@ -1,7 +1,7 @@
 //! Damage pipeline, death/drops and living/player ticks on [`World`].
 //! Split out of `world.rs`; behavior unchanged.
 
-use crate::entity_table::{AnimalKind, Entity, EntityId, LivingBody, MobKind};
+use crate::entity::table::{AnimalKind, Entity, EntityId, LivingBody, MobKind};
 use crate::material::Material;
 use crate::math_helper::floor_double;
 use crate::world::World;
@@ -33,7 +33,7 @@ impl World {
     /// `EntityPlayerMP::attackEntityFrom` (death message and the health
     /// packet are the network slice's).
     pub fn attack_living(&mut self, id: EntityId, amount: i32, attacker: Option<EntityId>) {
-        use crate::entity_living::{AttackInput, living_attack_run};
+        use crate::entity::living::{AttackInput, living_attack_run};
         self.sheep_shear(id, attacker);
         let amount = match self.entities.get(id) {
             Some(Entity::Player(p)) if p.respawn_ticks > 0 => return,
@@ -232,8 +232,8 @@ impl World {
         attacker: Option<EntityId>,
     ) -> Option<i32> {
         use crate::inventory::FfiItemStack;
-        use crate::player_combat::alpha_combat_calculate_damage;
-        use crate::player_inventory::{inventory_armor_value, inventory_damage_armor};
+        use crate::player::combat::alpha_combat_calculate_damage;
+        use crate::player::inventory::{inventory_armor_value, inventory_damage_armor};
         let attacker_is_player = attacker
             .and_then(|a| self.entities.get(a))
             .map(|e| matches!(e, Entity::Player(_)))
@@ -287,7 +287,7 @@ impl World {
     /// `playerDropVelocity` call) and a 40-tick pickup delay; all banks
     /// clear. The inventory-resend packet is the network slice's.
     fn scatter_player_inventory(&mut self, id: EntityId, px: f64, py: f64, pz: f64) {
-        use crate::entity_player::alpha_player_drop_velocity;
+        use crate::entity::player::alpha_player_drop_velocity;
         let stacks: Vec<crate::inventory::FfiItemStack> = match self.entities.get(id) {
             Some(Entity::Player(p)) => p
                 .inventory
@@ -328,7 +328,7 @@ impl World {
         mut stack: crate::inventory::FfiItemStack,
     ) -> i32 {
         use crate::inventory::FfiItemStack;
-        use crate::player_inventory::inventory_add_item_to;
+        use crate::player::inventory::inventory_add_item_to;
         if stack.stack_size <= 0 {
             return 0;
         }
@@ -374,16 +374,16 @@ impl World {
         // from the attack-shear), so death drops nothing.
         match self.entities.get(id) {
             Some(Entity::Mob(m)) => match m.kind {
-                crate::entity_table::MobKind::Spider => (287, self.rng.next_int_bound(3)),
-                crate::entity_table::MobKind::Zombie => (288, self.rng.next_int_bound(3)),
-                crate::entity_table::MobKind::Skeleton => (262, self.rng.next_int_bound(3)),
-                crate::entity_table::MobKind::Creeper => (289, self.rng.next_int_bound(3)),
+                crate::entity::table::MobKind::Spider => (287, self.rng.next_int_bound(3)),
+                crate::entity::table::MobKind::Zombie => (288, self.rng.next_int_bound(3)),
+                crate::entity::table::MobKind::Skeleton => (262, self.rng.next_int_bound(3)),
+                crate::entity::table::MobKind::Creeper => (289, self.rng.next_int_bound(3)),
             },
             Some(Entity::Animal(a)) => match a.kind {
-                crate::entity_table::AnimalKind::Sheep => (0, 0),
-                crate::entity_table::AnimalKind::Pig => (319, self.rng.next_int_bound(3)),
-                crate::entity_table::AnimalKind::Chicken => (288, self.rng.next_int_bound(3)),
-                crate::entity_table::AnimalKind::Cow => (334, self.rng.next_int_bound(3)),
+                crate::entity::table::AnimalKind::Sheep => (0, 0),
+                crate::entity::table::AnimalKind::Pig => (319, self.rng.next_int_bound(3)),
+                crate::entity::table::AnimalKind::Chicken => (288, self.rng.next_int_bound(3)),
+                crate::entity::table::AnimalKind::Cow => (334, self.rng.next_int_bound(3)),
             },
             _ => (0, 0),
         }
@@ -507,7 +507,7 @@ impl World {
             }
             _ => return,
         };
-        let t = crate::entity_living::alpha_living_tick(alive, opaque, water, air, hurt, attack, resist);
+        let t = crate::entity::living::alpha_living_tick(alive, opaque, water, air, hurt, attack, resist);
         match self.entities.get_mut(id) {
             Some(Entity::Mob(m)) => {
                 m.living.body.air = t.air;

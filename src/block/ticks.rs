@@ -14,7 +14,7 @@
 //! - sapling growth returns an action: tree generation itself runs in C++
 //!   through the existing `WorldAccessor` path.
 
-use crate::entity_table::{Body, Entity};
+use crate::entity::table::{Body, Entity};
 use crate::material::Material;
 use crate::world::{World, has_collision_box, has_collision_id};
 
@@ -88,9 +88,9 @@ fn q_water(w: &mut World, x: i32, y: i32, z: i32) -> bool {
 fn q_collidable(w: &mut World, x: i32, y: i32, z: i32) -> bool {
     let bid = w.get_block_id(x, y, z);
     bid != 0
-        && crate::block::alpha_block_properties_get(bid as u32).block_type
-            != crate::block::BlockType::Fluid as u8
-        && has_collision_box(crate::block::alpha_block_properties_get(bid as u32).block_type)
+        && crate::block::table::alpha_block_properties_get(bid as u32).block_type
+            != crate::block::table::BlockType::Fluid as u8
+        && has_collision_box(crate::block::table::alpha_block_properties_get(bid as u32).block_type)
         && has_collision_id(bid)
 }
 fn u_set_meta(w: &mut World, x: i32, y: i32, z: i32, meta: u8) {
@@ -196,7 +196,7 @@ pub fn block_sand_tick(w: &mut World, block_id: u8, x: i32, y: i32, z: i32) {
         let id = w.entities.alloc_id();
         let mut b = Body::new(id, 0.98, 0.98, 0.49);
         b.set_position(x as f64 + 0.5, y as f64 + 0.5, z as f64 + 0.5);
-        w.entities.insert(Entity::Falling(crate::entity_table::FallingEnt {
+        w.entities.insert(Entity::Falling(crate::entity::table::FallingEnt {
             body: b,
             block_id: block_id as i32,
             fall_time: 0,
@@ -991,7 +991,7 @@ pub fn block_base_drop(
 mod tests {
     use super::*;
     use crate::chunk::Chunk;
-    use crate::entity_table::Entity;
+    use crate::entity::table::Entity;
     use crate::world::World;
 
     /// Fresh world. Seeds below were picked so the scenario's FIRST RNG

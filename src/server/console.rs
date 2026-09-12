@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 use crate::commands::{ConsoleCommandTag, FfiString, rust_parse_console_command};
-use crate::entity_table::{AnimalEnt, AnimalKind, Entity, EntityId, MobEnt, MobKind};
+use crate::entity::table::{AnimalEnt, AnimalKind, Entity, EntityId, MobEnt, MobKind};
 use crate::server::sessions::SessionState;
 use crate::server::settings::write_list;
 use crate::server::Server;

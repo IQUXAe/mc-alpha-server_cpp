@@ -21,10 +21,10 @@ use std::io::{Read, Write};
 use crate::chunk::{
     Chunk, PendingBoat, PendingCreature, PendingItem, CHUNK_AREA, CHUNK_NIBBLE_BYTES, CHUNK_VOLUME,
 };
-use crate::entity_table::Entity;
+use crate::entity::table::Entity;
 use crate::inventory::FfiItemStack;
 use crate::nbt::{NbtCompound, NbtList, NbtTag, read_root, write_root};
-use crate::tile_entity_sign::SIGN_LINES;
+use crate::tile_entity::sign::SIGN_LINES;
 use crate::world::{TileData, World};
 
 // ---- chunk keys (our own LevelDB layout: high u32 = x, low u32 = z) ----
@@ -391,9 +391,9 @@ pub struct DecodedChunk {
     pub sky: Vec<u8>,
     pub light: Vec<u8>,
     pub height: Vec<u8>,
-    pub furnaces: Vec<((i32, i32, i32), crate::tile_entity_furnace::FfiFurnaceState)>,
-    pub chests: Vec<((i32, i32, i32), crate::tile_entity_chest::FfiChestState)>,
-    pub signs: Vec<((i32, i32, i32), crate::tile_entity_sign::FfiSignState)>,
+    pub furnaces: Vec<((i32, i32, i32), crate::tile_entity::furnace::FfiFurnaceState)>,
+    pub chests: Vec<((i32, i32, i32), crate::tile_entity::chest::FfiChestState)>,
+    pub signs: Vec<((i32, i32, i32), crate::tile_entity::sign::FfiSignState)>,
     pub items: Vec<PendingItem>,
     pub animals: Vec<PendingCreature>,
     pub monsters: Vec<PendingCreature>,
@@ -505,7 +505,7 @@ pub fn decode_chunk_blob(bytes: &[u8], cx: i32, cz: i32) -> Option<DecodedChunk>
             let (x, y, z) = (get_int(&c.map, "x"), get_int(&c.map, "y"), get_int(&c.map, "z"));
             match get_string(&c.map, "id").as_str() {
                 "Furnace" => {
-                    let mut s = crate::tile_entity_furnace::furnace_create();
+                    let mut s = crate::tile_entity::furnace::furnace_create();
                     s.burn_time = get_short(&c.map, "BurnTime");
                     s.cook_time = get_short(&c.map, "CookTime");
                     s.current_item_burn_time = get_short(&c.map, "ItemBurnTime");
@@ -513,15 +513,15 @@ pub fn decode_chunk_blob(bytes: &[u8], cx: i32, cz: i32) -> Option<DecodedChunk>
                     furnaces.push(((x, y, z), s));
                 }
                 "Chest" => {
-                    let mut s = crate::tile_entity_chest::chest_create();
+                    let mut s = crate::tile_entity::chest::chest_create();
                     read_stack_slots(&c.map, &mut s.slots);
                     chests.push(((x, y, z), s));
                 }
                 "Sign" => {
-                    let mut s = crate::tile_entity_sign::sign_create();
+                    let mut s = crate::tile_entity::sign::sign_create();
                     for i in 0..SIGN_LINES {
                         let text = get_string(&c.map, &format!("Text{}", i + 1));
-                        crate::tile_entity_sign::sign_set_line(&mut s, i as i32, &text);
+                        crate::tile_entity::sign::sign_set_line(&mut s, i as i32, &text);
                     }
                     signs.push(((x, y, z), s));
                 }
@@ -682,7 +682,7 @@ pub struct DecodedPlayer {
 
 /// Encode one player row to a `.dat` file image (schema mirrors
 /// `save_player_data`, including the legacy Pos/Rotation doubles).
-pub fn encode_player(world: &World, id: crate::entity_table::EntityId) -> Option<Vec<u8>> {
+pub fn encode_player(world: &World, id: crate::entity::table::EntityId) -> Option<Vec<u8>> {
     let p = match world.entities.get(id) {
         Some(Entity::Player(p)) => p,
         _ => return None,
@@ -886,7 +886,7 @@ impl World {
     }
 
     /// Write one player's `.dat` file into `dir` (lowercase name, atomic).
-    pub fn save_player_to(&self, dir: &str, id: crate::entity_table::EntityId) -> bool {
+    pub fn save_player_to(&self, dir: &str, id: crate::entity::table::EntityId) -> bool {
         let username = match self.entities.get(id) {
             Some(Entity::Player(p)) => p.username.clone(),
             _ => return false,
@@ -904,14 +904,14 @@ impl World {
     /// Read one player's `.dat` file and insert a live row (login path
     /// for the network slice; respawn immunity comes fresh from the
     /// constructor like C++).
-    pub fn load_player_from(&mut self, dir: &str, username: &str) -> Option<crate::entity_table::EntityId> {
+    pub fn load_player_from(&mut self, dir: &str, username: &str) -> Option<crate::entity::table::EntityId> {
         let bytes = std::fs::read(
             std::path::Path::new(dir).join(format!("{}.dat", username.to_lowercase())),
         )
         .ok()?;
         let d = decode_player(&bytes, username)?;
         let id = self.entities.alloc_id();
-        let mut p = crate::entity_table::PlayerEnt::new(id, &d.username);
+        let mut p = crate::entity::table::PlayerEnt::new(id, &d.username);
         p.living.body.set_position(d.pos[0], d.pos[1], d.pos[2]);
         p.living.body.motion = d.motion;
         p.living.body.yaw = d.yaw;
@@ -955,9 +955,9 @@ fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entity_table::{AnimalEnt, AnimalKind, MobEnt, MobKind, PlayerEnt};
+    use crate::entity::table::{AnimalEnt, AnimalKind, MobEnt, MobKind, PlayerEnt};
     use crate::inventory::FfiItemStack;
-    use crate::tile_entity_chest::CHEST_SIZE;
+    use crate::tile_entity::chest::CHEST_SIZE;
     use crate::world::World;
 
     fn tmp_dir(name: &str) -> std::path::PathBuf {
@@ -974,7 +974,7 @@ mod tests {
 
     /// World with a furnished chunk: torch w/ meta, furnace + chest +
     /// sign tiles, a sheep, a zombie, an item, and a stocked player.
-    fn furnished_world() -> (World, crate::entity_table::EntityId) {
+    fn furnished_world() -> (World, crate::entity::table::EntityId) {
         let mut w = World::new(99);
         let mut c = Chunk::new(0, 0);
         for x in 0..16 {
@@ -987,17 +987,17 @@ mod tests {
         w.set_block_id(3, 64, 4, 50);
         w.set_block_meta(3, 64, 4, 5);
         // Furnace with fuel+input, chest with dirt, labeled sign.
-        let mut f = crate::tile_entity_furnace::furnace_create();
+        let mut f = crate::tile_entity::furnace::furnace_create();
         f.slots[0] = stk(15, 3, 0);
         f.slots[1] = stk(263, 2, 0);
         f.burn_time = 40;
         w.tiles.insert((4, 64, 4), TileData::Furnace(f));
         w.set_block_id(4, 64, 4, 61);
-        let mut ch = crate::tile_entity_chest::chest_create();
+        let mut ch = crate::tile_entity::chest::chest_create();
         ch.slots[0] = stk(3, 7, 0);
         w.tiles.insert((5, 64, 4), TileData::Chest(ch));
         w.set_block_id(5, 64, 4, 54);
-        let mut sign = crate::tile_entity_sign::sign_create();
+        let mut sign = crate::tile_entity::sign::sign_create();
         sign.lines[0][..5].copy_from_slice(b"hello");
         w.tiles.insert((6, 64, 4), TileData::Sign(sign));
         w.set_block_id(6, 64, 4, 63);

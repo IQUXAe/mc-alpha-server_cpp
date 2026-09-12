@@ -1,13 +1,13 @@
 //! Mob/animal sensing, targeting, pathing and ticks on [`World`].
 //! Split out of `world.rs`; behavior unchanged.
 
-use crate::entity_ai::{
+use crate::entity::ai::{
      alpha_ai_animal_path_weight, alpha_ai_mob_path_weight, chase_speed, face_run, steer_run,
      wander_pick,
 };
-use crate::entity_living::{HeadingIo, MoveFeedback, alpha_living_fall_damage, living_heading_run};
-use crate::entity_physics::{PushOut, alpha_entity_push};
-use crate::entity_table::{
+use crate::entity::living::{HeadingIo, MoveFeedback, alpha_living_fall_damage, living_heading_run};
+use crate::entity::physics::{PushOut, alpha_entity_push};
+use crate::entity::table::{
     AnimalKind, Entity, EntityId, MobKind, mob_attack_reach, mob_burns_in_daylight,
 };
 use crate::material::Material;

@@ -2,7 +2,7 @@
 //! (mirrors handlePlace + activeBlockOrUseItem).
 //! Split out of `session.rs`; behavior unchanged.
 
-use crate::entity_table::Entity;
+use crate::entity::table::Entity;
 use crate::inventory::FfiItemStack;
 use crate::item_data::{alpha_item_food_heal, alpha_item_max_damage};
 use crate::item_use::alpha_item_food_bite;
@@ -110,9 +110,9 @@ impl PlaySession {
             if s.item_id == 333 && water {
                 // Boat on water: spawn + consume, like C++.
                 let bid = ctx.world.entities.alloc_id();
-                let mut b = crate::entity_table::Body::new(bid, 1.5, 0.6, 0.3);
+                let mut b = crate::entity::table::Body::new(bid, 1.5, 0.6, 0.3);
                 b.set_position(x as f64 + 0.5, y as f64 + 1.5, z as f64 + 0.5);
-                ctx.world.entities.insert(Entity::Boat(crate::entity_table::BoatEnt {
+                ctx.world.entities.insert(Entity::Boat(crate::entity::table::BoatEnt {
                     body: b,
                     time_since_hit: 0,
                     damage_taken: 0,
@@ -312,7 +312,7 @@ impl PlaySession {
                     if bite.heal > 0 && !p.living.body.dead && p.living.health > 0 {
                         p.living.hurt_resist = p.living.max_hurt_resist / 2;
                     }
-                    p.living.health = crate::entity_living::alpha_living_heal(
+                    p.living.health = crate::entity::living::alpha_living_heal(
                         p.living.health,
                         p.living.max_health,
                         bite.heal,
@@ -365,9 +365,9 @@ impl PlaySession {
                 return false;
             }
             let bid = ctx.world.entities.alloc_id();
-            let mut b = crate::entity_table::Body::new(bid, 1.5, 0.6, 0.3);
+            let mut b = crate::entity::table::Body::new(bid, 1.5, 0.6, 0.3);
             b.set_position(hx as f64 + 0.5, hy as f64 + 1.5, hz as f64 + 0.5);
-            ctx.world.entities.insert(Entity::Boat(crate::entity_table::BoatEnt {
+            ctx.world.entities.insert(Entity::Boat(crate::entity::table::BoatEnt {
                 body: b,
                 time_since_hit: 0,
                 damage_taken: 0,

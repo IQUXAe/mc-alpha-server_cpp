@@ -152,7 +152,7 @@ impl World {
                 continue;
             }
             let tile = self.tiles.entry((lx, ly, lz)).or_insert_with(|| {
-                TileData::Chest(crate::tile_entity_chest::chest_create())
+                TileData::Chest(crate::tile_entity::chest::chest_create())
             });
             if let TileData::Chest(ch) = tile {
                 if slot >= 0 && (slot as usize) < ch.slots.len() {

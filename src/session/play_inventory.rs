@@ -1,7 +1,7 @@
 //! Inventory apply, ghost stacks and sign text on `PlaySession`.
 //! Split out of `session.rs`; behavior unchanged.
 
-use crate::entity_table::Entity;
+use crate::entity::table::Entity;
 use crate::inventory::FfiItemStack;
 use crate::session::play::PlaySession;
 use crate::session::{SessionBroadcast, SessionCtx};
@@ -153,7 +153,7 @@ impl PlaySession {
                 }
                 // Same replace-not-merge rule as chests (vanilla
                 // readFromNBT starts from a fresh bank).
-                s.slots = crate::tile_entity_furnace::furnace_create().slots;
+                s.slots = crate::tile_entity::furnace::furnace_create().slots;
                 if let Some(NbtTag::List(l)) = nbt.map.get("Items") {
                     for elem in &l.elements {
                         if let NbtTag::Compound(im) = elem {
@@ -172,7 +172,7 @@ impl PlaySession {
             TileData::Chest(mut s) => {
                 // Vanilla readFromNBT replaces the whole bank: clear first
                 // so client-removed stacks do not linger server-side.
-                s.slots = crate::tile_entity_chest::chest_create().slots;
+                s.slots = crate::tile_entity::chest::chest_create().slots;
                 if let Some(NbtTag::List(l)) = nbt.map.get("Items") {
                     for elem in &l.elements {
                         if let NbtTag::Compound(im) = elem {

@@ -2,7 +2,7 @@
 //! Split out of `server.rs`; behavior unchanged.
 
 use std::collections::HashMap;
-use crate::entity_table::{Entity, PlayerEnt};
+use crate::entity::table::{Entity, PlayerEnt};
 use crate::network::PacketData;
 use crate::persist::ChunkStore;
 use crate::server::streaming::PlayStream;

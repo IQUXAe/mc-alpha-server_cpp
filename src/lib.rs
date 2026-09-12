@@ -12,20 +12,10 @@
 //! live in `session_packets`, tile rows in `world::tiles`, and each
 //! god-object's tests in adjacent `tests` submodules.
 pub mod block;
-pub mod block_container;
-pub mod block_fire;
-pub mod block_ticks;
-pub mod entity_ai;
-pub mod entity_living;
-pub mod entity_misc;
-pub mod entity_physics;
-pub mod entity_player;
-pub mod entity_table;
+pub mod entity;
 pub mod byte_buffer;
 pub mod inventory;
-pub mod tile_entity_furnace;
-pub mod tile_entity_chest;
-pub mod tile_entity_sign;
+pub mod tile_entity;
 pub mod random;
 pub mod noise;
 pub mod biome;
@@ -39,11 +29,7 @@ pub mod generator;
 pub mod pathfinder;
 pub mod persist;
 pub mod commands;
-pub mod player_inventory;
-pub mod player_combat;
-pub mod player_movement;
-pub mod player_mining;
-pub mod player_digging;
+pub mod player;
 pub mod tracker_math;
 pub mod mob_spawning;
 pub mod server;

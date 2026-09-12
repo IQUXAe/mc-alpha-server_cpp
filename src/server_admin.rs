@@ -17,7 +17,7 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use crate::entity_table::Entity;
+use crate::entity::table::Entity;
 use crate::session::{PlaySession, SessionBroadcast, pkt_chat};
 use crate::world::World;
 
@@ -306,7 +306,7 @@ mod tests {
         assert_eq!(parse_command_double("1_0"), None);
     }
 
-    use crate::entity_table::{Entity, PlayerEnt};
+    use crate::entity::table::{Entity, PlayerEnt};
     use crate::session::{PlaySession, SessionBroadcast};
     use crate::world::World;
 

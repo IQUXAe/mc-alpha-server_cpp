@@ -24,7 +24,7 @@
 pub use crate::session_packets::{pkt_handshake, pkt_kick, pkt_login_response, pkt_chat, pkt_time, pkt_spawn_pos, pkt_health, pkt_teleport, pkt_block_change, pkt_inventory_section, pkt_tile_entity, pkt_respawn, pkt_keepalive, pkt_arm, pkt_pre_chunk, pkt_map_chunk, tile_packet};
 
 use std::collections::HashSet;
-use crate::entity_table::EntityId;
+use crate::entity::table::EntityId;
 use crate::world::World;
 
 pub mod login;

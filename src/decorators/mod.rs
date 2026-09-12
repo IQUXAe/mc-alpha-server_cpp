@@ -7,7 +7,7 @@ use crate::chunk::Chunk;
 use crate::random::JavaRandom;
 use crate::noise::NoiseGeneratorOctaves;
 use crate::biome::BiomeType;
-use crate::block::alpha_block_properties_get;
+use crate::block::table::alpha_block_properties_get;
 use crate::world::material_of;
 use crate::world::{World, is_air_material};
 
@@ -59,7 +59,7 @@ impl<'a> BlockAccess for WorldAccess<'a> {
         let bid = self.get_block_id(x, y, z);
         bid != 0
             && !is_air_material(bid)
-            && crate::block::alpha_block_properties_get(bid as u32).allows_attachment
+            && crate::block::table::alpha_block_properties_get(bid as u32).allows_attachment
     }
     fn is_block_solid(&mut self, x: i32, y: i32, z: i32) -> bool {
         World::is_solid_in(self.chunks, x, y, z)

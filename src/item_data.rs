@@ -12,21 +12,21 @@
 //! Reused, not duplicated:
 //! - `FfiItemStack` comes from `crate::inventory`,
 //! - `max_stack_size` comes from
-//!   `crate::player_inventory::alpha_inventory_max_stack_size`,
+//!   `crate::player::inventory::alpha_inventory_max_stack_size`,
 //! - armor durability comes from
-//!   `crate::player_inventory::alpha_armor_max_damage`,
+//!   `crate::player::inventory::alpha_armor_max_damage`,
 //! - degrade-on-hit logic stays in `crate::inventory::item_stack_damage`,
 //! - weapon-vs-entity numbers stay in
-//!   `crate::player_combat::alpha_combat_get_weapon_damage`,
+//!   `crate::player::combat::alpha_combat_get_weapon_damage`,
 //! - full `getStrVsBlock` / `canHarvestBlock` with material fallback stay in
-//!   `crate::player_mining`.
+//!   `crate::player::mining`.
 //!
 //! World-needing behaviours (`onItemUse`, `onItemRightClick`, boat spawn,
 //! hoe/seed/flint/sign/block placement, soup/food healing via player,
 //! `hitEntity` via entity) are NOT ported here.
 
 use crate::inventory::FfiItemStack;
-use crate::player_inventory::{alpha_armor_max_damage, alpha_inventory_max_stack_size};
+use crate::player::inventory::{alpha_armor_max_damage, alpha_inventory_max_stack_size};
 
 // ---------------------------------------------------------------------------
 // Id table (final `itemID` values, see `Item::initItems` in Item.cpp)
@@ -494,7 +494,7 @@ impl PureItemStack {
 mod tests {
     use super::*;
     use crate::inventory::item_stack_damage;
-    use crate::player_mining::{alpha_mining_can_harvest, alpha_mining_get_str_vs_block};
+    use crate::player::mining::{alpha_mining_can_harvest, alpha_mining_get_str_vs_block};
 
     fn pure(id: i32, count: i32, damage: i32) -> PureItemStack {
         PureItemStack::new(id, count, damage)

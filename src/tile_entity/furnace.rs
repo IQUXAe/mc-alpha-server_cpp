@@ -1,4 +1,4 @@
-use crate::block::{BlockMaterial, alpha_block_properties_get};
+use crate::block::table::{BlockMaterial, alpha_block_properties_get};
 use crate::inventory::FfiItemStack;
 
 pub const SLOT_INPUT: usize = 0;

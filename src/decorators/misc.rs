@@ -1,5 +1,5 @@
 use crate::random::JavaRandom;
-use crate::block::alpha_block_properties_get;
+use crate::block::table::alpha_block_properties_get;
 use crate::world::material_of;
 use super::BlockAccess;
 

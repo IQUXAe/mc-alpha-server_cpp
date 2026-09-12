@@ -15,7 +15,7 @@
 //! - State is a plain `#[repr(C)]` value stored inline in C++
 //!   (no opaque pointer, no extra free function needed).
 
-use crate::player_mining::alpha_mining_check_hardness;
+use crate::player::mining::alpha_mining_check_hardness;
 
 /// Digging state, stored inline on the server side.
 ///

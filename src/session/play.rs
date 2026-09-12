@@ -1,11 +1,11 @@
 //! `PlaySession` core: state, dispatch (`pump`), movement echo, sends.
 //! Split out of `session.rs`; behavior unchanged.
 
-use crate::entity_table::{Entity, EntityId};
+use crate::entity::table::{Entity, EntityId};
 use crate::inventory::FfiItemStack;
 use crate::math_helper::floor_double;
 use crate::network::PacketData;
-use crate::player_digging::{FfiDigState, alpha_dig_state_new};
+use crate::player::digging::{FfiDigState, alpha_dig_state_new};
 use crate::session::{SessionCtx, SessionOutcome};
 use crate::session_packets::{
     pkt_block_change, pkt_inventory_section, pkt_keepalive, pkt_kick, pkt_teleport, tile_packet,

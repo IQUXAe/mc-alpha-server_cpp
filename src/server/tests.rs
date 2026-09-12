@@ -4,7 +4,7 @@
     use std::net::{TcpListener, TcpStream};
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::Duration;
-    use crate::entity_table::{Entity, MobEnt, MobKind};
+    use crate::entity::table::{Entity, MobEnt, MobKind};
     use crate::server_config::ServerConfig;
 
     static TMP: AtomicU64 = AtomicU64::new(0);
@@ -642,7 +642,7 @@
         // Idle furnace with fuel right next to spawn.
         let (fx, fz) = (srv.world.spawn[0], srv.world.spawn[2]);
         srv.world.set_block_id(fx, 64, fz, 61);
-        let mut f = crate::tile_entity_furnace::furnace_create();
+        let mut f = crate::tile_entity::furnace::furnace_create();
         f.slots[0] = crate::inventory::FfiItemStack {
             stack_size: 1,
             animations_to_go: 0,
