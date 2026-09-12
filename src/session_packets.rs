@@ -86,10 +86,10 @@ pub fn pkt_block_change(x: i32, y: i32, z: i32, block_type: u8, meta: u8) -> Vec
 
 fn put_slot(buf: &mut Vec<u8>, s: Option<ItemStack>) {
     match s {
-        Some(v) if v.stack_size > 0 => {
+        Some(v) if v.count > 0 => {
             put_i16(buf, v.item_id as i16);
-            put_i8(buf, v.stack_size as i8);
-            put_i16(buf, v.item_damage as i16);
+            put_i8(buf, v.count as i8);
+            put_i16(buf, v.damage as i16);
         }
         // Vanilla writes empty slots as a bare -1 (2 bytes, no
         // count/damage tail). Anything longer desyncs the stream: the

@@ -416,18 +416,18 @@ mod tests {
         let mut s = ItemStack::new(ITEM_SWORD_WOOD, 1, 31);
         let broke = item_stack_damage(&mut s, 1, max);
         assert!(!broke);
-        assert_eq!(s.item_damage, 32);
+        assert_eq!(s.damage, 32);
         let broke2 = item_stack_damage(&mut s, 1, max);
         assert!(broke2);
-        assert_eq!(s.item_damage, 0);
-        assert_eq!(s.stack_size, 0);
+        assert_eq!(s.damage, 0);
+        assert_eq!(s.count, 0);
 
         let mut plain = ItemStack::new(ITEM_DIAMOND, 1, 0);
         let max_plain = item_max_damage(ITEM_DIAMOND);
         assert_eq!(max_plain, 0);
         let broke3 = item_stack_damage(&mut plain, 100, max_plain);
         assert!(!broke3);
-        assert_eq!(plain.stack_size, 1);
+        assert_eq!(plain.count, 1);
     }
 
     #[test]

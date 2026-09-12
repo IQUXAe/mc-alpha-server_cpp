@@ -266,7 +266,7 @@ impl World {
         if let Some(Entity::Player(p)) = self.entities.get_mut(id) {
             p.armor_carry = res.new_armor_damage_carry;
             for (i, slot) in p.inventory.armor.iter_mut().enumerate() {
-                *slot = if tmp[i].item_id > 0 && tmp[i].stack_size > 0 {
+                *slot = if !tmp[i].is_empty() {
                     Some(tmp[i])
                 } else {
                     None
@@ -300,13 +300,13 @@ impl World {
             p.inventory.crafting = [None; 4];
         }
         for s in stacks {
-            if s.stack_size <= 0 || s.item_id <= 0 {
+            if s.is_empty() {
                 continue;
             }
             let (ra, rb, rc) =
                 (self.rng.next_double(), self.rng.next_double(), self.rng.next_double());
             let v = player_drop_velocity(ra, rb, rc);
-            let eid = self.spawn_item_entity(s.item_id, s.stack_size, s.item_damage, px, py + 0.5, pz);
+            let eid = self.spawn_item_entity(s.item_id, s.count, s.damage, px, py + 0.5, pz);
             if let Some(Entity::Item(e)) = self.entities.get_mut(eid) {
                 e.body.motion = [v.mx, v.my, v.mz];
                 e.pickup_delay = 40;
@@ -324,11 +324,11 @@ impl World {
     ) -> i32 {
         use crate::inventory::ItemStack;
         use crate::player::inventory::inventory_add_item;
-        if stack.stack_size <= 0 {
+        if stack.count <= 0 {
             return 0;
         }
         if stack.item_id <= 0 || stack.item_id >= 32000 {
-            return stack.stack_size;
+            return stack.count;
         }
         match self.entities.get_mut(id) {
             Some(Entity::Player(p)) => {
@@ -338,7 +338,7 @@ impl World {
                 }
                 let rem = inventory_add_item(&mut tmp, &mut stack, 64);
                 for (i, slot) in p.inventory.main.iter_mut().enumerate() {
-                    *slot = if tmp[i].item_id > 0 && tmp[i].stack_size > 0 {
+                    *slot = if !tmp[i].is_empty() {
                         Some(tmp[i])
                     } else {
                         None
@@ -346,7 +346,7 @@ impl World {
                 }
                 rem
             }
-            _ => stack.stack_size,
+            _ => stack.count,
         }
     }
 

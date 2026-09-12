@@ -645,12 +645,12 @@
         w.tick_world();
         // Dirt merged into the held slot, the item row is gone...
         assert_eq!(
-            w.player_held(player).map(|s| (s.item_id, s.stack_size)),
+            w.player_held(player).map(|s| (s.item_id, s.count)),
             Some((3, 5))
         );
         let dirt: i32 = match w.entities.get(player).unwrap() {
             crate::entity::table::Entity::Player(p) => {
-                p.inventory.main.iter().filter_map(|s| *s).map(|s| s.stack_size).sum()
+                p.inventory.main.iter().filter_map(|s| *s).map(|s| s.count).sum()
             }
             _ => unreachable!(),
         };
@@ -1461,7 +1461,7 @@
             w.entities.get(player).unwrap(),
             crate::entity::table::Entity::Player(p)
                 if p.armor_carry == 0
-                    && p.inventory.armor.iter().all(|s| s.map(|x| x.item_damage) == Some(10))
+                    && p.inventory.armor.iter().all(|s| s.map(|x| x.damage) == Some(10))
         ));
     }
 
@@ -1483,7 +1483,7 @@
         assert_eq!(w.player_add_item(player, stk(3, 60, 0)), 0);
         let main: Vec<Option<(i32, i32)>> = match w.entities.get(player).unwrap() {
             crate::entity::table::Entity::Player(p) => {
-                p.inventory.main.iter().take(3).map(|s| s.map(|x| (x.item_id, x.stack_size))).collect()
+                p.inventory.main.iter().take(3).map(|s| s.map(|x| (x.item_id, x.count))).collect()
             }
             _ => unreachable!(),
         };
@@ -1503,7 +1503,7 @@
         if let Some(crate::entity::table::Entity::Player(p)) = w.entities.get_mut(player) {
             p.inventory.current = 2;
         }
-        assert_eq!(w.player_held(player).map(|s| (s.item_id, s.stack_size)), Some((5, 3)));
+        assert_eq!(w.player_held(player).map(|s| (s.item_id, s.count)), Some((5, 3)));
         if let Some(crate::entity::table::Entity::Player(p)) = w.entities.get_mut(player) {
             p.inventory.current = 99;
         }

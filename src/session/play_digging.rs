@@ -132,7 +132,7 @@ impl PlaySession {
                     if wear > 0 {
                         let max = item_max_damage(s.item_id);
                         crate::inventory::item_stack_damage(&mut s, wear, max);
-                        if s.stack_size <= 0 || s.item_damage > max {
+                        if s.count <= 0 || s.damage > max {
                             slot = None;
                         } else {
                             slot = Some(s);

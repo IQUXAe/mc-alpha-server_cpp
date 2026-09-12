@@ -151,7 +151,7 @@ impl PlaySession {
                 if wear > 0 {
                     let max = item_max_damage(s.item_id);
                     crate::inventory::item_stack_damage(&mut s, wear, max);
-                    if s.stack_size <= 0 {
+                    if s.count <= 0 {
                         // A spent ghost clears the fallback (and the held
                         // id); a spent real stack clears its own slot.
                         if self.held_fallback.is_some() {

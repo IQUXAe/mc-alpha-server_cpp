@@ -19,10 +19,6 @@ pub struct FurnaceTickResult {
     pub needs_block_update: bool,
 }
 
-fn slot_empty(s: &ItemStack) -> bool {
-    s.item_id < 0 || s.stack_size <= 0
-}
-
 fn get_smelting_result(item_id: i32) -> i32 {
     match item_id {
         15 => 265,   // Iron Ore -> Iron Ingot
@@ -89,11 +85,11 @@ fn tick_core(state: &mut FurnaceState, fuel: i32) -> FurnaceTickResult {
             state.burn_time = fuel as i16;
             changed = true;
             let fuel_slot = &mut state.slots[SLOT_FUEL];
-            fuel_slot.stack_size -= 1;
-            if fuel_slot.stack_size <= 0 {
+            fuel_slot.count -= 1;
+            if fuel_slot.count <= 0 {
                 fuel_slot.item_id = -1;
-                fuel_slot.stack_size = 0;
-                fuel_slot.item_damage = 0;
+                fuel_slot.count = 0;
+                fuel_slot.damage = 0;
             }
         }
     }
@@ -119,7 +115,7 @@ fn tick_core(state: &mut FurnaceState, fuel: i32) -> FurnaceTickResult {
 
 fn can_smelt(state: &FurnaceState) -> bool {
     let input = &state.slots[SLOT_INPUT];
-    if slot_empty(input) {
+    if input.is_empty() {
         return false;
     }
     let result_id = get_smelting_result(input.item_id);
@@ -128,13 +124,13 @@ fn can_smelt(state: &FurnaceState) -> bool {
         return false;
     }
     let output = &state.slots[SLOT_OUTPUT];
-    if slot_empty(output) {
+    if output.is_empty() {
         return true;
     }
     if output.item_id != result_id {
         return false;
     }
-    output.stack_size < 64
+    output.count < 64
 }
 
 fn smelt_item(state: &mut FurnaceState) {
@@ -145,22 +141,22 @@ fn smelt_item(state: &mut FurnaceState) {
 
     {
         let output = &mut state.slots[SLOT_OUTPUT];
-        if slot_empty(output) {
+        if output.is_empty() {
             output.item_id = result_id;
-            output.stack_size = 1;
-            output.item_damage = 0;
+            output.count = 1;
+            output.damage = 0;
         } else if output.item_id == result_id {
-            output.stack_size += 1;
+            output.count += 1;
         }
     }
 
     {
         let input = &mut state.slots[SLOT_INPUT];
-        input.stack_size -= 1;
-        if input.stack_size <= 0 {
+        input.count -= 1;
+        if input.count <= 0 {
             input.item_id = -1;
-            input.stack_size = 0;
-            input.item_damage = 0;
+            input.count = 0;
+            input.damage = 0;
         }
     }
 }
@@ -213,7 +209,7 @@ mod tests {
         assert!(r.needs_block_update);
         assert_eq!(s.burn_time, 300);
         assert_eq!(s.current_item_burn_time, 300);
-        assert_eq!(s.slots[SLOT_FUEL].stack_size, 1);
+        assert_eq!(s.slots[SLOT_FUEL].count, 1);
         // Already burning: no block update, burn counts down.
         let r = furnace_tick_native(&mut s);
         assert!(!r.needs_block_update);
@@ -236,7 +232,7 @@ mod tests {
             furnace_tick_native(&mut s);
         }
         assert_eq!(s.slots[SLOT_OUTPUT].item_id, 1);
-        assert_eq!(s.slots[SLOT_OUTPUT].stack_size, 1);
+        assert_eq!(s.slots[SLOT_OUTPUT].count, 1);
         assert_eq!(s.slots[SLOT_INPUT].item_id, -1);
         // Coal still burning (1600 - 200).
         assert!(s.burn_time > 0);

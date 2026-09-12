@@ -450,7 +450,7 @@
         assert_eq!(pump_match(&mut client, &mut srv, &|p| p.0 == 22).0, 22);
         assert_eq!(pump_match(&mut client, &mut srv, &|p| p.0 == 5).0, 5);
         let dirt: i32 = match srv.world.entities.get(eid).unwrap() {
-            Entity::Player(p) => p.inventory.main.iter().filter_map(|s| *s).map(|s| s.stack_size).sum(),
+            Entity::Player(p) => p.inventory.main.iter().filter_map(|s| *s).map(|s| s.count).sum(),
             _ => unreachable!(),
         };
         assert_eq!(dirt, 5);

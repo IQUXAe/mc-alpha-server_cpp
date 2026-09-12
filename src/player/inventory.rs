@@ -82,15 +82,15 @@ pub fn armor_base_points(item_id: i32) -> i32 {
 }
 
 /// Adds items to an array of inventory slots (e.g. 36 slots).
-/// Updates `slots` in place and decreases `stack.stack_size`.
-/// Returns remaining `stack_size` (0 if completely added).
+/// Updates `slots` in place and decreases `stack.count`.
+/// Returns remaining `count` (0 if completely added).
 /// Fills partial stacks first, then empty slots.
 pub fn inventory_add_item(
     slots: &mut [ItemStack],
     incoming: &mut ItemStack,
     stack_limit: i32,
 ) -> i32 {
-    if incoming.stack_size <= 0 || incoming.item_id <= 0 {
+    if incoming.is_empty() {
         return 0;
     }
     let slots_slice = slots;
@@ -100,14 +100,14 @@ pub fn inventory_add_item(
     let eff_limit = if stack_limit > 0 { stack_limit } else { 64 };
 
     if stackable {
-        while incoming.stack_size > 0 {
+        while incoming.count > 0 {
             // Find first partial matching slot
             let mut target_slot: Option<usize> = None;
             for (i, slot) in slots_slice.iter().enumerate() {
                 if slot.item_id == incoming.item_id
-                    && slot.item_damage == incoming.item_damage
-                    && slot.stack_size < max_stack
-                    && slot.stack_size < eff_limit
+                    && slot.damage == incoming.damage
+                    && slot.count < max_stack
+                    && slot.count < eff_limit
                 {
                     target_slot = Some(i);
                     break;
@@ -117,7 +117,7 @@ pub fn inventory_add_item(
             // If no matching slot found, find first empty slot
             if target_slot.is_none() {
                 for (i, slot) in slots_slice.iter().enumerate() {
-                    if slot.item_id <= 0 || slot.stack_size <= 0 {
+                    if slot.is_empty() {
                         target_slot = Some(i);
                         break;
                     }
@@ -129,30 +129,29 @@ pub fn inventory_add_item(
             };
 
             let slot = &mut slots_slice[slot_idx];
-            if slot.item_id <= 0 || slot.stack_size <= 0 {
+            if slot.is_empty() {
                 slot.item_id = incoming.item_id;
-                slot.item_damage = incoming.item_damage;
-                slot.stack_size = 0;
+                slot.damage = incoming.damage;
+                slot.count = 0;
             }
 
             let limit = std::cmp::min(max_stack, eff_limit);
-            let free_space = limit - slot.stack_size;
-            let amount_to_add = std::cmp::min(incoming.stack_size, free_space);
+            let free_space = limit - slot.count;
+            let amount_to_add = std::cmp::min(incoming.count, free_space);
 
             if amount_to_add > 0 {
-                incoming.stack_size -= amount_to_add;
-                slot.stack_size += amount_to_add;
-                slot.animations_to_go = 5;
+                incoming.count -= amount_to_add;
+                slot.count += amount_to_add;
             } else {
                 break;
             }
         }
     } else {
         // Non-stackable: place 1 into each empty slot
-        while incoming.stack_size > 0 {
+        while incoming.count > 0 {
             let mut target_slot: Option<usize> = None;
             for (i, slot) in slots_slice.iter().enumerate() {
-                if slot.item_id <= 0 || slot.stack_size <= 0 {
+                if slot.is_empty() {
                     target_slot = Some(i);
                     break;
                 }
@@ -164,14 +163,13 @@ pub fn inventory_add_item(
 
             let slot = &mut slots_slice[slot_idx];
             slot.item_id = incoming.item_id;
-            slot.item_damage = incoming.item_damage;
-            slot.stack_size = 1;
-            slot.animations_to_go = 5;
-            incoming.stack_size -= 1;
+            slot.damage = incoming.damage;
+            slot.count = 1;
+            incoming.count -= 1;
         }
     }
 
-    incoming.stack_size
+    incoming.count
 }
 
 /// Calculates total armor defense value from worn armor pieces (0-20 points).
@@ -183,7 +181,7 @@ pub fn inventory_calc_armor(armor: &[ItemStack]) -> i32 {
     let mut remaining_durability = 0;
 
     for item in armor {
-        if item.item_id <= 0 || item.stack_size <= 0 {
+        if item.is_empty() {
             continue;
         }
 
@@ -199,7 +197,7 @@ pub fn inventory_calc_armor(armor: &[ItemStack]) -> i32 {
 
         total_reduction += base_points;
         total_durability += max_damage;
-        let rem = (max_damage - item.item_damage).max(0);
+        let rem = (max_damage - item.damage).max(0);
         remaining_durability += rem;
     }
 
@@ -216,7 +214,7 @@ pub fn inventory_damage_armor(armor: &mut [ItemStack], damage_amount: i32) {
         return;
     }
     for item in armor.iter_mut() {
-        if item.item_id <= 0 || item.stack_size <= 0 {
+        if item.is_empty() {
             continue;
         }
 
@@ -225,16 +223,15 @@ pub fn inventory_damage_armor(armor: &mut [ItemStack], damage_amount: i32) {
             continue;
         }
 
-        item.item_damage += damage_amount;
-        if item.item_damage > max_damage {
-            item.stack_size -= 1;
-            if item.stack_size <= 0 {
+        item.damage += damage_amount;
+        if item.damage > max_damage {
+            item.count -= 1;
+            if item.count <= 0 {
                 item.item_id = 0;
-                item.stack_size = 0;
-                item.item_damage = 0;
-                item.animations_to_go = 0;
+                item.count = 0;
+                item.damage = 0;
             } else {
-                item.item_damage = 0;
+                item.damage = 0;
             }
         }
     }
@@ -242,19 +239,14 @@ pub fn inventory_damage_armor(armor: &mut [ItemStack], damage_amount: i32) {
 
 /// Resolves crafting recipes in the player's 2x2 crafting grid.
 /// `grid` contains 4 slots: [0]=(0,0), [1]=(1,0), [2]=(0,1), [3]=(1,1).
-/// Returns `ItemStack` containing crafted output or empty item (item_id=0, stack_size=0).
+/// Returns `ItemStack` containing crafted output or empty item.
 pub fn inventory_craft_2x2(grid: &[ItemStack; 4]) -> ItemStack {
-    let empty = ItemStack {
-        item_id: 0,
-        stack_size: 0,
-        item_damage: 0,
-        animations_to_go: 0,
-    };
+    let empty = ItemStack::empty();
 
     let g = grid;
 
     let id = |idx: usize| -> i32 {
-        if g[idx].item_id > 0 && g[idx].stack_size > 0 {
+        if !g[idx].is_empty() {
             g[idx].item_id
         } else {
             0
@@ -268,12 +260,7 @@ pub fn inventory_craft_2x2(grid: &[ItemStack; 4]) -> ItemStack {
         // Wood (17) -> 4 Planks (5)
         for i in 0..4 {
             if id(i) == 17 {
-                return ItemStack {
-                    item_id: 5,
-                    stack_size: 4,
-                    item_damage: 0,
-                    animations_to_go: 0,
-                };
+                return ItemStack::new(5, 4, 0);
             }
         }
     }
@@ -285,48 +272,28 @@ pub fn inventory_craft_2x2(grid: &[ItemStack; 4]) -> ItemStack {
         if (id(0) == 5 && id(2) == 5 && id(1) == 0 && id(3) == 0)
             || (id(1) == 5 && id(3) == 5 && id(0) == 0 && id(2) == 0)
         {
-            return ItemStack {
-                item_id: 280,
-                stack_size: 4,
-                item_damage: 0,
-                animations_to_go: 0,
-            };
+            return ItemStack::new(280, 4, 0);
         }
 
         // Coal over stick: 4 torches (id 50)
         if (id(0) == 263 && id(2) == 280 && id(1) == 0 && id(3) == 0)
             || (id(1) == 263 && id(3) == 280 && id(0) == 0 && id(2) == 0)
         {
-            return ItemStack {
-                item_id: 50,
-                stack_size: 4,
-                item_damage: 0,
-                animations_to_go: 0,
-            };
+            return ItemStack::new(50, 4, 0);
         }
 
         // Redstone over stick: 1 redstone torch (id 76)
         if (id(0) == 331 && id(2) == 280 && id(1) == 0 && id(3) == 0)
             || (id(1) == 331 && id(3) == 280 && id(0) == 0 && id(2) == 0)
         {
-            return ItemStack {
-                item_id: 76,
-                stack_size: 1,
-                item_damage: 0,
-                animations_to_go: 0,
-            };
+            return ItemStack::new(76, 1, 0);
         }
 
         // Lever: stick (280) over cobblestone (4)
         if (id(0) == 280 && id(2) == 4 && id(1) == 0 && id(3) == 0)
             || (id(1) == 280 && id(3) == 4 && id(0) == 0 && id(2) == 0)
         {
-            return ItemStack {
-                item_id: 69,
-                stack_size: 1,
-                item_damage: 0,
-                animations_to_go: 0,
-            };
+            return ItemStack::new(69, 1, 0);
         }
 
         // Flint & Steel: diagonal only ("A "/" B" + mirror) — Java CraftingManager.
@@ -334,12 +301,7 @@ pub fn inventory_craft_2x2(grid: &[ItemStack; 4]) -> ItemStack {
         if (id(0) == 265 && id(1) == 0 && id(2) == 0 && id(3) == 318)
             || (id(0) == 0 && id(1) == 265 && id(2) == 318 && id(3) == 0)
         {
-            return ItemStack {
-                item_id: 259,
-                stack_size: 1,
-                item_damage: 0,
-                animations_to_go: 0,
-            };
+            return ItemStack::new(259, 1, 0);
         }
 
         // NOTE: pressure plates ("###") and buttons need a 3x3 workbench in
@@ -350,24 +312,14 @@ pub fn inventory_craft_2x2(grid: &[ItemStack; 4]) -> ItemStack {
         if (id(0) == 1 && id(2) == 1 && id(1) == 0 && id(3) == 0)
             || (id(1) == 1 && id(3) == 1 && id(0) == 0 && id(2) == 0)
         {
-            return ItemStack {
-                item_id: 77,
-                stack_size: 1,
-                item_damage: 0,
-                animations_to_go: 0,
-            };
+            return ItemStack::new(77, 1, 0);
         }
 
         // Jack-o'-lantern: pumpkin (86) over torch (50)
         if (id(0) == 86 && id(2) == 50 && id(1) == 0 && id(3) == 0)
             || (id(1) == 86 && id(3) == 50 && id(0) == 0 && id(2) == 0)
         {
-            return ItemStack {
-                item_id: 91,
-                stack_size: 1,
-                item_damage: 0,
-                animations_to_go: 0,
-            };
+            return ItemStack::new(91, 1, 0);
         }
     }
 
@@ -375,42 +327,22 @@ pub fn inventory_craft_2x2(grid: &[ItemStack; 4]) -> ItemStack {
     if count_items == 4 {
         // 4 Planks -> 1 Workbench (58)
         if id(0) == 5 && id(1) == 5 && id(2) == 5 && id(3) == 5 {
-            return ItemStack {
-                item_id: 58,
-                stack_size: 1,
-                item_damage: 0,
-                animations_to_go: 0,
-            };
+            return ItemStack::new(58, 1, 0);
         }
 
         // 4 Snowballs (332) -> 1 Snow block (80)
         if id(0) == 332 && id(1) == 332 && id(2) == 332 && id(3) == 332 {
-            return ItemStack {
-                item_id: 80,
-                stack_size: 1,
-                item_damage: 0,
-                animations_to_go: 0,
-            };
+            return ItemStack::new(80, 1, 0);
         }
 
         // 4 Clay (337) -> 1 Clay block (82)
         if id(0) == 337 && id(1) == 337 && id(2) == 337 && id(3) == 337 {
-            return ItemStack {
-                item_id: 82,
-                stack_size: 1,
-                item_damage: 0,
-                animations_to_go: 0,
-            };
+            return ItemStack::new(82, 1, 0);
         }
 
         // 4 Bricks (336) -> 1 Brick block (45)
         if id(0) == 336 && id(1) == 336 && id(2) == 336 && id(3) == 336 {
-            return ItemStack {
-                item_id: 45,
-                stack_size: 1,
-                item_damage: 0,
-                animations_to_go: 0,
-            };
+            return ItemStack::new(45, 1, 0);
         }
     }
 
@@ -420,13 +352,12 @@ pub fn inventory_craft_2x2(grid: &[ItemStack; 4]) -> ItemStack {
 /// Decreases stack sizes of crafting grid items by 1 after a successful craft.
 pub fn inventory_consume_craft_2x2(g: &mut [ItemStack; 4]) {
     for item in g.iter_mut() {
-        if item.item_id > 0 && item.stack_size > 0 {
-            item.stack_size -= 1;
-            if item.stack_size <= 0 {
+        if !item.is_empty() {
+            item.count -= 1;
+            if item.count <= 0 {
                 item.item_id = 0;
-                item.stack_size = 0;
-                item.item_damage = 0;
-                item.animations_to_go = 0;
+                item.count = 0;
+                item.damage = 0;
             }
         }
     }
@@ -439,45 +370,45 @@ mod tests {
     #[test]
     fn test_inventory_add_item_stackable() {
         let mut slots = vec![
-            ItemStack { item_id: 0, stack_size: 0, item_damage: 0, animations_to_go: 0 };
+            ItemStack::empty();
             36
         ];
-        slots[0] = ItemStack { item_id: 1, stack_size: 50, item_damage: 0, animations_to_go: 0 };
+        slots[0] = ItemStack::new(1, 50, 0);
 
-        let mut incoming = ItemStack { item_id: 1, stack_size: 20, item_damage: 0, animations_to_go: 0 };
+        let mut incoming = ItemStack::new(1, 20, 0);
         let rem = inventory_add_item(&mut slots, &mut incoming, 64);
 
         assert_eq!(rem, 0);
-        assert_eq!(incoming.stack_size, 0);
-        assert_eq!(slots[0].stack_size, 64);
+        assert_eq!(incoming.count, 0);
+        assert_eq!(slots[0].count, 64);
         assert_eq!(slots[1].item_id, 1);
-        assert_eq!(slots[1].stack_size, 6);
+        assert_eq!(slots[1].count, 6);
     }
 
     #[test]
     fn test_inventory_add_item_non_stackable() {
         let mut slots = vec![
-            ItemStack { item_id: 0, stack_size: 0, item_damage: 0, animations_to_go: 0 };
+            ItemStack::empty();
             36
         ];
 
-        let mut incoming = ItemStack { item_id: 276, stack_size: 2, item_damage: 0, animations_to_go: 0 }; // Diamond sword
+        let mut incoming = ItemStack::new(276, 2, 0); // Diamond sword
         let rem = inventory_add_item(&mut slots, &mut incoming, 64);
 
         assert_eq!(rem, 0);
         assert_eq!(slots[0].item_id, 276);
-        assert_eq!(slots[0].stack_size, 1);
+        assert_eq!(slots[0].count, 1);
         assert_eq!(slots[1].item_id, 276);
-        assert_eq!(slots[1].stack_size, 1);
+        assert_eq!(slots[1].count, 1);
     }
 
     #[test]
     fn test_armor_points_full_diamond() {
         let armor = vec![
-            ItemStack { item_id: 310, stack_size: 1, item_damage: 0, animations_to_go: 0 }, // Diamond helmet (3)
-            ItemStack { item_id: 311, stack_size: 1, item_damage: 0, animations_to_go: 0 }, // Diamond chest (8)
-            ItemStack { item_id: 312, stack_size: 1, item_damage: 0, animations_to_go: 0 }, // Diamond legs (6)
-            ItemStack { item_id: 313, stack_size: 1, item_damage: 0, animations_to_go: 0 }, // Diamond boots (3)
+            ItemStack::new(310, 1, 0), // Diamond helmet (3)
+            ItemStack::new(311, 1, 0), // Diamond chest (8)
+            ItemStack::new(312, 1, 0), // Diamond legs (6)
+            ItemStack::new(313, 1, 0), // Diamond boots (3)
         ];
         // Total base reduction: 3 + 8 + 6 + 3 = 20 points
         let pts = inventory_calc_armor(&armor);
@@ -487,12 +418,12 @@ mod tests {
     #[test]
     fn test_armor_degradation_and_breakage() {
         let mut armor = vec![
-            ItemStack { item_id: 298, stack_size: 1, item_damage: 30, animations_to_go: 0 }, // Leather helmet max 33
+            ItemStack::new(298, 1, 30), // Leather helmet max 33
         ];
 
         inventory_damage_armor(&mut armor, 5);
         // 30 + 5 = 35 > 33 -> broken!
-        assert_eq!(armor[0].stack_size, 0);
+        assert_eq!(armor[0].count, 0);
         assert_eq!(armor[0].item_id, 0);
     }
 
@@ -500,25 +431,25 @@ mod tests {
     fn test_2x2_crafting_recipes() {
         // Wood to Planks
         let grid = [
-            ItemStack { item_id: 17, stack_size: 1, item_damage: 0, animations_to_go: 0 },
-            ItemStack { item_id: 0, stack_size: 0, item_damage: 0, animations_to_go: 0 },
-            ItemStack { item_id: 0, stack_size: 0, item_damage: 0, animations_to_go: 0 },
-            ItemStack { item_id: 0, stack_size: 0, item_damage: 0, animations_to_go: 0 },
+            ItemStack::new(17, 1, 0),
+            ItemStack::empty(),
+            ItemStack::empty(),
+            ItemStack::empty(),
         ];
         let out = inventory_craft_2x2(&grid);
         assert_eq!(out.item_id, 5);
-        assert_eq!(out.stack_size, 4);
+        assert_eq!(out.count, 4);
 
         // 4 Planks to Workbench
         let grid_wb = [
-            ItemStack { item_id: 5, stack_size: 1, item_damage: 0, animations_to_go: 0 },
-            ItemStack { item_id: 5, stack_size: 1, item_damage: 0, animations_to_go: 0 },
-            ItemStack { item_id: 5, stack_size: 1, item_damage: 0, animations_to_go: 0 },
-            ItemStack { item_id: 5, stack_size: 1, item_damage: 0, animations_to_go: 0 },
+            ItemStack::new(5, 1, 0),
+            ItemStack::new(5, 1, 0),
+            ItemStack::new(5, 1, 0),
+            ItemStack::new(5, 1, 0),
         ];
         let out_wb = inventory_craft_2x2(&grid_wb);
         assert_eq!(out_wb.item_id, 58);
-        assert_eq!(out_wb.stack_size, 1);
+        assert_eq!(out_wb.count, 1);
     }
 
     #[test]

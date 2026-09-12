@@ -199,8 +199,8 @@ fn rot_list(yaw: f32, pitch: f32) -> NbtTag {
 
 fn write_stack(m: &mut BTreeMap<String, NbtTag>, s: &ItemStack) {
     m.insert("id".to_string(), NbtTag::Short(s.item_id as i16));
-    m.insert("Count".to_string(), NbtTag::Byte(s.stack_size as i8));
-    m.insert("Damage".to_string(), NbtTag::Short(s.item_damage as i16));
+    m.insert("Count".to_string(), NbtTag::Byte(s.count as i8));
+    m.insert("Damage".to_string(), NbtTag::Short(s.damage as i16));
 }
 
 pub(crate) fn read_stack(m: &BTreeMap<String, NbtTag>) -> ItemStack {
@@ -413,7 +413,7 @@ pub(crate) fn tile_nbt(x: i32, y: i32, z: i32, tile: &TileData) -> NbtCompound {
             m.insert("ItemBurnTime".to_string(), NbtTag::Short(s.current_item_burn_time));
             let mut items = Vec::new();
             for (i, slot) in s.slots.iter().enumerate() {
-                if slot.stack_size > 0 {
+                if slot.count > 0 {
                     let mut im = BTreeMap::new();
                     write_stack(&mut im, slot);
                     im.insert("Slot".to_string(), NbtTag::Byte(i as i8));
@@ -426,7 +426,7 @@ pub(crate) fn tile_nbt(x: i32, y: i32, z: i32, tile: &TileData) -> NbtCompound {
             m.insert("id".to_string(), NbtTag::String("Chest".to_string()));
             let mut items = Vec::new();
             for (i, slot) in s.slots.iter().enumerate() {
-                if slot.stack_size > 0 {
+                if slot.count > 0 {
                     let mut im = BTreeMap::new();
                     write_stack(&mut im, slot);
                     im.insert("Slot".to_string(), NbtTag::Byte(i as i8));
@@ -711,7 +711,7 @@ pub fn encode_player(world: &World, id: crate::entity::table::EntityId) -> Optio
     let mut push_bank = |bank: &[Option<ItemStack>], base: i32| {
         for (i, slot) in bank.iter().enumerate() {
             if let Some(s) = slot {
-                if s.stack_size > 0 {
+                if s.count > 0 {
                     let mut im = BTreeMap::new();
                     im.insert("Slot".to_string(), NbtTag::Byte((base + i as i32) as i8));
                     write_stack(&mut im, s);
@@ -756,7 +756,7 @@ pub fn decode_player(bytes: &[u8], username: &str) -> Option<DecodedPlayer> {
             if let NbtTag::Compound(im) = elem {
                 let slot = get_byte(&im.map, "Slot") as u8;
                 let stack = read_stack(&im.map);
-                if stack.stack_size <= 0 {
+                if stack.count <= 0 {
                     continue;
                 }
                 if slot < 36 {
@@ -1039,7 +1039,7 @@ mod tests {
         assert_eq!(w2.get_block_id(3, 64, 4), 50);
         assert_eq!(w2.get_block_meta(3, 64, 4), 5);
         assert!(matches!(w2.tiles.get(&(4, 64, 4)), Some(TileData::Furnace(f)) if f.burn_time == 40 && f.slots[0].item_id == 15));
-        assert!(matches!(w2.tiles.get(&(5, 64, 4)), Some(TileData::Chest(c)) if c.slots[0].stack_size == 7));
+        assert!(matches!(w2.tiles.get(&(5, 64, 4)), Some(TileData::Chest(c)) if c.slots[0].count == 7));
         assert!(matches!(w2.tiles.get(&(6, 64, 4)), Some(TileData::Sign(_))));
         // Entities thawed live with state.
         let mut sheep_ok = false;
@@ -1112,9 +1112,9 @@ mod tests {
         };
         assert_eq!(health, 17);
         assert_eq!(score, 42);
-        assert_eq!(dirt.map(|s| (s.item_id, s.stack_size)), Some((3, 10)));
-        assert_eq!(helm.map(|s| (s.item_id, s.item_damage)), Some((306, 5)));
-        assert_eq!(sticks.map(|s| (s.item_id, s.stack_size)), Some((280, 4)));
+        assert_eq!(dirt.map(|s| (s.item_id, s.count)), Some((3, 10)));
+        assert_eq!(helm.map(|s| (s.item_id, s.damage)), Some((306, 5)));
+        assert_eq!(sticks.map(|s| (s.item_id, s.count)), Some((280, 4)));
         // Held selection rides the file like C++ savedHeldItemId.
         assert_eq!(
             match w2.entities.get(nid).unwrap() {

@@ -162,7 +162,7 @@
         }
         assert_eq!(w.get_block_id(3, 64, 4), 0);
         let dmg = match w.entities.get(player).unwrap() {
-            Entity::Player(p) => p.inventory.main[0].map(|s| s.item_damage),
+            Entity::Player(p) => p.inventory.main[0].map(|s| s.damage),
             _ => unreachable!(),
         };
         assert!(dmg.unwrap_or(0) > 0, "stone pick should wear, dmg={dmg:?}");
@@ -224,7 +224,7 @@
         );
         assert_eq!(w.get_block_id(3, 64, 4), 3);
         let count = match w.entities.get(player).unwrap() {
-            Entity::Player(p) => p.inventory.main[0].map(|s| s.stack_size),
+            Entity::Player(p) => p.inventory.main[0].map(|s| s.count),
             _ => unreachable!(),
         };
         assert_eq!(count, Some(9));
@@ -251,7 +251,7 @@
         );
         assert_eq!(health_of(&w, player), 19);
         let count = match w.entities.get(player).unwrap() {
-            Entity::Player(p) => p.inventory.main[0].map(|s| s.stack_size),
+            Entity::Player(p) => p.inventory.main[0].map(|s| s.count),
             _ => unreachable!(),
         };
         assert_eq!(count, Some(2));
@@ -559,7 +559,7 @@
             })
             .is_none());
         let kept = match w.entities.get(player).unwrap() {
-            Entity::Player(p) => p.inventory.main[35].map(|s| (s.item_id, s.stack_size)),
+            Entity::Player(p) => p.inventory.main[35].map(|s| (s.item_id, s.count)),
             _ => unreachable!(),
         };
         assert_eq!(kept, Some((3, 5)));

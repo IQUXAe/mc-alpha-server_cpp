@@ -17,7 +17,7 @@ use crate::session_packets::pkt_health;
 impl PlaySession {
     /// Write a mutated stack into the real current slot (air-use path).
     fn write_back_current(&mut self, ctx: &mut SessionCtx, s: ItemStack) {
-        let live = s.stack_size > 0 && s.item_id > 0;
+        let live = !s.is_empty();
         // Ghost fallback shadows the current slot while active.
         if self.held_fallback.is_some() {
             self.held_fallback = if live { Some(s) } else { None };
@@ -32,7 +32,7 @@ impl PlaySession {
         }
         if let Some(Entity::Player(p)) = ctx.world.entities.get_mut(self.player) {
             p.inventory.main[cur as usize] =
-                if s.stack_size > 0 && s.item_id > 0 { Some(s) } else { None };
+                if !s.is_empty() { Some(s) } else { None };
         }
     }
 }
@@ -80,7 +80,7 @@ impl PlaySession {
         let mut stack_slot: Option<usize> = None;
         if item_id >= 0 {
             if let Some(s) = self.selected_stack(ctx.world) {
-                if s.item_id == item_id as i32 && s.stack_size > 0 {
+                if s.item_id == item_id as i32 && s.count > 0 {
                     stack = Some(s);
                     stack_slot = match ctx.world.entities.get(me) {
                         Some(Entity::Player(p)) => {
@@ -95,7 +95,7 @@ impl PlaySession {
                 if let Some(Entity::Player(p)) = ctx.world.entities.get(me) {
                     for (i, slot) in p.inventory.main.iter().enumerate() {
                         if let Some(s) = slot {
-                            if s.item_id == item_id as i32 && s.stack_size > 0 {
+                            if s.item_id == item_id as i32 && s.count > 0 {
                                 stack = Some(*s);
                                 stack_slot = Some(i);
                                 break;
@@ -118,8 +118,8 @@ impl PlaySession {
                     damage_taken: 0,
                     forward_dir: 1,
                 }));
-                if s.stack_size > 0 {
-                    s.stack_size -= 1;
+                if s.count > 0 {
+                    s.count -= 1;
                 }
                 self.write_stack_slot(ctx, stack_slot, s);
             } else if matches!(clicked, 54 | 58 | 61 | 62) {
@@ -139,7 +139,7 @@ impl PlaySession {
         if let Some(Entity::Player(p)) = ctx.world.entities.get_mut(me) {
             for slot in p.inventory.main.iter_mut() {
                 if let Some(s) = slot {
-                    if s.stack_size <= 0 {
+                    if s.count <= 0 {
                         *slot = None;
                     }
                 }
@@ -164,7 +164,7 @@ impl PlaySession {
     /// Write a mutated held stack back to its slot (or the fallback copy
     /// while a ghost is active, so real slot contents are never shadowed).
     fn write_stack_slot(&mut self, ctx: &mut SessionCtx, slot: Option<usize>, s: ItemStack) {
-        let live = s.stack_size > 0 && s.item_id > 0;
+        let live = !s.is_empty();
         if self.held_fallback.is_some() {
             self.held_fallback = if live { Some(s) } else { None };
             return;
@@ -221,7 +221,7 @@ impl PlaySession {
         if clicked > 0 && matches!(clicked, 54 | 58 | 61 | 62) {
             return self.activated_block(ctx, clicked, x, y, z);
         }
-        if s.stack_size <= 0 {
+        if s.count <= 0 {
             return false;
         }
         let me = self.player;
@@ -245,18 +245,18 @@ impl PlaySession {
                 } else if !item_seeds_use(&mut u, x, y, z, side) {
                     false
                 } else {
-                    if s.stack_size > 0 {
-                        s.stack_size -= 1;
+                    if s.count > 0 {
+                        s.count -= 1;
                     }
                     true
                 }
             }
             259 => {
                 let max = item_max_damage(s.item_id);
-                let out = item_flint_use(&mut u, s.item_damage, max, x, y, z, side);
-                s.item_damage = out.new_damage;
+                let out = item_flint_use(&mut u, s.damage, max, x, y, z, side);
+                s.damage = out.new_damage;
                 if out.broke {
-                    s.stack_size = 0;
+                    s.count = 0;
                 }
                 true
             }
@@ -264,20 +264,20 @@ impl PlaySession {
                 if !item_sign_use(&mut u, x, y, z, side, yaw) {
                     false
                 } else {
-                    if s.stack_size > 0 {
-                        s.stack_size -= 1;
+                    if s.count > 0 {
+                        s.count -= 1;
                     }
                     true
                 }
             }
             333 => false,
             1..=255 => {
-                if !item_block_use(&mut u, s.item_id as u8, s.stack_size, x, y, z, side, yaw)
+                if !item_block_use(&mut u, s.item_id as u8, s.count, x, y, z, side, yaw)
                 {
                     false
                 } else {
-                    if s.stack_size > 0 {
-                        s.stack_size -= 1;
+                    if s.count > 0 {
+                        s.count -= 1;
                     }
                     true
                 }
@@ -294,13 +294,13 @@ impl PlaySession {
         let me = self.player;
         let heal = item_food_heal(s.item_id);
         if heal > 0 {
-            let bite = item_food_bite(s.stack_size, heal);
+            let bite = item_food_bite(s.count, heal);
             if s.item_id == 282 {
                 s.item_id = 281;
-                s.stack_size = 1;
-                s.item_damage = 0;
+                s.count = 1;
+                s.damage = 0;
             } else {
-                s.stack_size = bite.new_count;
+                s.count = bite.new_count;
             }
             if bite.heal > 0 {
                 if let Some(Entity::Player(p)) = ctx.world.entities.get_mut(me) {
@@ -360,8 +360,8 @@ impl PlaySession {
                 damage_taken: 0,
                 forward_dir: 1,
             }));
-            if s.stack_size > 0 {
-                s.stack_size -= 1;
+            if s.count > 0 {
+                s.count -= 1;
             }
             self.write_back_current(ctx, s);
             self.send_inventory(ctx.world);

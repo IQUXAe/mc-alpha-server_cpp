@@ -1,14 +1,13 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ItemStack {
-    pub stack_size: i32,
-    pub animations_to_go: i32,
+    pub count: i32,
     pub item_id: i32,
-    pub item_damage: i32,
+    pub damage: i32,
 }
 
 impl ItemStack {
-    pub const fn new(item_id: i32, stack_size: i32, item_damage: i32) -> Self {
-        Self { stack_size, animations_to_go: 0, item_id, item_damage }
+    pub const fn new(item_id: i32, count: i32, damage: i32) -> Self {
+        Self { count, item_id, damage }
     }
 
     /// Empty player-style slot (`item_id: 0`).
@@ -20,6 +19,10 @@ impl ItemStack {
     pub const fn empty_tile() -> Self {
         Self::new(-1, 0, 0)
     }
+
+    pub const fn is_empty(self) -> bool {
+        self.item_id <= 0 || self.count <= 0
+    }
 }
 
 // Returns true if the item broke (stack size changed).
@@ -28,13 +31,13 @@ pub fn item_stack_damage(stack: &mut ItemStack, damage: i32, max_damage: i32) ->
     if max_damage <= 0 {
         return false;
     }
-    stack.item_damage += damage;
-    if stack.item_damage > max_damage {
-        stack.stack_size -= 1;
-        if stack.stack_size < 0 {
-            stack.stack_size = 0;
+    stack.damage += damage;
+    if stack.damage > max_damage {
+        stack.count -= 1;
+        if stack.count < 0 {
+            stack.count = 0;
         }
-        stack.item_damage = 0;
+        stack.damage = 0;
         return true;
     }
     false

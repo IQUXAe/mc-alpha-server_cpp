@@ -306,12 +306,12 @@ impl World {
         match tile {
             TileData::Furnace(s) => {
                 for slot in s.slots {
-                    if slot.stack_size > 0 {
+                    if slot.count > 0 {
                         block_furnace_scatter_stack(
                             &mut *self,
                             slot.item_id,
-                            slot.stack_size,
-                            slot.item_damage,
+                            slot.count,
+                            slot.damage,
                             x,
                             y,
                             z,
@@ -321,12 +321,12 @@ impl World {
             }
             TileData::Chest(s) => {
                 for slot in s.slots {
-                    if slot.stack_size > 0 {
+                    if slot.count > 0 {
                         block_chest_scatter_stack(
                             &mut *self,
                             slot.item_id,
-                            slot.stack_size,
-                            slot.item_damage,
+                            slot.count,
+                            slot.damage,
                             x,
                             y,
                             z,
