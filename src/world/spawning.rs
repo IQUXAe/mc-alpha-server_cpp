@@ -1,118 +1,52 @@
 //! Spawn fitness, hostile/passive spawn passes and the world tick.
-//! Split out of `world.rs`; behavior unchanged. The `SPAWN_*` bridge below
-//! feeds the stateless `mob_spawning` drivers (same thread-local pattern as
-//! `world_shims`; see that file's SAFETY docs).
+//! Split out of `world.rs`; behavior unchanged. `World` implements the
+//! `mob_spawning::SpawnerWorld` trait directly (explicit borrows, no bridge).
+//!
 
 use crate::entity_table::{AnimalKind, Entity, EntityId, MobKind};
 use crate::math_helper::floor_double;
 use crate::world::{GRASS_BLOCK_ID, WORLD_HEIGHT, World, is_air_material};
 use crate::world::tiles::TileData;
 
-// Native spawner bridge: the existing `spawn_pass` drivers stay
-// untouched; these shims feed them the native world's RNG, chunk map,
-// and table through a thread-local pointer (the established `*World`
-// bridge pattern). Draws come from the world's own `JavaRandom`, so the
-// native stream is deterministic per seed but independent of the C++
-// mt19937 stream. No pending queue exists natively: inserts land
-// directly in the table, so no live-pointer workaround is needed.
-thread_local! {
-    static SPAWN_WORLD: std::cell::Cell<*mut World> = std::cell::Cell::new(std::ptr::null_mut());
-    static SPAWN_HOSTILE: std::cell::Cell<bool> = std::cell::Cell::new(true);
-}
-
-fn spawn_next_int(bound: i32) -> i32 {
-    if bound <= 0 {
-        return 0;
-    }
-    SPAWN_WORLD.with(|w| unsafe {
-        // SAFETY: the spawn driver sets this from a live `&mut World` and
-        // clears it right after; null (no driver) is checked below.
-        let world = w.get();
-        if world.is_null() {
+impl crate::mob_spawning::SpawnerWorld for World {
+    fn spawn_next_int(&mut self, bound: i32) -> i32 {
+        if bound <= 0 {
             return 0;
         }
-        (*world).rng.next_int_bound(bound)
-    })
-}
+        self.rng.next_int_bound(bound)
+    }
 
-fn spawn_next_uniform_float(lo: f32, hi: f32) -> f32 {
-    SPAWN_WORLD.with(|w| unsafe {
-        // SAFETY: the spawn driver sets this from a live `&mut World` and
-        // clears it right after; null (no driver) is checked below.
-        let world = w.get();
-        if world.is_null() {
-            return lo;
-        }
-        lo + (hi - lo) * (*world).rng.next_float()
-    })
-}
+    fn spawn_next_float(&mut self, lo: f32, hi: f32) -> f32 {
+        lo + (hi - lo) * self.rng.next_float()
+    }
 
-fn spawn_chunk_exists(x: i32, z: i32) -> bool {
-    SPAWN_WORLD.with(|w| unsafe {
-        // SAFETY: the spawn driver sets this from a live `&mut World` and
-        // clears it right after; null (no driver) is checked below.
-        let world = w.get();
-        if world.is_null() {
-            return false;
-        }
-        (*world).has_chunk(x, z)
-    })
-}
+    fn spawn_chunk_exists(&mut self, x: i32, z: i32) -> bool {
+        self.has_chunk(x, z)
+    }
 
-fn spawn_is_solid(x: i32, y: i32, z: i32) -> bool {
-    SPAWN_WORLD.with(|w| unsafe {
-        // SAFETY: the spawn driver sets this from a live `&mut World` and
-        // clears it right after; null (no driver) is checked below.
-        let world = w.get();
-        if world.is_null() {
-            return false;
-        }
-        (*world).is_solid(x, y, z)
-    })
-}
+    fn spawn_is_solid(&mut self, x: i32, y: i32, z: i32) -> bool {
+        self.is_solid(x, y, z)
+    }
 
-fn spawn_is_air(x: i32, y: i32, z: i32) -> bool {
-    SPAWN_WORLD.with(|w| unsafe {
-        // SAFETY: the spawn driver sets this from a live `&mut World` and
-        // clears it right after; null (no driver) is checked below.
-        let world = w.get();
-        if world.is_null() {
-            return false;
-        }
-        is_air_material((*world).get_block_id(x, y, z))
-    })
-}
+    fn spawn_is_air(&mut self, x: i32, y: i32, z: i32) -> bool {
+        is_air_material(self.get_block_id(x, y, z))
+    }
 
-fn spawn_is_liquid(x: i32, y: i32, z: i32) -> bool {
-    SPAWN_WORLD.with(|w| unsafe {
-        // SAFETY: the spawn driver sets this from a live `&mut World` and
-        // clears it right after; null (no driver) is checked below.
-        let world = w.get();
-        if world.is_null() {
-            return false;
-        }
-        (*world).material_at(x, y, z).is_liquid()
-    })
-}
+    fn spawn_is_liquid(&mut self, x: i32, y: i32, z: i32) -> bool {
+        self.material_at(x, y, z).is_liquid()
+    }
 
-fn spawn_try_spawn(
-    kind: u8,
-    fx: f32,
-    fy: f32,
-    fz: f32,
-    yaw: f32,
-    out_max_in_chunk: &mut i32,
-) -> i32 {
-    SPAWN_WORLD.with(|w| unsafe {
-        // SAFETY: the spawn driver sets this from a live `&mut World` and
-        // clears it right after; null (no driver) is checked below.
-        let world = w.get();
-        if world.is_null() {
-            return -1;
-        }
-        let world = &mut *world;
-        let hostile = SPAWN_HOSTILE.with(|h| h.get());
-        let id = world.entities.alloc_id();
+    fn spawn_try_spawn(
+        &mut self,
+        hostile: bool,
+        kind: u8,
+        fx: f32,
+        fy: f32,
+        fz: f32,
+        yaw: f32,
+        out_max_in_chunk: &mut i32,
+    ) -> i32 {
+        let id = self.entities.alloc_id();
         if hostile {
             let mkind = match kind {
                 0 => MobKind::Spider,
@@ -123,9 +57,9 @@ fn spawn_try_spawn(
             let mut m = crate::entity_table::MobEnt::new(id, mkind);
             m.living.body.set_position(fx as f64, fy as f64, fz as f64);
             m.living.body.yaw = yaw;
-            world.entities.insert(Entity::Mob(m));
-            if !world.spawner_mob_ok(id) {
-                world.entities.remove(id);
+            self.entities.insert(Entity::Mob(m));
+            if !self.spawner_mob_ok(id) {
+                self.entities.remove(id);
                 return -1;
             }
         } else {
@@ -141,51 +75,29 @@ fn spawn_try_spawn(
             // The C++ chicken ctor rolls the egg clock at construction,
             // before the spawn check below (draw consumed even on reject).
             if akind == AnimalKind::Chicken {
-                a.egg_timer = 6000 + world.rng.next_int_bound(6000);
+                a.egg_timer = 6000 + self.rng.next_int_bound(6000);
             }
-            world.entities.insert(Entity::Animal(a));
-            if !world.spawner_animal_ok(id) {
-                world.entities.remove(id);
+            self.entities.insert(Entity::Animal(a));
+            if !self.spawner_animal_ok(id) {
+                self.entities.remove(id);
                 return -1;
             }
         }
         *out_max_in_chunk = 4;
         id
-    })
-}
+    }
 
-fn spawn_jockey(fx: f32, fy: f32, fz: f32, yaw: f32, host_id: i32) -> bool {
-    SPAWN_WORLD.with(|w| unsafe {
-        // SAFETY: the spawn driver sets this from a live `&mut World` and
-        // clears it right after; null (no driver) is checked below.
-        let world = w.get();
-        if world.is_null() {
+    fn spawn_jockey(&mut self, fx: f32, fy: f32, fz: f32, yaw: f32, host_id: i32) -> bool {
+        if self.entities.get(host_id).is_none() {
             return false;
         }
-        let world = &mut *world;
-        if world.entities.get(host_id).is_none() {
-            return false;
-        }
-        let id = world.entities.alloc_id();
+        let id = self.entities.alloc_id();
         let mut m = crate::entity_table::MobEnt::new(id, MobKind::Skeleton);
         m.living.body.set_position(fx as f64, fy as f64, fz as f64);
         m.living.body.yaw = yaw;
-        world.entities.insert(Entity::Mob(m));
-        world.entities.mount(id, Some(host_id));
+        self.entities.insert(Entity::Mob(m));
+        self.entities.mount(id, Some(host_id));
         true
-    })
-}
-
-fn spawner_table() -> crate::mob_spawning::SpawnerWorld {
-    crate::mob_spawning::SpawnerWorld {
-        next_int: Some(spawn_next_int),
-        next_uniform_float: Some(spawn_next_uniform_float),
-        chunk_exists: Some(spawn_chunk_exists),
-        is_solid: Some(spawn_is_solid),
-        is_air: Some(spawn_is_air),
-        is_liquid: Some(spawn_is_liquid),
-        try_spawn: Some(spawn_try_spawn),
-        spawn_jockey: Some(spawn_jockey),
     }
 }
 
@@ -254,14 +166,9 @@ impl World {
         let (px, py, pz) = self.spawn_anchors();
         let count = self.entities.count_mobs() as i32;
         let (sx, sy, sz) = (self.spawn[0], self.spawn[1], self.spawn[2]);
-        SPAWN_WORLD.with(|w| w.set(self as *mut World));
-        SPAWN_HOSTILE.with(|h| h.set(true));
-        let table = spawner_table();
-        let n = crate::mob_spawning::rust_world_spawn_hostile(
-            &table, &px, &py, &pz, count, sx, sy, sz, WORLD_HEIGHT,
-        );
-        SPAWN_WORLD.with(|w| w.set(std::ptr::null_mut()));
-        n
+        crate::mob_spawning::rust_world_spawn_hostile(
+            self, &px, &py, &pz, count, sx, sy, sz, WORLD_HEIGHT,
+        )
     }
 
     /// Passive spawn pass (mirrors `World::spawnPassiveMobs`).
@@ -272,14 +179,9 @@ impl World {
         let (px, py, pz) = self.spawn_anchors();
         let count = self.entities.count_animals() as i32;
         let (sx, sy, sz) = (self.spawn[0], self.spawn[1], self.spawn[2]);
-        SPAWN_WORLD.with(|w| w.set(self as *mut World));
-        SPAWN_HOSTILE.with(|h| h.set(false));
-        let table = spawner_table();
-        let n = crate::mob_spawning::rust_world_spawn_passive(
-            &table, &px, &py, &pz, count, sx, sy, sz, WORLD_HEIGHT,
-        );
-        SPAWN_WORLD.with(|w| w.set(std::ptr::null_mut()));
-        n
+        crate::mob_spawning::rust_world_spawn_passive(
+            self, &px, &py, &pz, count, sx, sy, sz, WORLD_HEIGHT,
+        )
     }
 
     /// Item pickup sweep (mirrors the in-loop pickup: ready items within

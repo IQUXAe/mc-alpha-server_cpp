@@ -6,20 +6,19 @@
 //!   world-spawn exclusion check. Pure (no pointers, no allocation), the
 //!   single source of truth, unit-tested on both sides of the FFI.
 //! - `rust_world_spawn_hostile` / `rust_world_spawn_passive`: batch drivers
-//!   that run the whole per-tick spawn pass. C++ keeps ownership of the
-//!   RNG stream (`World::rand`, via the `next_int` / `next_uniform_float`
-//!   callbacks, so the exact draw sequence is preserved), block storage,
-//!   and the entity list; Rust owns the control flow and all constants.
+//!   that run the whole per-tick spawn pass against a `SpawnerWorld`.
+//!   The live `World` implements the trait directly (explicit borrows, no
+//!   thread-local bridge); tests implement it on a scripted fake, so draw
+//!   sequences and check order stay exactly covered.
 //!
 //! NOTE on draw order: the old C++ loop drew the four pack-spread values as
 //! `x += spread6(rand) - spread6(rand)`, whose evaluation order was
 //! unspecified. The driver below fixes the order (x-pair, then z-pair);
 //! the draw *count* per attempt is unchanged.
 //!
-//! World access stays in C++ behind the `SpawnerWorld` callback table
-//! (block storage, entity list, `getCanSpawnHere`), and RNG draws stay on
-//! the C++ `World::rand` stream via callbacks, so check order
-//! and draw sequences are preserved.
+//! World access is explicit through the `SpawnerWorld` trait (block
+//! storage, entity list, `getCanSpawnHere`), and RNG draws go through it
+//! into `World::rand`, so check order and draw sequences are preserved.
 
 /// Spawn cap: `budget_per_256 * num_eligible_chunks / 256`.
 ///
@@ -61,27 +60,36 @@ pub fn alpha_spawn_too_close_to_spawn(
     dsx * dsx + dsy * dsy + dsz * dsz < 576.0
 }
 
-/// World access for the spawn drivers. All function pointers must be
-/// non-null; a null table (or null entry) makes the driver return 0.
+/// World access for the spawn drivers, as an explicit trait (no
+/// thread-local bridge). The live world implements it with direct
+/// borrows; tests implement it on a scripted fake.
 ///
-/// RNG draws go through `next_int` / `next_uniform_float` into C++
+/// RNG draws go through `spawn_next_int` / `spawn_next_float` into
 /// `World::rand`, preserving the exact historical draw sequence.
-/// `try_spawn` must construct `kind`, position it, run `getCanSpawnHere`,
-/// join the world on success, write `getMaxSpawnedInChunk` to
-/// `out_max_in_chunk`, and return the entity id (or negative on failure).
+/// `spawn_try_spawn` must construct `kind`, position it, run
+/// `getCanSpawnHere`, join the world on success, write
+/// `getMaxSpawnedInChunk` to `out_max_in_chunk`, and return the entity id
+/// (or negative on failure).
 /// Kinds are 0=spider,1=zombie,2=skeleton,3=creeper for the hostile driver
 /// and 0=sheep,1=pig,2=chicken,3=cow for the passive driver.
-pub struct SpawnerWorld {
-    pub next_int: Option<fn(bound: i32) -> i32>,
-    pub next_uniform_float: Option<fn(lo: f32, hi: f32) -> f32>,
-    pub chunk_exists: Option<fn(x: i32, z: i32) -> bool>,
-    pub is_solid: Option<fn(x: i32, y: i32, z: i32) -> bool>,
-    pub is_air: Option<fn(x: i32, y: i32, z: i32) -> bool>,
-    pub is_liquid: Option<fn(x: i32, y: i32, z: i32) -> bool>,
-    pub try_spawn:
-        Option<fn(kind: u8, fx: f32, fy: f32, fz: f32, yaw: f32, out_max_in_chunk: &mut i32) -> i32>,
-    pub spawn_jockey:
-        Option<fn(fx: f32, fy: f32, fz: f32, yaw: f32, host_id: i32) -> bool>,
+pub trait SpawnerWorld {
+    fn spawn_next_int(&mut self, bound: i32) -> i32;
+    fn spawn_next_float(&mut self, lo: f32, hi: f32) -> f32;
+    fn spawn_chunk_exists(&mut self, x: i32, z: i32) -> bool;
+    fn spawn_is_solid(&mut self, x: i32, y: i32, z: i32) -> bool;
+    fn spawn_is_air(&mut self, x: i32, y: i32, z: i32) -> bool;
+    fn spawn_is_liquid(&mut self, x: i32, y: i32, z: i32) -> bool;
+    fn spawn_try_spawn(
+        &mut self,
+        hostile: bool,
+        kind: u8,
+        fx: f32,
+        fy: f32,
+        fz: f32,
+        yaw: f32,
+        out_max_in_chunk: &mut i32,
+    ) -> i32;
+    fn spawn_jockey(&mut self, fx: f32, fy: f32, fz: f32, yaw: f32, host_id: i32) -> bool;
 }
 
 const CHUNK_RADIUS: i32 = 8;
@@ -102,7 +110,7 @@ fn chunk_key(chunk_x: i32, chunk_z: i32) -> u64 {
 /// skeletons excluded). Preserves the old C++ check order and draw sequence.
 #[allow(clippy::too_many_arguments)]
 fn spawn_pass(
-    world: &SpawnerWorld,
+    world: &mut impl SpawnerWorld,
     players_x: &[f64],
     players_y: &[f64],
     players_z: &[f64],
@@ -136,31 +144,27 @@ fn spawn_pass(
         return 0;
     }
 
-    let (Some(next_int), Some(next_float), Some(chunk_exists), Some(is_solid), Some(is_air), Some(is_liquid), Some(try_spawn), Some(spawn_jockey)) =
-        (world.next_int, world.next_uniform_float, world.chunk_exists, world.is_solid, world.is_air, world.is_liquid, world.try_spawn, world.spawn_jockey)
-    else {
-        return 0;
-    };
-
     let mut spawned = 0;
     for key in &eligible {
-        if next_int(CHUNK_ROLL) != 0 {
+        if world.spawn_next_int(CHUNK_ROLL) != 0 {
             continue;
         }
         let chunk_x = (key >> 32) as i32;
         let chunk_z = (key & 0xFFFF_FFFF) as i32;
-        if !chunk_exists(chunk_x, chunk_z) {
+        if !world.spawn_chunk_exists(chunk_x, chunk_z) {
             continue;
         }
 
         let base_x = chunk_x.wrapping_mul(16);
         let base_z = chunk_z.wrapping_mul(16);
-        let kind = next_int(4) as u8;
-        let origin_x = base_x + next_int(16);
-        let origin_y = next_int(world_height);
-        let origin_z = base_z + next_int(16);
+        let kind = world.spawn_next_int(4) as u8;
+        let origin_x = base_x + world.spawn_next_int(16);
+        let origin_y = world.spawn_next_int(world_height);
+        let origin_z = base_z + world.spawn_next_int(16);
 
-        if is_solid(origin_x, origin_y, origin_z) || !is_air(origin_x, origin_y, origin_z) {
+        if world.spawn_is_solid(origin_x, origin_y, origin_z)
+            || !world.spawn_is_air(origin_x, origin_y, origin_z)
+        {
             continue;
         }
 
@@ -174,14 +178,20 @@ fn spawn_pass(
             for _ in 0..PACK_ATTEMPTS {
                 // Java order per attempt: x-pair, y-pair, z-pair. The y draws
                 // are nextInt(1) (always 0) but still consume RNG state.
-                x += alpha_spawn_pack_offset(next_int(PACK_SPREAD), next_int(PACK_SPREAD));
-                y += alpha_spawn_pack_offset(next_int(1), next_int(1));
-                z += alpha_spawn_pack_offset(next_int(PACK_SPREAD), next_int(PACK_SPREAD));
+                x += alpha_spawn_pack_offset(
+                    world.spawn_next_int(PACK_SPREAD),
+                    world.spawn_next_int(PACK_SPREAD),
+                );
+                y += alpha_spawn_pack_offset(world.spawn_next_int(1), world.spawn_next_int(1));
+                z += alpha_spawn_pack_offset(
+                    world.spawn_next_int(PACK_SPREAD),
+                    world.spawn_next_int(PACK_SPREAD),
+                );
 
-                if !is_solid(x, y - 1, z)
-                    || is_solid(x, y, z)
-                    || is_liquid(x, y, z)
-                    || is_solid(x, y + 1, z)
+                if !world.spawn_is_solid(x, y - 1, z)
+                    || world.spawn_is_solid(x, y, z)
+                    || world.spawn_is_liquid(x, y, z)
+                    || world.spawn_is_solid(x, y + 1, z)
                 {
                     continue;
                 }
@@ -207,17 +217,17 @@ fn spawn_pass(
                     continue;
                 }
 
-                let yaw = next_float(0.0, 360.0);
+                let yaw = world.spawn_next_float(0.0, 360.0);
                 let mut max_in_chunk = 4;
-                let id = try_spawn(kind, fx, fy, fz, yaw, &mut max_in_chunk);
+                let id = world.spawn_try_spawn(hostile, kind, fx, fy, fz, yaw, &mut max_in_chunk);
                 if id < 0 {
                     continue;
                 }
                 spawned += 1;
 
                 // Alpha spider jockey chance (hostile only).
-                if hostile && kind == 0 && next_int(JOCKEY_ROLL) == 0 {
-                    spawn_jockey(fx, fy, fz, yaw, id);
+                if hostile && kind == 0 && world.spawn_next_int(JOCKEY_ROLL) == 0 {
+                    world.spawn_jockey(fx, fy, fz, yaw, id);
                 }
 
                 group_count += 1;
@@ -234,7 +244,7 @@ fn spawn_pass(
 /// Batch driver for `World::spawnHostileMobs`: parallel player-position
 /// slices. Returns the primary spawn count.
 pub fn rust_world_spawn_hostile(
-    world: &SpawnerWorld,
+    world: &mut impl SpawnerWorld,
     players_x: &[f64],
     players_y: &[f64],
     players_z: &[f64],
@@ -250,7 +260,7 @@ pub fn rust_world_spawn_hostile(
 /// Batch driver for `World::spawnPassiveMobs`. Same contract as hostile;
 /// spider-jockey logic is skipped.
 pub fn rust_world_spawn_passive(
-    world: &SpawnerWorld,
+    world: &mut impl SpawnerWorld,
     players_x: &[f64],
     players_y: &[f64],
     players_z: &[f64],
@@ -312,120 +322,111 @@ mod tests {
         assert!(alpha_spawn_too_close_to_spawn(23.5, 64.0, 0.0, 0, 64, 0));
     }
 
-    // Batch-driver tests with a scripted stub world. All scenarios run
-    // sequentially inside one test because they share stub counters.
+    // Batch-driver tests with a scripted fake world. Each scenario owns
+    // its fake (no shared counters), so draw scripts stay local.
     mod driver {
         use super::*;
-        use std::sync::atomic::{AtomicI32, Ordering};
 
-        static TRY_SPAWN_CALLS: AtomicI32 = AtomicI32::new(0);
-        static JOCKEY_CALLS: AtomicI32 = AtomicI32::new(0);
-        static NEXT_ID: AtomicI32 = AtomicI32::new(1);
-
-        fn reset() {
-            TRY_SPAWN_CALLS.store(0, Ordering::SeqCst);
-            JOCKEY_CALLS.store(0, Ordering::SeqCst);
-            NEXT_ID.store(1, Ordering::SeqCst);
+        struct FakeWorld {
+            try_calls: i32,
+            jockey_calls: i32,
+            next_id: i32,
         }
 
-        // All RNG draws return 0: every 1/N roll succeeds, kinds/origins are 0.
-        fn stub_next_int(bound: i32) -> i32 {
-            assert!(bound > 0);
-            0
-        }
-        fn stub_next_float(_lo: f32, _hi: f32) -> f32 {
-            0.0
-        }
-        fn stub_chunk_exists(_x: i32, _z: i32) -> bool {
-            true
-        }
-        // Solid ground only at y == -1, air everywhere, no liquid.
-        fn stub_is_solid(_x: i32, y: i32, _z: i32) -> bool {
-            y == -1
-        }
-        fn stub_is_air(_x: i32, _y: i32, _z: i32) -> bool {
-            true
-        }
-        fn stub_is_liquid(_x: i32, _y: i32, _z: i32) -> bool {
-            false
-        }
-        fn stub_try_spawn(
-            _kind: u8,
-            _fx: f32,
-            _fy: f32,
-            _fz: f32,
-            _yaw: f32,
-            out_max: &mut i32,
-        ) -> i32 {
-            TRY_SPAWN_CALLS.fetch_add(1, Ordering::SeqCst);
-            *out_max = 4;
-            NEXT_ID.fetch_add(1, Ordering::SeqCst)
-        }
-        fn stub_spawn_jockey(_fx: f32, _fy: f32, _fz: f32, _yaw: f32, _host: i32) -> bool {
-            JOCKEY_CALLS.fetch_add(1, Ordering::SeqCst);
-            true
+        fn fake() -> FakeWorld {
+            FakeWorld { try_calls: 0, jockey_calls: 0, next_id: 1 }
         }
 
-        fn stub_world() -> SpawnerWorld {
-            SpawnerWorld {
-                next_int: Some(stub_next_int),
-                next_uniform_float: Some(stub_next_float),
-                chunk_exists: Some(stub_chunk_exists),
-                is_solid: Some(stub_is_solid),
-                is_air: Some(stub_is_air),
-                is_liquid: Some(stub_is_liquid),
-                try_spawn: Some(stub_try_spawn),
-                spawn_jockey: Some(stub_spawn_jockey),
+        impl SpawnerWorld for FakeWorld {
+            // All RNG draws return 0: every 1/N roll succeeds, kinds/origins are 0.
+            fn spawn_next_int(&mut self, bound: i32) -> i32 {
+                assert!(bound > 0);
+                0
+            }
+            fn spawn_next_float(&mut self, _lo: f32, _hi: f32) -> f32 {
+                0.0
+            }
+            fn spawn_chunk_exists(&mut self, _x: i32, _z: i32) -> bool {
+                true
+            }
+            // Solid ground only at y == -1, air everywhere, no liquid.
+            fn spawn_is_solid(&mut self, _x: i32, y: i32, _z: i32) -> bool {
+                y == -1
+            }
+            fn spawn_is_air(&mut self, _x: i32, _y: i32, _z: i32) -> bool {
+                true
+            }
+            fn spawn_is_liquid(&mut self, _x: i32, _y: i32, _z: i32) -> bool {
+                false
+            }
+            fn spawn_try_spawn(
+                &mut self,
+                _hostile: bool,
+                _kind: u8,
+                _fx: f32,
+                _fy: f32,
+                _fz: f32,
+                _yaw: f32,
+                out_max: &mut i32,
+            ) -> i32 {
+                self.try_calls += 1;
+                *out_max = 4;
+                let id = self.next_id;
+                self.next_id += 1;
+                id
+            }
+            fn spawn_jockey(&mut self, _fx: f32, _fy: f32, _fz: f32, _yaw: f32, _host: i32) -> bool {
+                self.jockey_calls += 1;
+                true
             }
         }
 
         #[test]
         fn test_driver_scenarios() {
-            let world = stub_world();
             // Player at origin; world spawn far away so nothing is excluded.
             let px = [0.5f64];
             let py = [64.0f64];
             let pz = [0.5f64];
 
             // No players, no chunks, no spawns.
-            reset();
+            let mut world = fake();
             assert_eq!(
-                rust_world_spawn_hostile(&world, &[], &[], &[], 0, 1000, 64, 1000, 128),
+                rust_world_spawn_hostile(&mut world, &[], &[], &[], 0, 1000, 64, 1000, 128),
                 0
             );
-            assert_eq!(TRY_SPAWN_CALLS.load(Ordering::SeqCst), 0);
+            assert_eq!(world.try_calls, 0);
 
             // Cap gate: 1 player -> 289 chunks -> max 112 hostile; 113 blocks everything.
-            reset();
+            let mut world = fake();
             assert_eq!(
-                rust_world_spawn_hostile(&world, &px, &py, &pz, 113, 1000, 64, 1000, 128),
+                rust_world_spawn_hostile(&mut world, &px, &py, &pz, 113, 1000, 64, 1000, 128),
                 0
             );
-            assert_eq!(TRY_SPAWN_CALLS.load(Ordering::SeqCst), 0);
+            assert_eq!(world.try_calls, 0);
 
             // Happy hostile path: every chunk attempts (roll always 0), each
             // fills its group of 4 (max_in_chunk), kind 0 (spider) always
             // triggers the per-spawn jockey roll (always 0).
             // 17x17 = 289 chunks -> 289*4 primary + 289*4 jockeys.
-            reset();
-            let n = rust_world_spawn_hostile(&world, &px, &py, &pz, 0, 1000, 64, 1000, 128);
+            let mut world = fake();
+            let n = rust_world_spawn_hostile(&mut world, &px, &py, &pz, 0, 1000, 64, 1000, 128);
             assert_eq!(n, 289 * 4);
-            assert_eq!(TRY_SPAWN_CALLS.load(Ordering::SeqCst), 289 * 4);
-            assert_eq!(JOCKEY_CALLS.load(Ordering::SeqCst), 289 * 4);
+            assert_eq!(world.try_calls, 289 * 4);
+            assert_eq!(world.jockey_calls, 289 * 4);
 
             // Happy passive path: same totals, no jockeys.
-            reset();
-            let n = rust_world_spawn_passive(&world, &px, &py, &pz, 0, 1000, 64, 1000, 128);
+            let mut world = fake();
+            let n = rust_world_spawn_passive(&mut world, &px, &py, &pz, 0, 1000, 64, 1000, 128);
             assert_eq!(n, 289 * 4);
-            assert_eq!(TRY_SPAWN_CALLS.load(Ordering::SeqCst), 289 * 4);
-            assert_eq!(JOCKEY_CALLS.load(Ordering::SeqCst), 0);
+            assert_eq!(world.try_calls, 289 * 4);
+            assert_eq!(world.jockey_calls, 0);
 
             // World-spawn exclusion: spawn at y=0 inside the eligible area
             // removes candidates (strictly fewer spawns than the happy path).
-            reset();
-            let n_excl = rust_world_spawn_hostile(&world, &px, &py, &pz, 0, 8, 0, 8, 128);
+            let mut world = fake();
+            let n_excl = rust_world_spawn_hostile(&mut world, &px, &py, &pz, 0, 8, 0, 8, 128);
             assert!(n_excl < 289 * 4);
-            assert_eq!(TRY_SPAWN_CALLS.load(Ordering::SeqCst), n_excl);
+            assert_eq!(world.try_calls, n_excl);
         }
     }
 }
