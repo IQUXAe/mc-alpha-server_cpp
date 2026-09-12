@@ -571,6 +571,10 @@ impl World {
                 }
                 (b.on_ground, my)
             };
+            // Contact damage (mirrors the `onEntityCollidedWithBlock`
+            // sweep at the tail of `Entity.moveEntity`): any cactus in
+            // the post-move box deals 1 through the pipeline.
+            self.cactus_contact(id);
             if !suppress {
                 let mut ev = -1.0f32;
                 let nd =
@@ -584,6 +588,40 @@ impl World {
             }
         }
         None
+    }
+
+    /// Cactus prickles for one living body (mirrors
+    /// `BlockCactus.onEntityCollidedWithBlock` as fired from
+    /// `Entity.moveEntity`): any cactus cell intersecting the box deals
+    /// 1 damage through the attack pipeline (resist window included,
+    /// like vanilla). Only mobs, animals and players qualify.
+    fn cactus_contact(&mut self, id: EntityId) {
+        let bbox = match self.entities.get(id) {
+            Some(Entity::Mob(m)) => m.living.body.bounding_box,
+            Some(Entity::Animal(a)) => a.living.body.bounding_box,
+            Some(Entity::Player(p)) => p.living.body.bounding_box,
+            _ => return,
+        };
+        let (x0, y0, z0) = (
+            floor_double(bbox.min_x),
+            floor_double(bbox.min_y),
+            floor_double(bbox.min_z),
+        );
+        let (x1, y1, z1) = (
+            floor_double(bbox.max_x),
+            floor_double(bbox.max_y),
+            floor_double(bbox.max_z),
+        );
+        for x in x0..=x1 {
+            for y in y0..=y1 {
+                for z in z0..=z1 {
+                    if self.get_block_id(x, y, z) == 81 {
+                        self.attack_living(id, 1, None);
+                        return;
+                    }
+                }
+            }
+        }
     }
 
     /// Item push-out from solid rock (mirrors `pushOutOfBlocks`).
@@ -1573,6 +1611,80 @@ mod tests {
         assert!(w.entities.get(item).is_none());
         // The full take was recorded for the server tick's collect fan-out.
         assert_eq!(w.item_pickups, vec![(item, player)]);
+    }
+
+    #[test]
+    fn test_hand_hit_knocks_pig_back() {
+        // Hand hit from the east must shove the pig west immediately and
+        // displace it on the next tick (knockback pipeline + heading).
+        let mut w = world_with_floor();
+        let player = add_player(&mut w, "steve", 5.5, 64.0, 4.5);
+        let pig = add_animal(&mut w, AnimalKind::Pig, 3.5, 64.0, 4.5);
+        w.attack_living(pig, 1, Some(player));
+        let motion = match w.entities.get(pig).unwrap() {
+            crate::entity_table::Entity::Animal(a) => a.living.body.motion,
+            _ => unreachable!(),
+        };
+        assert!(motion[0] < -0.3, "westward shove, got {motion:?}");
+        assert_eq!(motion[1], 0.4);
+        w.tick_world();
+        let after = match w.entities.get(pig).unwrap() {
+            crate::entity_table::Entity::Animal(a) => a.living.body.pos[0],
+            _ => unreachable!(),
+        };
+        assert!(after < 3.5 - 0.15, "pig displaced west, now at {after}");
+    }
+
+    #[test]
+    fn test_native_drop_ids_spot_checks() {
+        // Vanilla idDropped/quantityDropped spot checks (Java Block*).
+        assert_eq!(World::native_drop_ids(63), (323, 1, 0));
+        assert_eq!(World::native_drop_ids(68), (323, 1, 0));
+        assert_eq!(World::native_drop_ids(62), (61, 1, 0));
+        assert_eq!(World::native_drop_ids(82), (337, 4, 0));
+        assert_eq!(World::native_drop_ids(43), (44, 1, 0));
+        assert_eq!(World::native_drop_ids(1), (4, 1, 0));
+        assert_eq!(World::native_drop_ids(16), (263, 1, 0));
+        assert_eq!(World::native_drop_ids(56), (264, 1, 0));
+        assert_eq!(World::native_drop_ids(39), (39, 1, 0));
+        assert_eq!(World::native_drop_ids(40), (40, 1, 0));
+        for bid in [20, 47, 52, 78, 79, 80] {
+            assert_eq!(World::native_drop_ids(bid).1, 0, "block {bid} drops nothing");
+        }
+    }
+
+    #[test]
+    fn test_rolled_drops_doors_redstone_gravel_leaves() {
+        let mut w = world_with_floor();
+        // Doors: upper half nothing, lower wood 324 / iron 330.
+        assert_eq!(w.rolled_drop_ids(64, 8), (0, 0));
+        assert_eq!(w.rolled_drop_ids(64, 0), (324, 1));
+        assert_eq!(w.rolled_drop_ids(71, 0), (330, 1));
+        // Redstone dust comes 4-5.
+        for _ in 0..20 {
+            let (d, q) = w.rolled_drop_ids(73, 0);
+            assert_eq!(d, 331);
+            assert!((4..=5).contains(&q), "{q}");
+        }
+        // Gravel flints or stays gravel; leaves sapling or nothing.
+        for _ in 0..50 {
+            assert!(matches!(w.rolled_drop_ids(13, 0), (318, 1) | (13, 1)));
+            assert!(matches!(w.rolled_drop_ids(18, 0), (6, 1) | (0, 0)));
+        }
+    }
+
+    #[test]
+    fn test_cactus_contact_hurts() {
+        // Standing in cactus deals 1 through the pipeline (BlockCactus).
+        let mut w = world_with_floor();
+        let player = add_player(&mut w, "steve", 3.5, 64.0, 4.5);
+        w.set_block_id(3, 64, 4, 81);
+        w.move_body(player, 0.0, 0.0, 0.0);
+        let hp = match w.entities.get(player).unwrap() {
+            crate::entity_table::Entity::Player(p) => p.living.health,
+            _ => unreachable!(),
+        };
+        assert_eq!(hp, 19);
     }
 
     fn furnace_tile_with(input: (i32, i32), fuel: (i32, i32)) -> TileData {
@@ -5116,13 +5228,14 @@ const SEEDS_ITEM_ID: i32 = 295;
 const SIGN_ITEM_ID: i32 = 323;
 
 impl World {
-    /// (drop_id, drop_count, drop_damage) mirroring the C++ idDropped /
-    /// quantityDropped / damageDropped call sites. No damageDropped
-    /// overrides exist, so damage is always 0; tallgrass and mushrooms
-    /// force (0, 0, 0) via their class overrides (not the props table).
+    /// (drop_id, drop_count, drop_damage) mirroring the Java idDropped /
+    /// quantityDropped call sites. No damageDropped overrides exist, so
+    /// damage is always 0; unregistered block 31 forces (0, 0, 0).
     pub(crate) fn native_drop_ids(bid: u8) -> (i32, i32, i32) {
+        // Block 31 exists in no Alpha registry; mushrooms drop themselves
+        // like any default block (their soil rule lives in block_ticks).
         match bid {
-            31 | 39 | 40 => (0, 0, 0),
+            31 => (0, 0, 0),
             _ => {
                 let p = alpha_block_properties_get(bid as u32);
                 (if p.id_dropped != 0 { p.id_dropped } else { bid as i32 }, p.quantity_dropped, 0)
@@ -5240,7 +5353,10 @@ impl World {
                 let (d, q, g) = Self::native_drop_ids(bid);
                 block_flower_neighbor(&TICK_TABLE, d, q, g, x, y, z);
             }
-            39 | 40 => block_mushroom_neighbor(&TICK_TABLE, 0, 0, 0, x, y, z),
+            39 | 40 => {
+                let (d, q, g) = Self::native_drop_ids(bid);
+                block_mushroom_neighbor(&TICK_TABLE, d, q, g, x, y, z);
+            }
             50 => {
                 let (d, q, g) = Self::native_drop_ids(bid);
                 block_torch_neighbor(&TICK_TABLE, d, q, g, x, y, z);
@@ -5280,12 +5396,13 @@ impl World {
     }
 
     /// Block-as-item drop at chance 1.0 (mirrors `dropBlockAsItem` for an
-    /// already-captured block id — the cell may be air by now).
-    pub(crate) fn drop_block_for(&mut self, bid: u8, x: i32, y: i32, z: i32) {
+    /// already-captured block id — the cell may be air by now, so the
+    /// pre-removal metadata rides along for meta-sensitive drops).
+    pub(crate) fn drop_block_for(&mut self, bid: u8, meta: u8, x: i32, y: i32, z: i32) {
         if bid == 0 {
             return;
         }
-        let (drop, qty, _) = Self::native_drop_ids(bid);
+        let (drop, qty) = self.rolled_drop_ids(bid, meta);
         if drop <= 0 {
             return;
         }
@@ -5293,10 +5410,49 @@ impl World {
         block_base_drop(&TICK_TABLE, drop, qty, 0, x, y, z, 1.0);
     }
 
+    /// idDropped/quantityDropped rolls that need world RNG or metadata
+    /// (mirrors the Java overrides, which draw from the block-break
+    /// Random): doors drop the item only from the lower half (wood 324,
+    /// iron 330), gravel flints 1/10, redstone dust comes 4-5, leaves
+    /// drop a sapling 1/20. Everything else is the props table.
+    fn rolled_drop_ids(&mut self, bid: u8, meta: u8) -> (i32, i32) {
+        match bid {
+            64 | 71 => {
+                if meta & 8 != 0 {
+                    (0, 0)
+                } else if bid == 71 {
+                    (330, 1)
+                } else {
+                    (324, 1)
+                }
+            }
+            13 => {
+                if self.rng.next_int_bound(10) == 0 {
+                    (318, 1)
+                } else {
+                    (13, 1)
+                }
+            }
+            73 | 74 => (331, 4 + self.rng.next_int_bound(2)),
+            18 => {
+                if self.rng.next_int_bound(20) == 0 {
+                    (6, 1)
+                } else {
+                    (0, 0)
+                }
+            }
+            _ => {
+                let (d, q, _) = Self::native_drop_ids(bid);
+                (d, q)
+            }
+        }
+    }
+
     /// Block-as-item drop for the live occupant (fluid wash path).
     pub(crate) fn drop_block_as_item(&mut self, x: i32, y: i32, z: i32) {
         let bid = self.get_block_id(x, y, z);
-        self.drop_block_for(bid, x, y, z);
+        let meta = self.get_block_meta(x, y, z);
+        self.drop_block_for(bid, meta, x, y, z);
     }
 
     /// Container tile scatter on break (mirrors the furnace/chest
@@ -5435,7 +5591,10 @@ impl World {
             }
             18 => {
                 let mut guard = with_tick_world(|w| w.leaves_guard, 0);
-                block_leaves_tick(&TICK_TABLE, bid, bid, 0, 0, 0, &mut guard, x, y, z);
+                // Decayed leaves drop a sapling 1/20 (BlockLeaves);
+                // the tick itself always clears the cell.
+                let (did, dqty) = if self.rng.next_int_bound(20) == 0 { (6, 1) } else { (0, 0) };
+                block_leaves_tick(&TICK_TABLE, bid, bid, did, dqty, 0, &mut guard, x, y, z);
                 with_tick_world(|w| w.leaves_guard = guard, ());
             }
             6 => {

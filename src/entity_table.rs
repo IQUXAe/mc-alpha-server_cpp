@@ -300,7 +300,7 @@ impl MobEnt {
         let (w, h) = mob_dims(kind);
         let mut living = LivingBody::new(id, w, h, 0.0);
         living.move_speed = mob_base_speed(kind);
-        living.body.step_height = 1.0; // EntityCreature ctor
+        living.body.step_height = 0.5; // EntityLiving ctor (players stay 0.0 like EntityPlayerMP)
         living.max_hurt_resist = 12; // EntityMob ctor
         Self {
             living,
@@ -336,7 +336,7 @@ impl AnimalEnt {
     pub fn new(id: EntityId, kind: AnimalKind) -> Self {
         let (w, h) = animal_dims(kind);
         let mut living = LivingBody::new(id, w, h, 0.0);
-        living.body.step_height = 1.0; // EntityCreature ctor
+        living.body.step_height = 0.5; // EntityLiving ctor (players stay 0.0 like EntityPlayerMP)
         living.max_hurt_resist = 12; // EntityAnimals ctor
         Self {
             living,

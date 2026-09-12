@@ -26,8 +26,10 @@ pub fn alpha_inventory_max_stack_size(item_id: i32) -> i32 {
         259 | 261 | 346 => 1,
         // Armor (Leather, Chain, Iron, Diamond, Gold)
         298..=317 => 1,
-        // Signs, Doors, Buckets, Minecarts, Boats, Saddle, Stew
-        282 | 323 | 324 | 325 | 326 | 327 | 328 | 329 | 330 | 333 | 335 | 342 | 343 => 1,
+        // Signs, Doors, Buckets, Minecarts, Boats, Saddle
+        323 | 324 | 325 | 326 | 327 | 328 | 329 | 330 | 333 | 335 | 342 | 343 => 1,
+        // Food (ItemFood sets maxStackSize = 1; unstackable in Alpha)
+        260 | 282 | 297 | 319 | 320 | 322 | 349 | 350 => 1,
         // Stack of 16
         332 | 344 => 16, // Snowball, Egg
         // Default stack size for items
@@ -559,5 +561,16 @@ mod tests {
         let out_wb = alpha_inventory_craft_2x2(&grid_wb);
         assert_eq!(out_wb.item_id, 58);
         assert_eq!(out_wb.stack_size, 1);
+    }
+
+    #[test]
+    fn test_food_does_not_stack() {
+        // ItemFood sets maxStackSize = 1 in Alpha 1.2.6 (all eight foods).
+        for id in [260, 282, 297, 319, 320, 322, 349, 350] {
+            assert_eq!(alpha_inventory_max_stack_size(id), 1, "food {id}");
+        }
+        assert_eq!(alpha_inventory_max_stack_size(1), 64);
+        assert_eq!(alpha_inventory_max_stack_size(332), 16);
+        assert_eq!(alpha_inventory_max_stack_size(267), 1);
     }
 }

@@ -909,24 +909,21 @@ pub fn block_crops_neighbor(
     u_schedule(w, x, y, z, block_id, 20);
 }
 
-fn block_crops_drop(w: &BlockTickWorld, wheat_id: i32, seeds_id: i32, x: i32, y: i32, z: i32, metadata: u8) {
+fn block_crops_drop(w: &BlockTickWorld, wheat_id: i32, _seeds_id: i32, x: i32, y: i32, z: i32, metadata: u8) {
     if rng_f01(w) > 1.0 {
         return;
     }
-    // Mature: wheat + 1..3 seeds; else one seed. Velocities match base drops.
+    // Mature crops drop one wheat, growing ones nothing (mirrors
+    // BlockCrops.idDropped; seeds come only from hoeing grass).
     if metadata >= 7 {
         u_drop(w, wheat_id, 1, 0, x as f64 + 0.5, y as f64 + 0.5, z as f64 + 0.5, 0.05, 0.15);
-        let extra = rng_int(w, 3);
-        u_drop(w, seeds_id, 1 + extra, 0, x as f64 + 0.5, y as f64 + 0.5, z as f64 + 0.5, 0.05, 0.15);
-    } else {
-        u_drop(w, seeds_id, 1, 0, x as f64 + 0.5, y as f64 + 0.5, z as f64 + 0.5, 0.05, 0.15);
     }
 }
 
 pub fn block_crops_drop_ffi(
     world: &BlockTickWorld,
     wheat_id: i32,
-    seeds_id: i32,
+    _seeds_id: i32,
     x: i32,
     y: i32,
     z: i32,
@@ -940,10 +937,6 @@ pub fn block_crops_drop_ffi(
     // Reuse the mature/immature split with the caller's chance gate.
     if metadata >= 7 {
         u_drop(w, wheat_id, 1, 0, x as f64 + 0.5, y as f64 + 0.5, z as f64 + 0.5, 0.05, 0.15);
-        let extra = rng_int(w, 3);
-        u_drop(w, seeds_id, 1 + extra, 0, x as f64 + 0.5, y as f64 + 0.5, z as f64 + 0.5, 0.05, 0.15);
-    } else {
-        u_drop(w, seeds_id, 1, 0, x as f64 + 0.5, y as f64 + 0.5, z as f64 + 0.5, 0.05, 0.15);
     }
 }
 
@@ -1358,7 +1351,7 @@ mod tests {
         let l = logs();
         assert!(l.contains(&"meta 0 5 0 4".to_string()), "{l:?}");
 
-        // 9. Mature crops drop wheat plus seeds.
+        // 9. Mature crops drop one wheat and nothing else.
         reset();
         let _ = fake().as_mut().map(|f| {
             f.blocks.insert((0, 5, 0), (59, 7));
@@ -1367,7 +1360,7 @@ mod tests {
         block_crops_drop_ffi(tp, 296, 295, 0, 5, 0, 7, 1.0);
         let l = logs();
         assert!(l.iter().any(|e| e.starts_with("drop 296 1 0")), "{l:?}");
-        assert!(l.iter().any(|e| e.starts_with("drop 295 2 0")), "{l:?}");
+        assert!(!l.iter().any(|e| e.starts_with("drop 295")), "{l:?}");
 
         // 10. Dry soil without crops reverts to dirt.
         reset();

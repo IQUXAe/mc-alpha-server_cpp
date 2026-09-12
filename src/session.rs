@@ -701,6 +701,11 @@ pub struct PlaySession {
     /// Last health byte sent as 0x08 (mirrors the `Packet8` diff-check in
     /// `EntityPlayerMP`); the server tick pushes on change.
     pub last_health: i8,
+    /// Server teleport awaiting client echo (mirrors `field_9006_j` in
+    /// `NetServerHandler`): while set, movement packets that do not match
+    /// the teleported spot are stale pre-teleport traffic and are held,
+    /// never kicked (this is what made respawn disconnect far travelers).
+    pub teleport_wait: Option<[f64; 3]>,
 }
 
 impl PlaySession {
@@ -716,6 +721,7 @@ impl PlaySession {
             keepalive_tick: 0,
             gone: false,
             last_health: 20,
+            teleport_wait: None,
         }
     }
 
@@ -757,6 +763,7 @@ impl PlaySession {
         if id == self.player {
             self.last = [x, y, z];
             self.has_moved = false;
+            self.teleport_wait = Some([x, y, z]);
         }
         self.outbox.push(pkt_teleport(x, y, z, yaw, pitch));
     }
@@ -802,7 +809,7 @@ impl PlaySession {
         }
         let mut found = false;
         if let Some(Entity::Player(p)) = world.entities.get_mut(self.player) {
-            for i in 0..35 {
+            for i in 0..36 {
                 if let Some(s) = p.inventory.main[i] {
                     if s.item_id == self.held_id {
                         p.inventory.current = i as i32;
@@ -812,19 +819,15 @@ impl PlaySession {
                 }
             }
             if !found {
-                p.inventory.main[35] = None;
+                // Genuine desync (or creative): park the ghost fallback
+                // without touching real slot contents, slot 35 included.
                 p.inventory.current = 35;
             }
         }
         if found {
             self.held_fallback = None;
         } else if self.held_fallback.map(|s| s.item_id) != Some(self.held_id) {
-            self.held_fallback = Some(FfiItemStack {
-                stack_size: 1,
-                animations_to_go: 0,
-                item_id: self.held_id,
-                item_damage: 0,
-            });
+            self.held_fallback = Some(Self::ghost_stack(self.held_id));
         }
     }
 
@@ -842,20 +845,21 @@ impl PlaySession {
         self.sync_held(world);
     }
 
-    /// Selected stack (mirrors `getSelectedItemStack`): real slot first,
-    /// then the fallback copy.
+    /// Selected stack (mirrors `getSelectedItemStack`): ghost fallback
+    /// first while active (its slot-35 shadow holds real content that must
+    /// not be consumed as the held item), else the real current slot.
     fn selected_stack(&self, world: &World) -> Option<FfiItemStack> {
+        if let Some(s) = self.held_fallback {
+            if self.held_id > 0 && s.item_id == self.held_id {
+                return Some(s);
+            }
+        }
         if let Some(Entity::Player(p)) = world.entities.get(self.player) {
             let cur = p.inventory.current;
             if cur >= 0 && (cur as usize) < p.inventory.main.len() {
                 if let Some(s) = p.inventory.main[cur as usize] {
                     return Some(s);
                 }
-            }
-        }
-        if let Some(s) = self.held_fallback {
-            if self.held_id > 0 && s.item_id == self.held_id {
-                return Some(s);
             }
         }
         None
@@ -974,6 +978,17 @@ impl PlaySession {
             self.last = pos;
             self.has_moved = true;
         }
+        // Teleport acknowledgement (mirrors `field_9006_j`): while the
+        // client has not echoed the teleported spot, its packets are
+        // stale pre-teleport traffic (e.g. the death position right after
+        // respawn) and are held, never kicked or applied.
+        if let Some(t) = self.teleport_wait {
+            if x == t[0] && z == t[2] && (y - t[1]) * (y - t[1]) < 0.01 {
+                self.teleport_wait = None;
+            } else {
+                return None;
+            }
+        }
         let final_yaw = if rotating { yaw } else { cur_yaw };
         let final_pitch = if rotating { pitch } else { cur_pitch };
         // Riding branch: look + drift only.
@@ -1067,8 +1082,10 @@ impl PlaySession {
         match res.status {
             1 => return self.kick("Illegal stance"),
             2 => return self.kick("Illegal position"),
-            3 => return self.kick("Moved too quickly"),
-            4 => {
+            // Vanilla never kicks for distance ("moved wrongly" only snaps
+            // the player back): teleport home and wait for the client echo
+            // instead of disconnecting legitimate teleports and respawns.
+            3 | 4 => {
                 self.teleport_to(ctx.world, me, bx, by, bz, final_yaw, final_pitch);
                 return None;
             }
@@ -1200,6 +1217,9 @@ impl PlaySession {
         if bid == 0 {
             return;
         }
+        // Pre-removal metadata rides into the drop (doors drop from the
+        // lower half only, like BlockDoor.idDropped).
+        let meta = ctx.world.get_block_meta(x, y, z);
         if matches!(bid, 54 | 61 | 62 | 63 | 68) {
             ctx.world.scatter_container_tile(x, y, z);
         } else {
@@ -1241,7 +1261,7 @@ impl PlaySession {
         if removed {
             let held_id = self.selected_stack(ctx.world).map(|s| s.item_id).unwrap_or(0);
             if alpha_mining_can_harvest(bid as i32, held_id) {
-                ctx.world.drop_block_for(bid, x, y, z);
+                ctx.world.drop_block_for(bid, meta, x, y, z);
             }
         }
     }
@@ -1721,6 +1741,12 @@ pub fn tile_packet(x: i32, y: i32, z: i32, tile: &TileData) -> Vec<u8> {
 impl PlaySession {
     /// Write a mutated stack into the real current slot (air-use path).
     fn write_back_current(&mut self, ctx: &mut SessionCtx, s: FfiItemStack) {
+        let live = s.stack_size > 0 && s.item_id > 0;
+        // Ghost fallback shadows the current slot while active.
+        if self.held_fallback.is_some() {
+            self.held_fallback = if live { Some(s) } else { None };
+            return;
+        }
         let cur = match ctx.world.entities.get(self.player) {
             Some(Entity::Player(p)) => p.inventory.current,
             _ => return,
@@ -1879,11 +1905,9 @@ impl PlaySession {
                     let max = alpha_item_max_damage(s.item_id);
                     crate::inventory::item_stack_damage(&mut s, wear, max);
                     if s.stack_size <= 0 {
-                        let is_fallback = match ctx.world.entities.get(me) {
-                            Some(Entity::Player(p)) => p.inventory.current == 35,
-                            _ => false,
-                        };
-                        if is_fallback {
+                        // A spent ghost clears the fallback (and the held
+                        // id); a spent real stack clears its own slot.
+                        if self.held_fallback.is_some() {
                             self.held_fallback = None;
                             self.held_id = 0;
                             if let Some(Entity::Player(p)) = ctx.world.entities.get_mut(me) {
@@ -1904,16 +1928,20 @@ impl PlaySession {
                         }
                         self.send_inventory(ctx.world);
                     } else {
-                        let cur = match ctx.world.entities.get(me) {
-                            Some(Entity::Player(p)) => p.inventory.current,
-                            _ => -1,
-                        };
-                        if cur >= 0 && cur < 35 {
-                            if let Some(Entity::Player(p)) = ctx.world.entities.get_mut(me) {
-                                p.inventory.main[cur as usize] = Some(s);
-                            }
-                        } else if cur == 35 {
+                        // Worn ghost stays in the fallback; a worn real
+                        // stack returns to its own slot, 35 included.
+                        if self.held_fallback.is_some() {
                             self.held_fallback = Some(s);
+                        } else {
+                            let cur = match ctx.world.entities.get(me) {
+                                Some(Entity::Player(p)) => p.inventory.current,
+                                _ => -1,
+                            };
+                            if cur >= 0 && cur < 36 {
+                                if let Some(Entity::Player(p)) = ctx.world.entities.get_mut(me) {
+                                    p.inventory.main[cur as usize] = Some(s);
+                                }
+                            }
                         }
                     }
                 }
@@ -1969,6 +1997,7 @@ impl PlaySession {
         }
         self.last = [sx, sy, sz];
         self.has_moved = false;
+        self.teleport_wait = Some([sx, sy, sz]);
         // Packet order mirrors C++: respawn, health, teleport, inventory.
         self.outbox.push(pkt_respawn());
         self.outbox.push(pkt_teleport(sx, sy, sz, 0.0, 0.0));
@@ -2007,18 +2036,22 @@ impl PlaySession {
         }
     }
 
+    /// Ghost fallback for a held item id the server cannot find in any
+    /// real slot (desync/creative): a 1-count copy that shadows slot 35
+    /// without touching real contents, like vanilla's `field_10_k`.
+    fn ghost_stack(held_id: i32) -> FfiItemStack {
+        FfiItemStack { stack_size: 1, animations_to_go: 0, item_id: held_id, item_damage: 0 }
+    }
+
     fn apply_inventory(
         &mut self,
         ctx: &mut SessionCtx,
         inv_type: i32,
         slots: &[crate::network::FfiSlotData],
     ) {
-        fn apply(bank: &mut [Option<FfiItemStack>], slots: &[crate::network::FfiSlotData], skip: usize) {
+        fn apply(bank: &mut [Option<FfiItemStack>], slots: &[crate::network::FfiSlotData]) {
             let n = slots.len().min(bank.len());
             for i in 0..n {
-                if i == skip {
-                    continue;
-                }
                 let id = slots[i].item_id as i32;
                 if id >= 0 && id < 32000 {
                     let dmg = if crate::item_data::alpha_item_max_damage(id) > 0 {
@@ -2045,39 +2078,37 @@ impl PlaySession {
         let me = self.player;
         if inv_type == -1 {
             if let Some(Entity::Player(p)) = ctx.world.entities.get_mut(me) {
-                apply(&mut p.inventory.main, slots, 35);
+                apply(&mut p.inventory.main, slots);
             }
             if self.held_id > 0 {
                 let mut found = false;
                 if let Some(Entity::Player(p)) = ctx.world.entities.get_mut(me) {
-                    for i in 0..35 {
+                    for i in 0..36 {
                         if p.inventory.main[i].map(|s| s.item_id) == Some(self.held_id) {
                             p.inventory.current = i as i32;
                             found = true;
                             break;
                         }
                     }
-                    if found {
-                        p.inventory.main[35] = None;
+                    if !found {
+                        // Ghost fallback only; every real slot (35
+                        // included) keeps its contents.
+                        p.inventory.current = 35;
                     }
                 }
                 if found {
                     self.held_fallback = None;
                 } else {
-                    self.held_id = 0;
-                    self.held_fallback = None;
-                    if let Some(Entity::Player(p)) = ctx.world.entities.get_mut(me) {
-                        p.inventory.main[35] = None;
-                    }
+                    self.held_fallback = Some(Self::ghost_stack(self.held_id));
                 }
             }
         } else if inv_type == -2 {
             if let Some(Entity::Player(p)) = ctx.world.entities.get_mut(me) {
-                apply(&mut p.inventory.crafting, slots, usize::MAX);
+                apply(&mut p.inventory.crafting, slots);
             }
         } else if inv_type == -3 {
             if let Some(Entity::Player(p)) = ctx.world.entities.get_mut(me) {
-                apply(&mut p.inventory.armor, slots, usize::MAX);
+                apply(&mut p.inventory.armor, slots);
             }
         }
     }
@@ -2148,6 +2179,9 @@ impl PlaySession {
                 if let Some(NbtTag::Short(v)) = nbt.map.get("ItemBurnTime") {
                     s.current_item_burn_time = *v;
                 }
+                // Same replace-not-merge rule as chests (vanilla
+                // readFromNBT starts from a fresh bank).
+                s.slots = crate::tile_entity_furnace::furnace_create().slots;
                 if let Some(NbtTag::List(l)) = nbt.map.get("Items") {
                     for elem in &l.elements {
                         if let NbtTag::Compound(im) = elem {
@@ -2164,6 +2198,9 @@ impl PlaySession {
                 ctx.world.tiles.insert((x, y, z), TileData::Furnace(s));
             }
             TileData::Chest(mut s) => {
+                // Vanilla readFromNBT replaces the whole bank: clear first
+                // so client-removed stacks do not linger server-side.
+                s.slots = crate::tile_entity_chest::chest_create().slots;
                 if let Some(NbtTag::List(l)) = nbt.map.get("Items") {
                     for elem in &l.elements {
                         if let NbtTag::Compound(im) = elem {
@@ -2310,14 +2347,11 @@ impl PlaySession {
         None
     }
 
-    /// Write a mutated held stack back to its slot (or the fallback copy).
+    /// Write a mutated held stack back to its slot (or the fallback copy
+    /// while a ghost is active, so real slot contents are never shadowed).
     fn write_stack_slot(&mut self, ctx: &mut SessionCtx, slot: Option<usize>, s: FfiItemStack) {
         let live = s.stack_size > 0 && s.item_id > 0;
-        let is_fallback = match ctx.world.entities.get(self.player) {
-            Some(Entity::Player(p)) => p.inventory.current == 35,
-            _ => false,
-        };
-        if is_fallback {
+        if self.held_fallback.is_some() {
             self.held_fallback = if live { Some(s) } else { None };
             return;
         }
@@ -2602,7 +2636,8 @@ mod play_tests {
         );
         assert!(out.is_none());
         assert!((w.entities.get(player).unwrap().body().pos[0] - 4.5).abs() < 1e-6);
-        // Cross-map jump is rejected with a kick.
+        // Cross-map jump is snapped back, never kicked (vanilla has no
+        // speed kick): the server teleports home and waits for the echo.
         let out = sess.pump(
             &mut ctx(&mut w, &ops, &mut bc),
             PacketData::PlayerLookMove {
@@ -2610,8 +2645,18 @@ mod play_tests {
                 on_ground: true,
             },
         );
-        assert!(matches!(out, Some(SessionOutcome::Kick(_))));
-        assert_eq!(sess.outbox.last().unwrap()[0], 255);
+        assert!(out.is_none());
+        assert!(sess.teleport_wait.is_some());
+        assert_eq!(sess.outbox.last().unwrap()[0], 13);
+        // The client echo clears the wait and resumes validation.
+        let out = sess.pump(
+            &mut ctx(&mut w, &ops, &mut bc),
+            PacketData::PlayerLookMove {
+                x: 4.5, y: 64.0, stance: 65.62, z: 4.5, yaw: 0.0, pitch: 0.0, on_ground: true,
+            },
+        );
+        assert!(out.is_none());
+        assert!(sess.teleport_wait.is_none());
     }
 
     #[test]
@@ -3034,6 +3079,96 @@ mod play_tests {
             PacketData::ArmAnimation { entity_id: player, animate: 1 },
         );
         assert!(bc.iter().any(|b| matches!(b, SessionBroadcast::ArmSwing(id) if *id == player)));
+    }
+
+    #[test]
+    fn test_respawn_stale_position_held_not_kicked() {
+        // Death far from spawn, respawn, then a stale death-spot packet
+        // arrives before the client processes the teleport: vanilla holds
+        // it for the echo instead of kicking for speed.
+        let mut w = floor_world();
+        let ops = no_ops();
+        let player = spawn_player(&mut w, "Steve", 30.5, 64.0, 30.5);
+        w.attack_living(player, 100, None);
+        let mut sess = PlaySession::new(player);
+        let mut bc = Vec::new();
+        assert!(sess.pump(&mut ctx(&mut w, &ops, &mut bc), PacketData::Respawn).is_none());
+        let out = sess.pump(
+            &mut ctx(&mut w, &ops, &mut bc),
+            PacketData::PlayerLookMove {
+                x: 30.5, y: 64.0, stance: 65.62, z: 30.5, yaw: 0.0, pitch: 0.0,
+                on_ground: true,
+            },
+        );
+        assert!(out.is_none(), "stale packet held, not kicked");
+        assert!(sess.teleport_wait.is_some());
+        // The echo clears the wait and play resumes.
+        let out = sess.pump(
+            &mut ctx(&mut w, &ops, &mut bc),
+            PacketData::PlayerLookMove {
+                x: 0.5, y: 64.0, stance: 65.62, z: 0.5, yaw: 0.0, pitch: 0.0,
+                on_ground: true,
+            },
+        );
+        assert!(out.is_none());
+        assert!(sess.teleport_wait.is_none());
+    }
+
+    #[test]
+    fn test_slot_35_survives_client_echo() {
+        // The last main slot is real storage: client echoes apply to it
+        // and the held dance never wipes it (it used to be skipped and
+        // cleared, eating whatever the player parked there).
+        let mut w = floor_world();
+        let ops = no_ops();
+        let player = spawn_player(&mut w, "Steve", 3.5, 64.0, 4.5);
+        if let Some(Entity::Player(p)) = w.entities.get_mut(player) {
+            p.inventory.main[35] = Some(crate::inventory::FfiItemStack {
+                stack_size: 5, animations_to_go: 0, item_id: 3, item_damage: 0,
+            });
+        }
+        let mut sess = PlaySession::new(player);
+        let mut bc = Vec::new();
+        let mut slots =
+            vec![crate::network::FfiSlotData { item_id: -1, count: 0, damage: 0 }; 36];
+        slots[35] = crate::network::FfiSlotData { item_id: 3, count: 5, damage: 0 };
+        assert!(sess
+            .pump(&mut ctx(&mut w, &ops, &mut bc), PacketData::PlayerInventory {
+                inventory_type: -1,
+                slots,
+            })
+            .is_none());
+        let kept = match w.entities.get(player).unwrap() {
+            Entity::Player(p) => p.inventory.main[35].map(|s| (s.item_id, s.stack_size)),
+            _ => unreachable!(),
+        };
+        assert_eq!(kept, Some((3, 5)));
+    }
+
+    #[test]
+    fn test_held_switch_finds_slot_35() {
+        // Selecting the stack parked in slot 35 points current at it
+        // instead of fabricating a ghost and wiping the slot.
+        let mut w = floor_world();
+        let ops = no_ops();
+        let player = spawn_player(&mut w, "Steve", 3.5, 64.0, 4.5);
+        if let Some(Entity::Player(p)) = w.entities.get_mut(player) {
+            p.inventory.main[35] = Some(crate::inventory::FfiItemStack {
+                stack_size: 1, animations_to_go: 0, item_id: 323, item_damage: 0,
+            });
+        }
+        let mut sess = PlaySession::new(player);
+        let mut bc = Vec::new();
+        sess.pump(
+            &mut ctx(&mut w, &ops, &mut bc),
+            PacketData::BlockItemSwitch { entity_id: player, item_id: 323 },
+        );
+        let (cur, kept) = match w.entities.get(player).unwrap() {
+            Entity::Player(p) => (p.inventory.current, p.inventory.main[35].map(|s| s.item_id)),
+            _ => unreachable!(),
+        };
+        assert_eq!(cur, 35);
+        assert_eq!(kept, Some(323));
     }
 
     #[test]
