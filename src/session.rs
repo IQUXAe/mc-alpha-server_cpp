@@ -1124,9 +1124,13 @@ impl PlaySession {
         }
         if let Some(e) = ctx.world.entities.get_mut(me) {
             e.body_mut().fall_distance = fall_res.new_fall_distance;
-            // Server-authoritative ground: move_body just computed on_ground
-            // from collisions — never trust the client's flag (else no-fall
-            // cheats). Vanilla derives damage from the post-move state.
+            // Vanilla drives player onGround FROM THE PACKET
+            // (NetServerHandler.handleFlying: `playerEntity.onGround =
+            // packet.onGround`): a standing player sends zero-delta moves,
+            // for which moveEntity would report false. Removing this broke
+            // digging (5x off-ground penalty) and jumps. Fall *distance*
+            // above stays server-measured, so damage is still authoritative.
+            e.body_mut().on_ground = on_ground;
         }
         if let Some(e) = ctx.world.entities.get(me) {
             self.last = e.body().pos;
