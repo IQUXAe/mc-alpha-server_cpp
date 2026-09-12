@@ -2,6 +2,9 @@
 name = "alpha_server"
 version = "0.1.0"
 edition = "2021"
+description = "Minecraft Alpha 1.2.6 server implementation in Rust"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/IQUXAe/mc-alpha-server_rust"
 
 [profile.release]
 lto = true

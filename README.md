@@ -65,4 +65,8 @@ runtime files and stay out of git.
 
 ---
 
+## License
+
+GPLv3 or later, see [LICENSE](LICENSE). Copyright (C) 2026 IQUXAe.
+
 > Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.
