@@ -39,7 +39,7 @@ fn get_smelting_result(item_id: i32) -> i32 {
 
 pub fn furnace_create() -> FurnaceState {
     FurnaceState {
-        slots: [ItemStack { stack_size: 0, animations_to_go: 0, item_id: -1, item_damage: 0 }; FURNACE_SIZE],
+        slots: [ItemStack::empty_tile(); FURNACE_SIZE],
         burn_time: 0,
         cook_time: 0,
         current_item_burn_time: 0,
@@ -170,11 +170,11 @@ mod tests {
     use super::*;
 
     fn stack(item_id: i32, count: i32) -> ItemStack {
-        ItemStack { stack_size: count, animations_to_go: 0, item_id, item_damage: 0 }
+        ItemStack::new(item_id, count, 0)
     }
 
     fn empty() -> ItemStack {
-        ItemStack { stack_size: 0, animations_to_go: 0, item_id: -1, item_damage: 0 }
+        ItemStack::empty_tile()
     }
 
     fn state_with(input: ItemStack, fuel: ItemStack) -> FurnaceState {

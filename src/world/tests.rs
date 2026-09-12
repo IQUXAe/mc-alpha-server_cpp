@@ -747,18 +747,8 @@
     fn furnace_tile_with(input: (i32, i32), fuel: (i32, i32)) -> TileData {
         use crate::inventory::ItemStack;
         let mut s = crate::tile_entity::furnace::furnace_create();
-        s.slots[0] = ItemStack {
-            stack_size: input.1,
-            animations_to_go: 0,
-            item_id: input.0,
-            item_damage: 0,
-        };
-        s.slots[1] = ItemStack {
-            stack_size: fuel.1,
-            animations_to_go: 0,
-            item_id: fuel.0,
-            item_damage: 0,
-        };
+        s.slots[0] = ItemStack::new(input.0, input.1, 0);
+        s.slots[1] = ItemStack::new(fuel.0, fuel.1, 0);
         TileData::Furnace(s)
     }
 
@@ -1385,12 +1375,7 @@
     }
 
     fn stk(item_id: i32, count: i32, damage: i32) -> crate::inventory::ItemStack {
-        crate::inventory::ItemStack {
-            stack_size: count,
-            animations_to_go: 0,
-            item_id,
-            item_damage: damage,
-        }
+        crate::inventory::ItemStack::new(item_id, count, damage)
     }
 
     fn set_slot(w: &mut World, id: EntityId, bank: u8, slot: usize, s: crate::inventory::ItemStack) {

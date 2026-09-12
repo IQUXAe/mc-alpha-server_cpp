@@ -111,12 +111,7 @@ impl World {
             });
             if let TileData::Chest(ch) = tile {
                 if slot >= 0 && (slot as usize) < ch.slots.len() {
-                    ch.slots[slot as usize] = crate::inventory::ItemStack {
-                        stack_size: count,
-                        animations_to_go: 0,
-                        item_id: item,
-                        item_damage: 0,
-                    };
+                    ch.slots[slot as usize] = crate::inventory::ItemStack::new(item, count, 0);
                 }
             }
         }

@@ -80,12 +80,7 @@ impl PlaySession {
                         );
                     if bucket {
                         if let Some(Entity::Player(p)) = ctx.world.entities.get_mut(me) {
-                            p.inventory.main[cur as usize] = Some(ItemStack {
-                                stack_size: 1,
-                                animations_to_go: 0,
-                                item_id: 335,
-                                item_damage: 0,
-                            });
+                            p.inventory.main[cur as usize] = Some(ItemStack::new(335, 1, 0));
                         }
                         self.send_inventory(ctx.world);
                         return None;

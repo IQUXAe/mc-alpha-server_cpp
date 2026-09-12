@@ -12,7 +12,7 @@ impl PlaySession {
     /// real slot (desync/creative): a 1-count copy that shadows slot 35
     /// without touching real contents, like vanilla's `field_10_k`.
     pub(crate) fn ghost_stack(held_id: i32) -> ItemStack {
-        ItemStack { stack_size: 1, animations_to_go: 0, item_id: held_id, item_damage: 0 }
+        ItemStack::new(held_id, 1, 0)
     }
 
     pub(crate) fn apply_inventory(
@@ -33,12 +33,7 @@ impl PlaySession {
                     };
                     let count = slots[i].count as i32;
                     bank[i] = if count > 0 {
-                        Some(ItemStack {
-                            stack_size: count,
-                            animations_to_go: 0,
-                            item_id: id,
-                            item_damage: dmg,
-                        })
+                        Some(ItemStack::new(id, count, dmg))
                     } else {
                         None
                     };

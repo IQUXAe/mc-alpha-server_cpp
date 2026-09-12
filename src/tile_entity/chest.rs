@@ -9,6 +9,6 @@ pub struct ChestState {
 
 pub fn chest_create() -> ChestState {
     ChestState {
-        slots: [ItemStack { stack_size: 0, animations_to_go: 0, item_id: -1, item_damage: 0 }; CHEST_SIZE],
+        slots: [ItemStack::empty_tile(); CHEST_SIZE],
     }
 }

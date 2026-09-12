@@ -643,18 +643,8 @@
         let (fx, fz) = (srv.world.spawn[0], srv.world.spawn[2]);
         srv.world.set_block_id(fx, 64, fz, 61);
         let mut f = crate::tile_entity::furnace::furnace_create();
-        f.slots[0] = crate::inventory::ItemStack {
-            stack_size: 1,
-            animations_to_go: 0,
-            item_id: 4,
-            item_damage: 0,
-        };
-        f.slots[1] = crate::inventory::ItemStack {
-            stack_size: 1,
-            animations_to_go: 0,
-            item_id: 5,
-            item_damage: 0,
-        };
+        f.slots[0] = crate::inventory::ItemStack::new(4, 1, 0);
+        f.slots[1] = crate::inventory::ItemStack::new(5, 1, 0);
         srv.world.tiles.insert((fx, 64, fz), crate::world::TileData::Furnace(f));
         // Drain first (streaming/tracker noise), then tick into the flip.
         while next_pkt_opt(&mut a, Duration::from_millis(200)).is_some() {}

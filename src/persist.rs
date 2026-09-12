@@ -204,12 +204,11 @@ fn write_stack(m: &mut BTreeMap<String, NbtTag>, s: &ItemStack) {
 }
 
 pub(crate) fn read_stack(m: &BTreeMap<String, NbtTag>) -> ItemStack {
-    ItemStack {
-        item_id: get_short(m, "id") as i32,
-        stack_size: get_byte(m, "Count") as i32,
-        item_damage: get_short(m, "Damage") as i32,
-        animations_to_go: 0,
-    }
+    ItemStack::new(
+        get_short(m, "id") as i32,
+        get_byte(m, "Count") as i32,
+        get_short(m, "Damage") as i32,
+    )
 }
 
 // ---- chunk blob encode ----
@@ -968,7 +967,7 @@ mod tests {
     }
 
     fn stk(item_id: i32, count: i32, damage: i32) -> ItemStack {
-        ItemStack { stack_size: count, animations_to_go: 0, item_id, item_damage: damage }
+        ItemStack::new(item_id, count, damage)
     }
 
     /// World with a furnished chunk: torch w/ meta, furnace + chest +

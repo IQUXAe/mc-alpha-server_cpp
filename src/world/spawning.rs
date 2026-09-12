@@ -235,12 +235,7 @@ impl World {
                 };
                 let rem = self.player_add_item(
                     *pid,
-                    crate::inventory::ItemStack {
-                        stack_size: count,
-                        animations_to_go: 0,
-                        item_id,
-                        item_damage: damage,
-                    },
+                    crate::inventory::ItemStack::new(item_id, count, damage),
                 );
                 if rem < count {
                     if rem <= 0 {

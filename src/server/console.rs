@@ -241,12 +241,7 @@ impl Server {
         let count = count.clamp(1, 64);
         let rem = self.world.player_add_item(
             eid,
-            crate::inventory::ItemStack {
-                stack_size: count,
-                animations_to_go: 0,
-                item_id: id,
-                item_damage: 0,
-            },
+            crate::inventory::ItemStack::new(id, count, 0),
         );
         let given = count - rem;
         if let Some(cid) = self.players.get(&eid).copied() {

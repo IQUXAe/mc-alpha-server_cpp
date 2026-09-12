@@ -382,12 +382,7 @@ impl PureItemStack {
     }
 
     pub fn to_stack(self) -> ItemStack {
-        ItemStack {
-            stack_size: self.count,
-            animations_to_go: 0,
-            item_id: self.item_id,
-            item_damage: self.damage,
-        }
+        ItemStack::new(self.item_id, self.count, self.damage)
     }
 
     fn max_for(self) -> i32 {
@@ -643,12 +638,7 @@ mod tests {
         // existing item_stack_damage helper + our durability table.
         let max = item_max_damage(ITEM_SWORD_WOOD);
         assert_eq!(max, 32);
-        let mut s = ItemStack {
-            stack_size: 1,
-            animations_to_go: 0,
-            item_id: ITEM_SWORD_WOOD,
-            item_damage: 31,
-        };
+        let mut s = ItemStack::new(ITEM_SWORD_WOOD, 1, 31);
         let broke = item_stack_damage(&mut s, 1, max);
         assert!(!broke);
         assert_eq!(s.item_damage, 32);
@@ -657,12 +647,7 @@ mod tests {
         assert_eq!(s.item_damage, 0);
         assert_eq!(s.stack_size, 0);
 
-        let mut plain = ItemStack {
-            stack_size: 1,
-            animations_to_go: 0,
-            item_id: ITEM_DIAMOND,
-            item_damage: 0,
-        };
+        let mut plain = ItemStack::new(ITEM_DIAMOND, 1, 0);
         let max_plain = item_max_damage(ITEM_DIAMOND);
         assert_eq!(max_plain, 0);
         let broke3 = item_stack_damage(&mut plain, 100, max_plain);

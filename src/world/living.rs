@@ -242,12 +242,7 @@ impl World {
         // Environmental damage (fall/drown/fire/cactus, attacker=None) must
         // NOT scale — otherwise peaceful zeroes falls and easy nerfs them.
         let skip_difficulty_scale = attacker.is_none() || attacker_is_player;
-        let mut tmp = [ItemStack {
-            stack_size: 0,
-            animations_to_go: 0,
-            item_id: 0,
-            item_damage: 0,
-        }; 4];
+        let mut tmp = [ItemStack::empty(); 4];
         let carry = match self.entities.get(id) {
             Some(Entity::Player(p)) => {
                 for (i, slot) in p.inventory.armor.iter().enumerate() {
@@ -337,12 +332,7 @@ impl World {
         }
         match self.entities.get_mut(id) {
             Some(Entity::Player(p)) => {
-                let mut tmp = [ItemStack {
-                    stack_size: 0,
-                    animations_to_go: 0,
-                    item_id: 0,
-                    item_damage: 0,
-                }; 36];
+                let mut tmp = [ItemStack::empty(); 36];
                 for (i, slot) in p.inventory.main.iter().enumerate() {
                     tmp[i] = slot.unwrap_or(tmp[i]);
                 }
