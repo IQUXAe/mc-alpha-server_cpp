@@ -1,4 +1,5 @@
 use crate::random::JavaRandom;
+use crate::math_helper::{cos as mcos, sin as msin};
 
 pub struct MapGenCaves {
     range: i32,
@@ -95,13 +96,15 @@ impl MapGenCaves {
         let var26 = var23.next_int_bound(6) == 0;
 
         while var13 < var14 {
-            let var27 = 1.5 + ((((var13 as f32) * std::f32::consts::PI / (var14 as f32)).sin() * var10 * 1.0) as f64);
+            // Java MathHelper table sin/cos (not libm): tunnel headings must
+            // match the vanilla lattice bit-for-bit at the same seed.
+            let var27 = 1.5 + ((msin((var13 as f32) * std::f32::consts::PI / (var14 as f32)) * var10 * 1.0) as f64);
             let var29 = var27 * var15;
-            let var31 = var12.cos();
-            let var32 = var12.sin();
-            var4 += (var11.cos() * var31) as f64;
+            let var31 = mcos(var12);
+            let var32 = msin(var12);
+            var4 += (mcos(var11) * var31) as f64;
             var6 += var32 as f64;
-            var8 += (var11.sin() * var31) as f64;
+            var8 += (msin(var11) * var31) as f64;
 
             if var26 {
                 var12 *= 0.92;

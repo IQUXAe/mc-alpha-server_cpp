@@ -1442,6 +1442,9 @@ pub fn pkt_map_chunk(
 /// Cross-session events for the server tick (fan-out, saves).
 pub enum SessionBroadcast {
     Chat(String),
+    /// Private message: deliver `text` to `target`, or echo the miss note
+    /// back to the sender when offline (Java `/tell`).
+    Tell { target: String, text: String },
     ArmSwing(EntityId),
     TileChanged(i32, i32, i32),
 }
@@ -1482,9 +1485,12 @@ thread_local! {
 }
 
 fn with_use_ctx<T>(f: impl FnOnce(&mut World, EntityId, &mut PlaySession, &HashSet<String>) -> T, dflt: T) -> T {
-    // SAFETY: `UseGuard` installs the pointers from live `&mut` borrows and
-    // clears them on drop; the guard outlives every shim call, so the refs
-    // below are valid and unaliased for the closure body.
+    // SAFETY: `UseGuard` reborrows `&mut World` / `&mut PlaySession` through
+    // raw pointers for the guard's lifetime. Sound because the original
+    // `&mut SessionCtx` (which owns the `&mut World`) is never touched
+    // while the guard lives: the guarded region only uses `self`
+    // (PlaySession), the local `s` stack, and these shims. No two live
+    // `&mut` to the same allocation overlap in use.
     USE_CTX.with(|c| unsafe {
         let ctx = c.get();
         if ctx.world.is_null() || ctx.session.is_null() || ctx.ops.is_null() {
@@ -1973,15 +1979,21 @@ impl PlaySession {
 
     // ---- chat / commands / respawn / misc ----
 
+/// Vanilla chat charset (Java NetServerHandler.handleChat allow-list).
+const CHAT_ALLOWED: &str = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_'abcdefghijklmnopqrstuvwxyz{|}~⌂ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜø£Ø×ƒáíóúñÑªº¿®¬½¼¡«»";
+
     fn chat(&mut self, ctx: &mut SessionCtx, message: &str) -> Option<SessionOutcome> {
-        // Byte-truncate at 100 like C++ substr (on a char boundary so the
-        // String stays valid).
-        let mut msg = message.to_string();
-        while msg.len() > 100 {
-            msg.pop();
+        // Vanilla gates (Java NetServerHandler.handleChat): chars (not
+        // bytes) over 100 kick, then trim, then the allowed-charset kick.
+        if message.chars().count() > 100 {
+            return Some(SessionOutcome::Kick("Chat message too long".to_string()));
+        }
+        let msg = message.trim().to_string();
+        if !msg.chars().all(|c| Self::CHAT_ALLOWED.contains(c)) {
+            return Some(SessionOutcome::Kick("Illegal characters in chat".to_string()));
         }
         if msg.starts_with('/') {
-            chat_command(ctx.world, self, ctx.ops, &msg);
+            chat_command(ctx.world, self, ctx.ops, ctx.broadcast, &msg);
             return None;
         }
         let username = self.username(ctx.world).to_string();

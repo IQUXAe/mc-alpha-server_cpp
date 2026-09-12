@@ -7,6 +7,8 @@ pub enum ConsoleCommandTag {
     List,
     Stop,
     SaveAll,
+    SaveOff,
+    SaveOn,
     Op,
     Deop,
     BanIp,
@@ -15,6 +17,7 @@ pub enum ConsoleCommandTag {
     Pardon,
     Kick,
     Tp,
+    Give,
     Summon,
     Say,
     Tell,
@@ -30,9 +33,12 @@ pub struct FfiString {
 
 impl FfiString {
     pub fn from_str(s: &str) -> Self {
+        // Never hand out null: an empty arg points at a static NUL so
+        // callers can always read `len` bytes safely.
+        static NUL: u8 = 0;
         Self {
             ptr: if s.is_empty() {
-                std::ptr::null()
+                &NUL as *const u8 as *const c_char
             } else {
                 s.as_ptr() as *const c_char
             },
@@ -98,6 +104,10 @@ pub fn rust_parse_console_command(cmd: &str) -> RustParsedCommand {
         tag = ConsoleCommandTag::Stop;
     } else if lower.starts_with("save-all") {
         tag = ConsoleCommandTag::SaveAll;
+    } else if lower.starts_with("save-off") {
+        tag = ConsoleCommandTag::SaveOff;
+    } else if lower.starts_with("save-on") {
+        tag = ConsoleCommandTag::SaveOn;
     } else if lower.starts_with("op ") {
         tag = ConsoleCommandTag::Op;
         arg1 = arg_of(cmd, 3);
@@ -134,6 +144,19 @@ pub fn rust_parse_console_command(cmd: &str) -> RustParsedCommand {
         let (target, msg) = split_two(rest);
         arg1 = target;
         arg2 = msg;
+    } else if lower.starts_with("give ") {
+        // Java: give <player> <id> [count]. count clamps 1..64.
+        tag = ConsoleCommandTag::Give;
+        let rest = arg_of(cmd, 5);
+        let (target, tail) = split_two(rest);
+        arg1 = target;
+        let (id_str, count_str) = split_two(tail);
+        arg2 = id_str;
+        if !count_str.is_empty() {
+            if let Ok(c) = count_str.parse::<i32>() {
+                count = std::cmp::max(1, std::cmp::min(64, c));
+            }
+        }
     } else if lower.starts_with("summon ") {
         tag = ConsoleCommandTag::Summon;
         let rest = arg_of(cmd, 7);

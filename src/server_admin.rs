@@ -18,7 +18,7 @@
 use std::collections::{BTreeSet, HashSet};
 
 use crate::entity_table::Entity;
-use crate::session::{PlaySession, pkt_chat};
+use crate::session::{PlaySession, SessionBroadcast, pkt_chat};
 use crate::world::World;
 
 /// Lowercase ASCII like the C++ `::tolower` loop over latin names.
@@ -148,6 +148,7 @@ pub fn chat_command(
     world: &mut World,
     sess: &mut PlaySession,
     ops: &HashSet<String>,
+    broadcast: &mut Vec<SessionBroadcast>,
     msg: &str,
 ) {
     // Ops store lowercased; the query lowercases like C++ isOp.
@@ -164,6 +165,38 @@ pub fn chat_command(
         return;
     }
     let cmd = args[0];
+    // Vanilla player commands (Java NetServerHandler.func_4010_d): /me
+    // emotes to everyone, /kill suicides, /tell whispers. These need no op.
+    if cmd.eq_ignore_ascii_case("me") {
+        let text = body.splitn(2, char::is_whitespace).nth(1).unwrap_or("").trim();
+        let username = match world.entities.get(sess.player) {
+            Some(Entity::Player(p)) => p.username.clone(),
+            _ => return,
+        };
+        broadcast.push(SessionBroadcast::Chat(format!("* {username} {text}")));
+        return;
+    }
+    if cmd.eq_ignore_ascii_case("kill") {
+        world.attack_living(sess.player, 1000, None);
+        return;
+    }
+    if cmd.eq_ignore_ascii_case("tell") {
+        if args.len() < 3 {
+            return;
+        }
+        let username = match world.entities.get(sess.player) {
+            Some(Entity::Player(p)) => p.username.clone(),
+            _ => return,
+        };
+        // Re-split to keep the raw message (whitespace-preserved).
+        let rest = body.splitn(2, char::is_whitespace).nth(1).unwrap_or("");
+        let message = rest.splitn(2, char::is_whitespace).nth(1).unwrap_or("").trim();
+        broadcast.push(SessionBroadcast::Tell {
+            target: args[1].to_string(),
+            text: format!("§7{username} whispers {message}"),
+        });
+        return;
+    }
     if !op && (cmd == "give" || cmd == "tp") {
         say(sess, "You do not have permission to use this command");
         return;
@@ -274,7 +307,7 @@ mod tests {
     }
 
     use crate::entity_table::{Entity, PlayerEnt};
-    use crate::session::PlaySession;
+    use crate::session::{PlaySession, SessionBroadcast};
     use crate::world::World;
 
     fn setup(op: bool) -> (World, PlaySession, HashSet<String>) {
@@ -306,9 +339,11 @@ mod tests {
         out
     }
 
-    fn run(w: &mut World, sess: &mut PlaySession, ops: &HashSet<String>, cmd: &str) {
+    fn run(w: &mut World, sess: &mut PlaySession, ops: &HashSet<String>, cmd: &str) -> Vec<SessionBroadcast> {
         sess.outbox.clear();
-        chat_command(w, sess, ops, cmd);
+        let mut bc = Vec::new();
+        chat_command(w, sess, ops, &mut bc, cmd);
+        bc
     }
 
     fn gave_item(w: &World, item_id: i32, count: i32, damage: i32) -> bool {
@@ -362,5 +397,24 @@ mod tests {
         // Unknown command.
         run(&mut w, &mut sess, &ops, "/dance");
         assert_eq!(chats(&sess), vec!["Unknown command: dance"]);
+
+        // /me emotes to broadcast (no op needed).
+        let (mut w, mut sess, ops) = setup(false);
+        let bc = run(&mut w, &mut sess, &ops, "/me does a flip");
+        assert!(bc.iter().any(|b| matches!(b, SessionBroadcast::Chat(t) if t == "* Steve does a flip")));
+
+        // /kill damages self to death.
+        let (mut w, mut sess, ops) = setup(false);
+        let _ = run(&mut w, &mut sess, &ops, "/kill");
+        match w.entities.get(sess.player).unwrap() {
+            Entity::Player(p) => assert!(p.living.health <= 0),
+            _ => unreachable!(),
+        }
+
+        // /tell queues a targeted whisper.
+        let (mut w, mut sess, ops) = setup(false);
+        let bc = run(&mut w, &mut sess, &ops, "/tell Notch hello there");
+        assert!(bc.iter().any(|b| matches!(b, SessionBroadcast::Tell { target, text }
+            if target == "Notch" && text.contains("whispers"))));
     }
 }

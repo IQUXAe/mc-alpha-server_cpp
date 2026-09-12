@@ -400,15 +400,16 @@ impl WorldGenDungeons {
                         if (accessor.is_block_solid)(cx + 1, y, cz) { solid_count += 1; }
                         if (accessor.is_block_solid)(cx, y, cz - 1) { solid_count += 1; }
                         if (accessor.is_block_solid)(cx, y, cz + 1) { solid_count += 1; }
-                        
+
                         if solid_count == 1 {
                             (accessor.set_block_id)(cx, y, cz, 54); // chest block
-                            
-                            // Simulate chest item slot generation (8 attempts)
+
+                            // Chest loot (Java WorldGenDungeons: 8 rolls of
+                            // func_434_a into random slots).
                             for _ in 0..8 {
-                                let item = func_434_a(rand);
-                                if item.is_some() {
-                                    rand.next_int_bound(27); // slot index
+                                if let Some((item, count)) = dungeon_loot(rand) {
+                                    let slot = rand.next_int_bound(27);
+                                    push_dungeon_loot(cx, y, cz, slot, item, count);
                                 }
                             }
                             break;
@@ -419,7 +420,7 @@ impl WorldGenDungeons {
 
             // Place spawner
             (accessor.set_block_id)(x, y, z, 52); // mob spawner
-            func_433_b(rand); // Choose spawner mob type
+            dungeon_spawner_kind(rand); // Choose spawner mob type (RNG burn; spawner tiles arrive later)
             true
         } else {
             false
@@ -427,52 +428,68 @@ impl WorldGenDungeons {
     }
 }
 
-fn func_434_a(rand: &mut JavaRandom) -> Option<()> {
-    let var2 = rand.next_int_bound(11);
-    if var2 == 0 {
-        Some(())
-    } else if var2 == 1 {
-        rand.next_int_bound(4); // quantity
-        Some(())
-    } else if var2 == 2 {
-        Some(())
-    } else if var2 == 3 {
-        rand.next_int_bound(4); // quantity
-        Some(())
-    } else if var2 == 4 {
-        rand.next_int_bound(4); // quantity
-        Some(())
-    } else if var2 == 5 {
-        rand.next_int_bound(4); // quantity
-        Some(())
-    } else if var2 == 6 {
-        Some(())
-    } else if var2 == 7 {
-        if rand.next_int_bound(100) == 0 {
-            Some(())
-        } else {
-            None
+/// Pending dungeon-chest loot as (x, y, z, slot, item_id, count), drained
+/// by the world after populate write-back (the canvas holds no tiles).
+/// Thread-local: decoration runs on one thread per chunk batch.
+use std::cell::RefCell;
+thread_local! {
+    static DUNGEON_LOOT: RefCell<Vec<(i32, i32, i32, i32, i32, i32)>> = RefCell::new(Vec::new());
+}
+
+/// Queue one loot stack for a dungeon chest.
+fn push_dungeon_loot(x: i32, y: i32, z: i32, slot: i32, item: i32, count: i32) {
+    DUNGEON_LOOT.with(|c| c.borrow_mut().push((x, y, z, slot, item, count)));
+}
+
+/// Drain all pending loot (world calls this after chunk write-back).
+pub fn drain_dungeon_loot() -> Vec<(i32, i32, i32, i32, i32, i32)> {
+    DUNGEON_LOOT.with(|c| std::mem::take(&mut *c.borrow_mut()))
+}
+
+/// Dungeon loot (Java WorldGenDungeons.func_434_a): (shiftedIndex, count).
+/// Draw order matches Java exactly (quantity rolls only on taken branches).
+fn dungeon_loot(rand: &mut JavaRandom) -> Option<(i32, i32)> {
+    match rand.next_int_bound(11) {
+        0 => Some((329, 1)),                          // saddle
+        1 => Some((265, rand.next_int_bound(4) + 1)), // iron ingots
+        2 => Some((297, 1)),                          // bread
+        3 => Some((296, rand.next_int_bound(4) + 1)), // wheat
+        4 => Some((289, rand.next_int_bound(4) + 1)), // gunpowder
+        5 => Some((287, rand.next_int_bound(4) + 1)), // string
+        6 => Some((325, 1)),                          // bucket
+        7 => {
+            if rand.next_int_bound(100) == 0 {
+                Some((322, 1)) // golden apple
+            } else {
+                None
+            }
         }
-    } else if var2 == 8 {
-        if rand.next_int_bound(2) == 0 {
-            rand.next_int_bound(4); // quantity
-            Some(())
-        } else {
-            None
+        8 => {
+            if rand.next_int_bound(2) == 0 {
+                Some((331, rand.next_int_bound(4) + 1)) // redstone
+            } else {
+                None
+            }
         }
-    } else if var2 == 9 {
-        if rand.next_int_bound(10) == 0 {
-            rand.next_int_bound(2); // record index offset
-            Some(())
-        } else {
-            None
+        9 => {
+            if rand.next_int_bound(10) == 0 {
+                Some((2256 + rand.next_int_bound(2), 1)) // record 13/cat
+            } else {
+                None
+            }
         }
-    } else {
-        None
+        _ => None,
     }
 }
 
-fn func_433_b(rand: &mut JavaRandom) {
-    rand.next_int_bound(4);
+/// Spawner kind roll (Java func_433_b: 0 skeleton, 1-2 zombie, 3 spider).
+/// Returns 51/54/52 type ids for future spawner tiles; today only the RNG
+/// burn matters.
+fn dungeon_spawner_kind(rand: &mut JavaRandom) -> i32 {
+    match rand.next_int_bound(4) {
+        0 => 51,
+        3 => 52,
+        _ => 54,
+    }
 }
 

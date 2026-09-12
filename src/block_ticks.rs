@@ -245,7 +245,7 @@ pub fn block_sand_tick(world: &BlockTickWorld, block_id: u8, x: i32, y: i32, z: 
 // ---- fluid ----
 
 const FLOW_DIRS: [(i32, i32, i32); 6] = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)];
-const FLOW_PASSABLE: [u8; 10] = [37, 38, 39, 40, 50, 51, 55, 59, 83, 78];
+const FLOW_PASSABLE: [u8; 11] = [6, 37, 38, 39, 40, 50, 51, 55, 59, 83, 78];
 
 fn fluid_can_flow_into(w: &BlockTickWorld, x: i32, y: i32, z: i32) -> bool {
     let id = q_id(w, x, y, z);
@@ -1359,7 +1359,8 @@ mod tests {
         let l = logs();
         assert!(l.contains(&"meta 0 5 0 4".to_string()), "{l:?}");
 
-        // 9. Mature crops drop one wheat and nothing else.
+        // 9. Mature crops drop one wheat plus seed rolls (Java: 3x
+        // rand(15) <= 7 seeds on destroy).
         reset();
         let _ = fake().as_mut().map(|f| {
             f.blocks.insert((0, 5, 0), (59, 7));
@@ -1368,7 +1369,7 @@ mod tests {
         block_crops_drop_ffi(tp, 296, 295, 0, 5, 0, 7, 1.0);
         let l = logs();
         assert!(l.iter().any(|e| e.starts_with("drop 296 1 0")), "{l:?}");
-        assert!(!l.iter().any(|e| e.starts_with("drop 295")), "{l:?}");
+        assert!(l.iter().any(|e| e.starts_with("drop 295")), "{l:?}");
 
         // 10. Dry soil without crops reverts to dirt.
         reset();

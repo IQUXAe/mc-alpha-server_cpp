@@ -45,6 +45,9 @@ fn local_get_block_id(x: i32, y: i32, z: i32) -> u8 {
         if rel_x < 0 || rel_x >= 32 || rel_z < 0 || rel_z >= 32 {
             return (state.fallback_accessor.get_block_id)(x, y, z);
         }
+        if y < 0 || y >= 128 {
+            return (state.fallback_accessor.get_block_id)(x, y, z);
+        }
         let cx = (rel_x >> 4) as usize;
         let cz = (rel_z >> 4) as usize;
         let lx = (rel_x & 15) as usize;
@@ -77,6 +80,10 @@ fn local_set_block_id(x: i32, y: i32, z: i32, id: u8) {
             (state.fallback_accessor.set_block_id)(x, y, z, id);
             return;
         }
+        if y < 0 || y >= 128 {
+            (state.fallback_accessor.set_block_id)(x, y, z, id);
+            return;
+        }
         let cx = (rel_x >> 4) as usize;
         let cz = (rel_z >> 4) as usize;
         let lx = (rel_x & 15) as usize;
@@ -100,6 +107,9 @@ fn local_get_block_meta(x: i32, y: i32, z: i32) -> u8 {
         let rel_x = x - state.chunk_x * 16;
         let rel_z = z - state.chunk_z * 16;
         if rel_x < 0 || rel_x >= 32 || rel_z < 0 || rel_z >= 32 {
+            return (state.fallback_accessor.get_block_meta)(x, y, z);
+        }
+        if y < 0 || y >= 128 {
             return (state.fallback_accessor.get_block_meta)(x, y, z);
         }
         let cx = (rel_x >> 4) as usize;
@@ -131,6 +141,10 @@ fn local_set_block_meta(x: i32, y: i32, z: i32, meta: u8) {
         let rel_x = x - state.chunk_x * 16;
         let rel_z = z - state.chunk_z * 16;
         if rel_x < 0 || rel_x >= 32 || rel_z < 0 || rel_z >= 32 {
+            (state.fallback_accessor.set_block_meta)(x, y, z, meta);
+            return;
+        }
+        if y < 0 || y >= 128 {
             (state.fallback_accessor.set_block_meta)(x, y, z, meta);
             return;
         }
@@ -275,8 +289,10 @@ pub fn climate_into(
     debug_assert_eq!(biomes.len(), n);
     debug_assert_eq!(temperatures.len(), n);
     debug_assert_eq!(humidities.len(), n);
-    gen.temp_noise_gen.func_4101_a(temperatures, x0 as f64, z0 as f64, w, h, 0.025, 0.025, 0.25);
-    gen.humid_noise_gen.func_4101_a(humidities, x0 as f64, z0 as f64, w, h, 0.05, 0.05, 1.0 / 3.0);
+    // Java passes (double)0.025F / (double)0.05F (float widened), NOT the
+    // decimal f64 — the simplex lattice shifts otherwise (biome borders).
+    gen.temp_noise_gen.func_4101_a(temperatures, x0 as f64, z0 as f64, w, h, 0.025f32 as f64, 0.025f32 as f64, 0.25);
+    gen.humid_noise_gen.func_4101_a(humidities, x0 as f64, z0 as f64, w, h, 0.05f32 as f64, 0.05f32 as f64, 1.0 / 3.0);
 
     let mut field_4257_c = vec![0.0; n];
     gen.noise_gen3.func_4101_a(&mut field_4257_c, x0 as f64, z0 as f64, w, h, 0.25, 0.25, 0.5882352941176471);
@@ -313,7 +329,7 @@ pub fn chunk_temperatures(
     z0: i32,
     out: &mut [f64; 256],
 ) {
-    gen.temp_noise_gen.func_4101_a(out, x0 as f64, z0 as f64, 16, 16, 0.025, 0.025, 0.25);
+    gen.temp_noise_gen.func_4101_a(out, x0 as f64, z0 as f64, 16, 16, 0.025f32 as f64, 0.025f32 as f64, 0.25);
     let mut field_4257_c = [0.0f64; 256];
     gen.noise_gen3.func_4101_a(&mut field_4257_c, x0 as f64, z0 as f64, 16, 16, 0.25, 0.25, 0.5882352941176471);
     for idx in 0..256 {

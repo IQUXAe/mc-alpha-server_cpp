@@ -107,6 +107,8 @@ pub struct World {
     pub seed: i64,
     pub time: i64,
     pub spawn: [i32; 3],
+    /// Level name from `level-name` (used for `level.dat` LevelName).
+    pub level_name: String,
     /// Peaceful/easy/normal/hard (0..3, mirrors server difficulty;
     /// scales mob-vs-player damage; default normal like the C++ server).
     pub difficulty: i32,
@@ -186,6 +188,7 @@ impl World {
             seed,
             time: 0,
             spawn: [0, 64, 0],
+            level_name: "world".to_string(),
             difficulty: 2,
             spawn_monsters: true,
             spawn_animals: true,
@@ -1889,6 +1892,15 @@ mod tests {
     #[test]
     fn test_sand_falls_on_schedule() {
         let mut w = world_with_floor();
+        // Schedules need loaded surroundings (radius 8 like vanilla).
+        for cx in -1..=0 {
+            for cz in -1..=0 {
+                if cx == 0 && cz == 0 {
+                    continue;
+                }
+                add_floor_chunk(&mut w, cx, cz);
+            }
+        }
         w.set_block_id(3, 66, 4, 12);
         w.schedule_block_update(3, 66, 4, 12, 1);
         w.tick_world();
@@ -1903,6 +1915,14 @@ mod tests {
     #[test]
     fn test_scheduled_queue_gates_and_stales() {
         let mut w = world_with_floor();
+        for cx in -1..=0 {
+            for cz in -1..=0 {
+                if cx == 0 && cz == 0 {
+                    continue;
+                }
+                add_floor_chunk(&mut w, cx, cz);
+            }
+        }
         w.set_block_id(3, 66, 4, 12);
         // Future entry waits.
         w.schedule_block_update(3, 66, 4, 12, 5);
@@ -2025,19 +2045,23 @@ mod tests {
     fn test_unload_spills_and_recalls() {
         let mut w = world_with_floor();
         let _p = add_player(&mut w, "steve", 8.5, 64.0, 8.5);
-        add_floor_chunk(&mut w, 11, 0);
-        let item = w.spawn_item_entity(3, 2, 0, 11.0 * 16.0 + 8.5, 65.0, 8.5);
-        let zombie = add_mob(&mut w, MobKind::Zombie, 11.0 * 16.0 + 8.5, 65.0, 8.5);
+        // Tighten the unload radius so entities can sit in an unloading
+        // chunk yet stay inside the 128-block despawn range (vanilla kills
+        // far mobs before unload would ever spill them).
+        w.unload_radius = 5;
+        add_floor_chunk(&mut w, 7, 0);
+        let item = w.spawn_item_entity(3, 2, 0, 7.0 * 16.0 + 8.5, 65.0, 8.5);
+        let zombie = add_mob(&mut w, MobKind::Zombie, 7.0 * 16.0 + 8.5, 65.0, 8.5);
         w.time = 99;
         w.tick_world();
         assert_eq!(w.time, 100);
-        assert!(!w.has_chunk(11, 0));
+        assert!(!w.has_chunk(7, 0));
         assert!(w.entities.get(item).is_none());
         assert!(w.entities.get(zombie).is_none());
         // Spawn chunks stay put.
         assert!(w.has_chunk(0, 0));
-        assert!(w.recall_chunk(11, 0));
-        assert!(w.has_chunk(11, 0));
+        assert!(w.recall_chunk(7, 0));
+        assert!(w.has_chunk(7, 0));
         let items = w
             .entities
             .alive_ids()
@@ -5999,10 +6023,37 @@ impl World {
         }
     }
 
-    /// Queue a block update (mirrors `scheduleBlockUpdate`; duplicate keys
-    /// keep the first entry like the C++ set).
+    /// Queue a block update (mirrors `scheduleBlockUpdate`): entries dedup
+    /// by (x, y, z, id) — a second schedule for the same cell+id is dropped
+    /// (Java `scheduledTickSet`), and cells without loaded surroundings
+    /// (radius 8) are skipped. Time-Keyed map keeps fire order.
     pub fn schedule_block_update(&mut self, x: i32, y: i32, z: i32, block_id: u8, delay: i32) {
+        if block_id == 0 {
+            return;
+        }
+        if !self.chunks_exist_radius(x, z, 8) {
+            return;
+        }
+        if self.scheduled.values().zip(self.scheduled.keys()).any(|(v, k)| {
+            *v == block_id && k.1 == x && k.2 == y && k.3 == z
+        }) {
+            return;
+        }
         self.scheduled.entry((self.time + delay as i64, x, y, z)).or_insert(block_id);
+    }
+
+    /// Loaded-area check for a block radius (mirrors `checkChunksExist`).
+    fn chunks_exist_radius(&self, x: i32, z: i32, r: i32) -> bool {
+        let (x0, z0) = ((x - r).div_euclid(16), (z - r).div_euclid(16));
+        let (x1, z1) = ((x + r).div_euclid(16), (z + r).div_euclid(16));
+        for cx in x0..=x1 {
+            for cz in z0..=z1 {
+                if !self.has_chunk(cx, cz) {
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     /// Due scheduled updates, oldest first, capped at 1000 per tick like
@@ -6020,7 +6071,9 @@ impl World {
             }
             self.scheduled.remove(&(t, x, y, z));
             ran += 1;
-            if !self.has_chunk(x.div_euclid(16), z.div_euclid(16)) {
+            // Java processes only ticks whose radius-8 surroundings are
+            // loaded (World.scheduleBlockUpdate/process path).
+            if !self.chunks_exist_radius(x, z, 8) {
                 continue;
             }
             if bid == 0 || self.get_block_id(x, y, z) != bid {
@@ -6031,8 +6084,9 @@ impl World {
     }
 
     /// Random block ticks (mirrors the 80-cells-per-chunk pass over the
-    /// radius-8 loaded chunks around every joined player; chunk order is
-    /// sorted for determinism where C++ iterates an unordered set).
+    /// radius-9 loaded chunks around every joined player (Java World:1345);
+    /// chunk order is sorted for determinism where C++ iterates an
+    /// unordered set).
     fn random_block_ticks(&mut self) {
         let mut players: Vec<(f64, f64, f64)> = Vec::new();
         for oid in self.entities.all_ids() {
@@ -6047,8 +6101,8 @@ impl World {
         let mut keys: Vec<(i32, i32)> = Vec::new();
         for (px, _, pz) in &players {
             let (cx, cz) = ((px / 16.0).floor() as i32, (pz / 16.0).floor() as i32);
-            for dx in -8..=8 {
-                for dz in -8..=8 {
+            for dx in -9..=9 {
+                for dz in -9..=9 {
                     keys.push((cx + dx, cz + dz));
                 }
             }
@@ -6467,6 +6521,26 @@ impl World {
                         c.is_terrain_populated = requested;
                         self.chunks.insert((nx, nz), c);
                     }
+                }
+            }
+        }
+        // 4. Dungeon-chest loot: the canvas holds no tiles, so materialize
+        // chest rows for placed chests and deal the buffered stacks.
+        for (lx, ly, lz, slot, item, count) in crate::decorators::misc::drain_dungeon_loot() {
+            if self.get_block_id(lx, ly, lz) != 54 {
+                continue;
+            }
+            let tile = self.tiles.entry((lx, ly, lz)).or_insert_with(|| {
+                TileData::Chest(crate::tile_entity_chest::chest_create())
+            });
+            if let TileData::Chest(ch) = tile {
+                if slot >= 0 && (slot as usize) < ch.slots.len() {
+                    ch.slots[slot as usize] = crate::inventory::FfiItemStack {
+                        stack_size: count,
+                        animations_to_go: 0,
+                        item_id: item,
+                        item_damage: 0,
+                    };
                 }
             }
         }

@@ -44,49 +44,10 @@ impl From<FfiAabb> for AxisAlignedBB {
     }
 }
 
-/// Resolved movement: the box after collision plus the accepted delta.
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct ResolvedMove {
-    pub box_: FfiAabb,
-    pub dx: f64,
-    pub dy: f64,
-    pub dz: f64,
-}
-
-/// Y-then-X-then-Z collision resolution over a pre-gathered box list.
-/// Mirrors the `resolveMovement` lambda in `Entity::moveEntity` exactly:
-/// each pass clamps its axis against every box, then offsets the working
-/// box before the next pass.
-pub fn alpha_entity_resolve_move(
-    box_: &FfiAabb,
-    dx: f64,
-    dy: f64,
-    dz: f64,
-    boxes: &[FfiAabb],
-    out: &mut ResolvedMove,
-) -> bool {
-    let list = boxes;
-    let mut work: AxisAlignedBB = (*box_).into();
-    let (mut mx, mut my, mut mz) = (dx, dy, dz);
-    for cb in list {
-        let cb: AxisAlignedBB = (*cb).into();
-        my = cb.calculate_y_offset(&work, my);
-    }
-    work.offset(0.0, my, 0.0);
-    for cb in list {
-        let cb: AxisAlignedBB = (*cb).into();
-        mx = cb.calculate_x_offset(&work, mx);
-    }
-    work.offset(mx, 0.0, 0.0);
-    for cb in list {
-        let cb: AxisAlignedBB = (*cb).into();
-        mz = cb.calculate_z_offset(&work, mz);
-    }
-    work.offset(0.0, 0.0, mz);
-    *out = ResolvedMove { box_: work.into(), dx: mx, dy: my, dz: mz };
-    true
-}
+// NOTE: the old Y-X-Z `alpha_entity_resolve_move` helper was removed —
+// `World::move_body` owns the single collision+step implementation now
+// (a second copy had already drifted: no step height here). The axis
+// order is covered by move_body's behavior.
 
 /// Fall-state step (mirrors `Entity::updateFallState`). Returns the new
 /// `fallDistance`; when landing with accumulated distance it also writes
@@ -164,47 +125,12 @@ mod tests {
         FfiAabb { min_x: x0, min_y: y0, min_z: z0, max_x: x1, max_y: y1, max_z: z1 }
     }
 
-    fn resolve(box_: FfiAabb, dx: f64, dy: f64, dz: f64, boxes: &[FfiAabb]) -> ResolvedMove {
-        let mut out = ResolvedMove {
-            box_: box_ffi(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-            dx: 0.0,
-            dy: 0.0,
-            dz: 0.0,
-        };
-        assert!(alpha_entity_resolve_move(&box_, dx, dy, dz, boxes, &mut out));
-        out
-    }
-
     #[test]
-    fn test_fall_onto_floor_stops() {
-        // Entity box minY=2 falling 5 onto a floor slab occupying y 0..1.
-        let entity = box_ffi(-0.3, 2.0, -0.3, 0.3, 3.8, 0.3);
-        let floor = box_ffi(-8.0, 0.0, -8.0, 8.0, 1.0, 8.0);
-        let r = resolve(entity, 0.0, -5.0, 0.0, &[floor]);
-        assert!((r.dy - -1.0).abs() < 1e-9);
-        assert!((r.box_.min_y - 1.0).abs() < 1e-9);
-        assert_eq!(r.dx, 0.0);
-        assert_eq!(r.dz, 0.0);
-    }
-
-    #[test]
-    fn test_wall_blocks_x_only() {
-        // Moving +X into a wall: X clamped, Y/Z pass through.
-        let entity = box_ffi(0.0, 1.0, 0.0, 0.6, 2.8, 0.6);
-        let wall = box_ffi(1.0, 0.0, -8.0, 2.0, 4.0, 8.0);
-        let r = resolve(entity, 2.0, -0.5, 0.3, &[wall]);
-        assert!((r.dx - 0.4).abs() < 1e-9);
-        assert_eq!(r.dy, -0.5);
-        assert_eq!(r.dz, 0.3);
-        assert!((r.box_.max_x - 1.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn test_empty_boxes_full_move() {
-        let entity = box_ffi(0.0, 1.0, 0.0, 0.6, 2.8, 0.6);
-        let r = resolve(entity, 1.0, -2.0, 3.0, &[]);
-        assert_eq!((r.dx, r.dy, r.dz), (1.0, -2.0, 3.0));
-        assert!((r.box_.min_x - 1.0).abs() < 1e-9);
+    fn test_ffi_roundtrip() {
+        let b = box_ffi(-0.3, 2.0, -0.3, 0.3, 3.8, 0.3);
+        let back: AxisAlignedBB = b.into();
+        let fwd = FfiAabb::from(back);
+        assert_eq!(b, fwd);
     }
 
     #[test]

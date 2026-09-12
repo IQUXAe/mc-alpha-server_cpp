@@ -114,7 +114,7 @@ impl TrackedEntity {
             fire_ticks: 0,
             riding: NO_ENTITY,
             range: 512,
-            rate: 1,
+            rate: 2,
             send_velocity: false,
             is_player: true,
         }

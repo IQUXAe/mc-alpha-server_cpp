@@ -1,4 +1,5 @@
 use crate::random::JavaRandom;
+use crate::math_helper::{cos as mcos, sin as msin};
 use super::WorldAccessor;
 
 pub struct WorldGenMinable {
@@ -16,10 +17,10 @@ impl WorldGenMinable {
 
     pub fn generate(&self, accessor: &WorldAccessor, rand: &mut JavaRandom, x: i32, y: i32, z: i32) -> bool {
         let var6 = rand.next_float() * std::f32::consts::PI;
-        let var7 = (x + 8) as f64 + (var6.sin() * (self.number_of_blocks as f32) / 8.0) as f64;
-        let var9 = (x + 8) as f64 - (var6.sin() * (self.number_of_blocks as f32) / 8.0) as f64;
-        let var11 = (z + 8) as f64 + (var6.cos() * (self.number_of_blocks as f32) / 8.0) as f64;
-        let var13 = (z + 8) as f64 - (var6.cos() * (self.number_of_blocks as f32) / 8.0) as f64;
+        let var7 = (x + 8) as f64 + (msin(var6) * (self.number_of_blocks as f32) / 8.0) as f64;
+        let var9 = (x + 8) as f64 - (msin(var6) * (self.number_of_blocks as f32) / 8.0) as f64;
+        let var11 = (z + 8) as f64 + (mcos(var6) * (self.number_of_blocks as f32) / 8.0) as f64;
+        let var13 = (z + 8) as f64 - (mcos(var6) * (self.number_of_blocks as f32) / 8.0) as f64;
         let var15 = (y + rand.next_int_bound(3) + 2) as f64;
         let var17 = (y + rand.next_int_bound(3) + 2) as f64;
 
@@ -28,8 +29,8 @@ impl WorldGenMinable {
             let var22 = var15 + (var17 - var15) * (var19 as f64) / (self.number_of_blocks as f64);
             let var24 = var11 + (var13 - var11) * (var19 as f64) / (self.number_of_blocks as f64);
             let var26 = rand.next_double() * (self.number_of_blocks as f64) / 16.0;
-            let var28 = (((var19 as f32) * std::f32::consts::PI / (self.number_of_blocks as f32)).sin() + 1.0) as f64 * var26 + 1.0;
-            let var30 = (((var19 as f32) * std::f32::consts::PI / (self.number_of_blocks as f32)).sin() + 1.0) as f64 * var26 + 1.0;
+            let var28 = (msin((var19 as f32) * std::f32::consts::PI / (self.number_of_blocks as f32)) + 1.0) as f64 * var26 + 1.0;
+            let var30 = (msin((var19 as f32) * std::f32::consts::PI / (self.number_of_blocks as f32)) + 1.0) as f64 * var26 + 1.0;
 
             let start_x = (var20 - var28 / 2.0) as i32;
             let end_x = (var20 + var28 / 2.0) as i32;
@@ -77,10 +78,10 @@ impl WorldGenClay {
         }
 
         let var6 = rand.next_float() * std::f32::consts::PI;
-        let var7 = (x + 8) as f64 + (var6.sin() * (self.number_of_blocks as f32) / 8.0) as f64;
-        let var9 = (x + 8) as f64 - (var6.sin() * (self.number_of_blocks as f32) / 8.0) as f64;
-        let var11 = (z + 8) as f64 + (var6.cos() * (self.number_of_blocks as f32) / 8.0) as f64;
-        let var13 = (z + 8) as f64 - (var6.cos() * (self.number_of_blocks as f32) / 8.0) as f64;
+        let var7 = (x + 8) as f64 + (msin(var6) * (self.number_of_blocks as f32) / 8.0) as f64;
+        let var9 = (x + 8) as f64 - (msin(var6) * (self.number_of_blocks as f32) / 8.0) as f64;
+        let var11 = (z + 8) as f64 + (mcos(var6) * (self.number_of_blocks as f32) / 8.0) as f64;
+        let var13 = (z + 8) as f64 - (mcos(var6) * (self.number_of_blocks as f32) / 8.0) as f64;
         let var15 = (y + rand.next_int_bound(3) + 2) as f64;
         let var17 = (y + rand.next_int_bound(3) + 2) as f64;
 
@@ -89,8 +90,8 @@ impl WorldGenClay {
             let var22 = var15 + (var17 - var15) * (var19 as f64) / (self.number_of_blocks as f64);
             let var24 = var11 + (var13 - var11) * (var19 as f64) / (self.number_of_blocks as f64);
             let var26 = rand.next_double() * (self.number_of_blocks as f64) / 16.0;
-            let var28 = (((var19 as f32) * std::f32::consts::PI / (self.number_of_blocks as f32)).sin() + 1.0) as f64 * var26 + 1.0;
-            let var30 = (((var19 as f32) * std::f32::consts::PI / (self.number_of_blocks as f32)).sin() + 1.0) as f64 * var26 + 1.0;
+            let var28 = (msin((var19 as f32) * std::f32::consts::PI / (self.number_of_blocks as f32)) + 1.0) as f64 * var26 + 1.0;
+            let var30 = (msin((var19 as f32) * std::f32::consts::PI / (self.number_of_blocks as f32)) + 1.0) as f64 * var26 + 1.0;
 
             let start_x = (var20 - var28 / 2.0) as i32;
             let end_x = (var20 + var28 / 2.0) as i32;

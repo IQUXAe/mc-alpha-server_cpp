@@ -17,17 +17,16 @@
 
 use crate::player_mining::alpha_mining_check_hardness;
 
-/// Digging state, stored inline on the C++ side.
+/// Digging state, stored inline on the server side.
 ///
-/// Mirrors `ItemInWorldManager::{curblockDamage, blockDamage,
+/// Mirrors `ItemInWorldManager::{curblockDamage,
 /// initialDamage, partiallyDestroyedBlockX/Y/Z}` plus a `has_target`
-/// flag (C++ used `(0,0,0)` as implicit "no target", which collides
+/// flag (vanilla used `(0,0,0)` as implicit "no target", which collides
 /// with a real block at the origin).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FfiDigState {
     pub cur_damage: f32,
-    pub block_damage: f32,
     pub initial_cooldown: i32,
     pub target_x: i32,
     pub target_y: i32,
@@ -50,7 +49,6 @@ pub struct FfiDigInput {
 pub fn alpha_dig_state_new() -> FfiDigState {
     FfiDigState {
         cur_damage: 0.0,
-        block_damage: 0.0,
         initial_cooldown: 0,
         target_x: 0,
         target_y: 0,
@@ -110,7 +108,6 @@ pub fn alpha_dig_on_tick(
     let same_target = s.has_target && s.target_x == x && s.target_y == y && s.target_z == z;
     if !same_target {
         s.cur_damage = 0.0;
-        s.block_damage = 0.0;
         s.target_x = x;
         s.target_y = y;
         s.target_z = z;
@@ -133,10 +130,8 @@ pub fn alpha_dig_on_tick(
         return false;
     }
     s.cur_damage += hardness_tick;
-    s.block_damage += 1.0;
     if s.cur_damage >= 1.0 {
         s.cur_damage = 0.0;
-        s.block_damage = 0.0;
         s.initial_cooldown = 5;
         return true;
     }

@@ -27,10 +27,11 @@ use crate::nbt::{NbtCompound, NbtList, NbtTag, read_root, write_root};
 use crate::tile_entity_sign::SIGN_LINES;
 use crate::world::{TileData, World};
 
-// ---- chunk keys (mirror `getChunkKey`: high u32 = x, low u32 = z) ----
+// ---- chunk keys (our own LevelDB layout: high u32 = x, low u32 = z) ----
 
-/// LevelDB key bytes for a chunk (little-endian u64 like the C++ `Slice`
-/// over the key on x86).
+/// LevelDB key bytes for a chunk (little-endian u64).
+/// NOTE: this intentionally differs from the in-memory `server::chunk_key`
+/// (low = x); the store never shares keys with the network layer.
 pub fn chunk_key_bytes(cx: i32, cz: i32) -> [u8; 8] {
     (((cx as u32 as u64) << 32) | (cz as u32 as u64)).to_le_bytes()
 }
@@ -439,7 +440,8 @@ pub(crate) fn tile_nbt(x: i32, y: i32, z: i32, tile: &TileData) -> NbtCompound {
             m.insert("id".to_string(), NbtTag::String("Sign".to_string()));
             for (i, line) in s.lines.iter().enumerate() {
                 let len = line.iter().position(|&c| c == 0).unwrap_or(SIGN_LINES);
-                let text = String::from_utf8_lossy(&line[..len.min(16)]).to_string();
+                // Vanilla caps sign lines at 15 chars.
+                let text = String::from_utf8_lossy(&line[..len.min(15)]).to_string();
                 m.insert(format!("Text{}", i + 1), NbtTag::String(text));
             }
         }
@@ -617,7 +619,7 @@ pub fn decode_chunk_blob(bytes: &[u8], cx: i32, cz: i32) -> Option<DecodedChunk>
 // ---- level.dat ----
 
 /// Encode `level.dat` (gzip NBT mirroring `encodeLevelDat`: seed, spawn,
-/// time, zero size-on-disk, version 19132, name "world").
+/// time, zero size-on-disk, version 19132, level name).
 pub fn encode_level_dat(world: &World) -> Option<Vec<u8>> {
     let mut data = BTreeMap::new();
     data.insert("RandomSeed".to_string(), NbtTag::Long(world.seed));
@@ -627,7 +629,7 @@ pub fn encode_level_dat(world: &World) -> Option<Vec<u8>> {
     data.insert("Time".to_string(), NbtTag::Long(world.time));
     data.insert("SizeOnDisk".to_string(), NbtTag::Long(0));
     data.insert("version".to_string(), NbtTag::Int(19132));
-    data.insert("LevelName".to_string(), NbtTag::String("world".to_string()));
+    data.insert("LevelName".to_string(), NbtTag::String(world.level_name.clone()));
     let mut inner = BTreeMap::new();
     inner.insert("Data".to_string(), NbtTag::Compound(NbtCompound { map: data }));
     let mut raw = Vec::new();

@@ -53,7 +53,9 @@ pub const MAX_PACKETS_PER_TICK: usize = 50;
 /// Opaque connection handle.
 pub type ConnId = u64;
 
-/// Chunk key (mirrors `NetServerHandler::chunkKey`: low u32 = x, high = z).
+/// Chunk key for the in-memory maps (low u32 = x, high u32 = z).
+/// NOTE: intentionally different from the LevelDB `chunk_key_bytes`
+/// layout in persist.rs; the two key spaces never mix.
 pub fn chunk_key(x: i32, z: i32) -> i64 {
     (x as u32 as i64) | ((z as u32 as i64) << 32)
 }
@@ -249,6 +251,7 @@ impl Server {
         world.difficulty = settings.difficulty;
         world.spawn_monsters = settings.spawn_monsters;
         world.spawn_animals = settings.spawn_animals;
+        world.level_name = settings.level_name.clone();
         let store =
             ChunkStore::open(&format!("{level_dir}/db")).map_err(|e| format!("cannot open chunk store: {e}"))?;
         if !world.load_level_from(level_dir) {
@@ -413,6 +416,23 @@ impl Server {
                         }
                     }
                     sess.conn.send(bytes);
+                }
+                SessionBroadcast::Tell { target, text } => {
+                    // Java /tell: whisper to the named player, miss note
+                    // back to the sender when offline.
+                    let bytes = pkt_chat(&text);
+                    let mut delivered = false;
+                    if let Some(eid) = self.entity_named(&target) {
+                        if let Some(cid) = self.players.get(&eid).copied() {
+                            if let Some(other) = self.sessions.get(&cid) {
+                                other.conn.send(bytes.clone());
+                                delivered = true;
+                            }
+                        }
+                    }
+                    if !delivered {
+                        sess.conn.send(pkt_chat("§cThere's no player by that name online."));
+                    }
                 }
                 SessionBroadcast::ArmSwing(eid) => {
                     let bytes = pkt_arm(eid, 1);
@@ -898,13 +918,13 @@ impl Server {
 }
 
 impl Server {
-    /// Initial chunk queue (mirrors `sendChunks`: the (r+3) square sorted
-    /// center-out, padding included like C++).
+    /// Initial chunk queue: the view square sorted center-out (Java
+    /// `PlayerManager` sends the view, not padding — the 3x3 populate
+    /// neighborhood is ensured per send, not queued).
     fn initial_stream(pcx: i32, pcz: i32, view: i32) -> PlayStream {
-        let gen = view + 3;
         let mut queue = Vec::new();
-        for cx in pcx - gen..=pcx + gen {
-            for cz in pcz - gen..=pcz + gen {
+        for cx in pcx - view..=pcx + view {
+            for cz in pcz - view..=pcz + view {
                 queue.push((cx, cz));
             }
         }
@@ -1087,12 +1107,25 @@ impl Server {
                 _ => 0,
             };
             let te = match self.world.entities.get(*id) {
-                Some(e @ Entity::Player(_)) => TrackedEntity::from_entity(e, held, 512, 1, false),
-                Some(e @ Entity::Item(_)) => TrackedEntity::from_entity(e, 0, 64, 20, true),
-                Some(e @ Entity::Arrow(_)) => TrackedEntity::from_entity(e, 0, 64, 5, true),
-                Some(e @ Entity::Boat(_)) => TrackedEntity::from_entity(e, 0, 160, 5, true),
+                // Java EntityTracker: player 512/2, item 64/20, arrow 64/5,
+                // boat 160/5, mobs+animals 160/3 — each clamped to the view
+                // distance in blocks (EntityTracker.java:42-44).
+                Some(e @ Entity::Player(_)) => TrackedEntity::from_entity(
+                    e, held, 512.min(self.settings.view_distance * 16), 2, false,
+                ),
+                Some(e @ Entity::Item(_)) => TrackedEntity::from_entity(
+                    e, 0, 64.min(self.settings.view_distance * 16), 20, true,
+                ),
+                Some(e @ Entity::Arrow(_)) => TrackedEntity::from_entity(
+                    e, 0, 64.min(self.settings.view_distance * 16), 5, true,
+                ),
+                Some(e @ Entity::Boat(_)) => TrackedEntity::from_entity(
+                    e, 0, 160.min(self.settings.view_distance * 16), 5, true,
+                ),
                 Some(e @ Entity::Mob(_)) | Some(e @ Entity::Animal(_)) => {
-                    TrackedEntity::from_entity(e, 0, 160, 2, false)
+                    TrackedEntity::from_entity(
+                        e, 0, 160.min(self.settings.view_distance * 16), 3, false,
+                    )
                 }
                 Some(Entity::Falling(_)) | None => None,
             };
@@ -1279,6 +1312,17 @@ impl Server {
                 self.save_players();
                 log::info("Save complete.");
             }
+            ConsoleCommandTag::SaveOff => {
+                self.settings.auto_save_interval = 0;
+                log::info("Automatic saving is now disabled.");
+            }
+            ConsoleCommandTag::SaveOn => {
+                self.settings.auto_save_interval = AUTO_SAVE_INTERVAL_TICKS_DEFAULT;
+                log::info("Automatic saving is now enabled.");
+            }
+            ConsoleCommandTag::Give => {
+                self.console_give(&arg1, &arg2, count);
+            }
             ConsoleCommandTag::Op => {
                 self.ops.insert(admin_normalize(&arg1));
                 self.save_ops();
@@ -1411,6 +1455,52 @@ impl Server {
     fn save_ops(&self) {
         let ordered: BTreeSet<String> = self.ops.iter().cloned().collect();
         write_list(&self.ops_path, &ordered);
+    }
+
+    /// Console give (mirrors `give <player> <id> [count]`): validates the
+    /// id, merges through the shared inventory path, syncs the session.
+    fn console_give(&mut self, target: &str, id_raw: &str, count: i32) {
+        let eid = match self.entity_named(target) {
+            Some(e) => e,
+            None => {
+                log::info(&format!("Can't find user {target}. No give."));
+                return;
+            }
+        };
+        let id: i32 = match id_raw.parse() {
+            Ok(v) => v,
+            Err(_) => {
+                log::info(&format!("Invalid item id {id_raw}."));
+                return;
+            }
+        };
+        if !crate::item_data::alpha_item_is_valid(id) {
+            log::info(&format!("Invalid item id {id}."));
+            return;
+        }
+        let count = count.clamp(1, 64);
+        let rem = self.world.player_add_item(
+            eid,
+            crate::inventory::FfiItemStack {
+                stack_size: count,
+                animations_to_go: 0,
+                item_id: id,
+                item_damage: 0,
+            },
+        );
+        let given = count - rem;
+        if let Some(cid) = self.players.get(&eid).copied() {
+            if let Some(sess) = self.sessions.get_mut(&cid) {
+                if let SessionState::Play(play, _) = &mut sess.state {
+                    play.send_inventory(&self.world);
+                }
+            }
+        }
+        if rem > 0 {
+            log::info(&format!("Gave {given} of {id} to {target} ({rem} did not fit)."));
+        } else {
+            log::info(&format!("Gave {given} of {id} to {target}."));
+        }
     }
 
     /// Debug spawner (mirrors the console `summon`): ring placement
