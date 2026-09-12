@@ -3,6 +3,8 @@
     use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::time::Duration;
+    use crate::network::put_u8;
+    use crate::session::transport::{Conn, ConnEvent, bind_listener};
 
     fn login_packet(protocol: i32, username: &str) -> PacketData {
         PacketData::Login {
