@@ -152,13 +152,12 @@ impl World {
             // lava harmless.
             self.lava_contact(id);
             if !suppress {
-                let mut ev = -1.0f32;
-                let nd =
-                    crate::entity::physics::entity_fall_step(falling.0, falling.1, fall, &mut ev);
+                let (nd, ev) =
+                    crate::entity::physics::entity_fall_step(falling.0, falling.1, fall);
                 if let Some(e) = self.entities.get_mut(id) {
                     e.body_mut().fall_distance = nd;
                 }
-                if ev >= 0.0 {
+                if let Some(ev) = ev {
                     return Some(ev);
                 }
             }
@@ -549,11 +548,11 @@ impl World {
                 (Some(a), Some(b)) => (a.body().pos[0], a.body().pos[2], b.body().pos[0], b.body().pos[2]),
                 _ => continue,
             };
-            let mut push = crate::entity::physics::PushOut { dvx1: 0.0, dvz1: 0.0, dvx2: 0.0, dvz2: 0.0 };
-            let ok = crate::entity::physics::entity_push(ax, az, bx, bz, true, true, &mut push);
-            if !ok {
+            let Some(push) =
+                crate::entity::physics::entity_push(ax, az, bx, bz, true, true)
+            else {
                 continue;
-            }
+            };
             if let Some(Entity::Boat(b)) = self.entities.get_mut(id) {
                 b.body.motion[0] += push.dvx1;
                 b.body.motion[2] += push.dvz1;

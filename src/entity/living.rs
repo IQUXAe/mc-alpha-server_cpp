@@ -308,8 +308,7 @@ pub fn living_heading_run(
     }
 
     if touching_liquid {
-        let mut fly = FlyOut { dmx: 0.0, dmz: 0.0 };
-        if fly_apply(strafe, forward, 0.02, yaw, &mut fly) {
+        if let Some(fly) = fly_apply(strafe, forward, 0.02, yaw) {
             io.motion_x += fly.dmx as f64;
             io.motion_z += fly.dmz as f64;
         }
@@ -331,8 +330,7 @@ pub fn living_heading_run(
     let friction: f32 = if on_ground { ground_friction * 0.91 } else { 0.91 };
     let accel = 0.16277136f32 / (friction * friction * friction);
     let applied = if on_ground { 0.1f32 * accel } else { 0.02f32 };
-    let mut fly = FlyOut { dmx: 0.0, dmz: 0.0 };
-    if fly_apply(strafe, forward, applied, yaw, &mut fly) {
+    if let Some(fly) = fly_apply(strafe, forward, applied, yaw) {
         io.motion_x += fly.dmx as f64;
         io.motion_z += fly.dmz as f64;
     }
@@ -382,10 +380,10 @@ pub fn living_heading(
     living_heading_run(strafe, forward, jumping, on_ground, yaw, io, liquid, false, 0.6, &mut ladder, &mut mover)
 }
 
-fn fly_apply(strafe: f32, forward: f32, acceleration: f32, yaw: f32, out: &mut FlyOut) -> bool {
+fn fly_apply(strafe: f32, forward: f32, acceleration: f32, yaw: f32) -> Option<FlyOut> {
     let mut magnitude = strafe * strafe + forward * forward;
     if magnitude < 1.0e-4f32 {
-        return false;
+        return None;
     }
     magnitude = magnitude.sqrt();
     if magnitude < 1.0 {
@@ -395,9 +393,7 @@ fn fly_apply(strafe: f32, forward: f32, acceleration: f32, yaw: f32, out: &mut F
     let (s, f) = (strafe * magnitude, forward * magnitude);
     let radians = yaw * (std::f32::consts::PI / 180.0);
     let (sy, cy) = (sin(radians), cos(radians));
-    out.dmx = s * cy - f * sy;
-    out.dmz = f * cy + s * sy;
-    true
+    Some(FlyOut { dmx: s * cy - f * sy, dmz: f * cy + s * sy })
 }
 
 #[cfg(test)]
@@ -533,19 +529,15 @@ mod tests {
 
     #[test]
     fn test_fly_negligible_input() {
-        // Zero and sub-threshold inputs leave the caller's values alone.
-        let mut out = FlyOut { dmx: 9.0, dmz: 9.0 };
-        assert!(!fly_apply(0.0, 0.0, 0.1, 0.0, &mut out));
-        assert_eq!((out.dmx, out.dmz), (9.0, 9.0));
-        assert!(!fly_apply(0.0001, 0.0, 0.1, 0.0, &mut out));
-        assert_eq!((out.dmx, out.dmz), (9.0, 9.0));
+        // Zero and sub-threshold inputs produce no steering delta.
+        assert!(fly_apply(0.0, 0.0, 0.1, 0.0).is_none());
+        assert!(fly_apply(0.0001, 0.0, 0.1, 0.0).is_none());
     }
 
     #[test]
     fn test_fly_forward_yaw_zero() {
         // Facing +z (yaw 0): forward maps to +z.
-        let mut out = FlyOut { dmx: 0.0, dmz: 0.0 };
-        assert!(fly_apply(0.0, 1.0, 0.1, 0.0, &mut out));
+        let out = fly_apply(0.0, 1.0, 0.1, 0.0).unwrap();
         assert!(out.dmx.abs() < 1e-6);
         assert!((out.dmz - 0.1).abs() < 1e-6);
     }

@@ -6,7 +6,7 @@ use crate::entity::ai::{
      wander_pick,
 };
 use crate::entity::living::{HeadingIo, MoveFeedback, living_fall_damage, living_heading_run};
-use crate::entity::physics::{PushOut, entity_push};
+use crate::entity::physics::entity_push;
 use crate::entity::table::{
     AnimalKind, Entity, EntityId, MobKind, mob_attack_reach, mob_burns_in_daylight,
 };
@@ -626,11 +626,9 @@ impl World {
                 Some(e) => (e.body().pos[0], e.body().pos[2]),
                 None => (self_pos[0], self_pos[2]),
             };
-            let mut push = PushOut { dvx1: 0.0, dvz1: 0.0, dvx2: 0.0, dvz2: 0.0 };
-            let ok = entity_push(ox, oz, sx, sz, true, self_pushable, &mut push);
-            if !ok {
+            let Some(push) = entity_push(ox, oz, sx, sz, true, self_pushable) else {
                 continue;
-            }
+            };
             if let Some(o) = self.entities.get_mut(oid) {
                 o.body_mut().motion[0] += push.dvx1;
                 o.body_mut().motion[2] += push.dvz1;

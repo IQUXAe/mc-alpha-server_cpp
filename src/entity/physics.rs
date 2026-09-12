@@ -1,14 +1,11 @@
-//! Entity physics kernel ported from C++ `Entity::moveEntity`,
-//! `Entity::updateFallState`, and `Entity::applyEntityCollision`
-//! (which mirror Java `Entity`).
+//! Entity physics kernel (mirrors Java `Entity`).
 //!
-//! The world-dependent half stays in C++: gathering colliding boxes
-//! (`World::getCollidingBoundingBoxes`), the `onFall` damage event
-//! (virtual), and velocity application. Rust owns the pure resolution
-//! math, so collision order (Y, then X, then Z, with box offsets between
-//! passes) has a single tested source of truth.
+//! The world-dependent half lives in `world`: gathering colliding boxes,
+//! the `onFall` damage event, and velocity application. Rust owns the pure
+//! resolution math, so collision order (Y, then X, then Z, with box offsets
+//! between passes) has a single tested source of truth.
 //!
-//! AABB ops reuse the `aabb` module (itself a 1:1 port of `AxisAlignedBB`).
+//! AABB ops reuse the `aabb` module.
 
 use crate::aabb::AxisAlignedBB;
 use crate::math_helper::{abs_max, sqrt_double};
@@ -49,35 +46,25 @@ impl From<Aabb> for AxisAlignedBB {
 // order is covered by move_body's behavior.
 
 /// Fall-state step (mirrors `Entity::updateFallState`). Returns the new
-/// `fallDistance`; when landing with accumulated distance it also writes
-/// that distance to `out_fall_event` (C++ fires `onFall` for it, `-1.0`
-/// means no event).
-pub fn entity_fall_step(
-    on_ground: bool,
-    dy: f64,
-    fall_distance: f32,
-    out_fall_event: &mut f32,
-) -> f32 {
-    *out_fall_event = -1.0;
+/// `fallDistance` plus the landing event distance, if any.
+pub fn entity_fall_step(on_ground: bool, dy: f64, fall_distance: f32) -> (f32, Option<f32>) {
     if on_ground {
         if fall_distance > 0.0 {
-            *out_fall_event = fall_distance;
-            0.0
+            (0.0, Some(fall_distance))
         } else {
-            fall_distance
+            (fall_distance, None)
         }
     } else if dy < 0.0 {
-        // C++ promotes to double before subtracting, then narrows back.
-        (fall_distance as f64 - dy) as f32
+        // Promotes to double before subtracting, then narrows back.
+        ((fall_distance as f64 - dy) as f32, None)
     } else {
-        fall_distance
+        (fall_distance, None)
     }
 }
 
 /// Push impulse between two entities (mirrors `Entity::applyEntityCollision`
-/// after the identity/pushable guards, which stay in C++). Writes both
-/// velocity deltas; C++ applies them via `addVelocity`. Returns false when
-/// the pair is too close to push.
+/// after the identity/pushable guards). Returns both velocity deltas for
+/// the caller to apply; `None` when the pair is too close to push.
 #[derive(Clone, Copy, Debug)]
 pub struct PushOut {
     pub dvx1: f64,
@@ -93,16 +80,15 @@ pub fn entity_push(
     z2: f64,
     pushable1: bool,
     pushable2: bool,
-    out: &mut PushOut,
-) -> bool {
+) -> Option<PushOut> {
     if !pushable1 || !pushable2 {
-        return false;
+        return None;
     }
     let dx = x2 - x1;
     let dz = z2 - z1;
     let max_abs = abs_max(dx, dz);
     if max_abs < 0.01 {
-        return false;
+        return None;
     }
     let norm = sqrt_double(max_abs) as f64;
     let (nx, nz) = (dx / norm, dz / norm);
@@ -111,8 +97,7 @@ pub fn entity_push(
         scale = 1.0;
     }
     let (ix, iz) = (nx * scale * 0.05, nz * scale * 0.05);
-    *out = PushOut { dvx1: -ix, dvz1: -iz, dvx2: ix, dvz2: iz };
-    true
+    Some(PushOut { dvx1: -ix, dvz1: -iz, dvx2: ix, dvz2: iz })
 }
 
 #[cfg(test)]
@@ -133,33 +118,25 @@ mod tests {
 
     #[test]
     fn test_fall_step_landing_fires_event() {
-        let mut ev = -1.0f32;
-        let next = entity_fall_step(true, -3.0, 3.5, &mut ev);
-        assert_eq!(next, 0.0);
-        assert_eq!(ev, 3.5);
+        assert_eq!(entity_fall_step(true, -3.0, 3.5), (0.0, Some(3.5)));
     }
 
     #[test]
     fn test_fall_step_accumulates_in_air() {
-        let mut ev = -1.0f32;
-        let next = entity_fall_step(false, -2.0, 1.5, &mut ev);
-        assert_eq!(ev, -1.0);
+        let (next, ev) = entity_fall_step(false, -2.0, 1.5);
+        assert_eq!(ev, None);
         assert!((next - 3.5).abs() < 1e-6);
     }
 
     #[test]
     fn test_fall_step_rising_keeps_distance() {
-        let mut ev = -1.0f32;
-        let next = entity_fall_step(false, 1.0, 2.0, &mut ev);
-        assert_eq!((next, ev), (2.0, -1.0));
+        assert_eq!(entity_fall_step(false, 1.0, 2.0), (2.0, None));
     }
 
     #[test]
     fn test_push_impulse() {
-        // e1 at origin, e2 at (3,4): matches the C++ formula by hand
-        // (norm 2, scale 1/4, factor 0.05).
-        let mut out = PushOut { dvx1: 0.0, dvz1: 0.0, dvx2: 0.0, dvz2: 0.0 };
-        assert!(entity_push(0.0, 0.0, 3.0, 4.0, true, true, &mut out));
+        // e1 at origin, e2 at (3,4): norm 2, scale 1/4, factor 0.05.
+        let out = entity_push(0.0, 0.0, 3.0, 4.0, true, true).unwrap();
         assert!((out.dvx2 - 0.01875).abs() < 1e-9);
         assert!((out.dvz2 - 0.025).abs() < 1e-9);
         assert!((out.dvx1 + 0.01875).abs() < 1e-9);
@@ -168,8 +145,7 @@ mod tests {
 
     #[test]
     fn test_push_too_close_or_locked() {
-        let mut out = PushOut { dvx1: 0.0, dvz1: 0.0, dvx2: 0.0, dvz2: 0.0 };
-        assert!(!entity_push(0.0, 0.0, 0.005, 0.0, true, true, &mut out));
-        assert!(!entity_push(0.0, 0.0, 3.0, 4.0, false, true, &mut out));
+        assert!(entity_push(0.0, 0.0, 0.005, 0.0, true, true).is_none());
+        assert!(entity_push(0.0, 0.0, 3.0, 4.0, false, true).is_none());
     }
 }

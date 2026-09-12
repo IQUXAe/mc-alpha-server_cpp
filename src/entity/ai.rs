@@ -3,9 +3,9 @@
 //! Closed-form angle math plus the pure AI decision kernels (wander pick,
 //! chase-speed factor). RNG draws stay with the caller via `JavaRandom`.
 //!
-//! Angle convention notes (kept 1:1): yaw is degrees, `atan2(dz, dx)` in
-//! `f64` narrowed to `f32`, and the strafe helpers use the quantized
-//! `math_helper` sin/cos tables exactly like C++ `MathHelper::sin/cos`.
+//! Angle convention notes: yaw is degrees, `atan2(dz, dx)` in `f64`
+//! narrowed to `f32`, and the strafe helpers use the quantized
+//! `math_helper` sin/cos tables.
 
 use crate::math_helper::{cos, sin};
 
@@ -27,34 +27,15 @@ pub fn ai_clamp_angle(current: f32, target: f32, max_delta: f32) -> f32 {
     current + delta
 }
 
-/// Facing computation (mirrors `EntityCreature::faceEntity` after C++
-/// resolves `dy`: living eye height above, else bounding-box center).
-/// Writes the new yaw/pitch; the pitch result already includes the leading
-/// negation from C++.
-/// Pure facing core.
+/// Facing computation (mirrors `EntityCreature::faceEntity` after the
+/// caller resolves `dy`: living eye height above, else bounding-box center).
 /// Returns `(new_yaw, new_pitch)`; the pitch already includes the leading
-/// negation from C++.
+/// negation.
 pub fn face_run(dx: f64, dz: f64, dy: f64, cur_yaw: f32, cur_pitch: f32, max_turn: f32) -> (f32, f32) {
     let dist = crate::math_helper::sqrt_double(dx * dx + dz * dz);
     let yaw = (dz.atan2(dx) * 180.0 / std::f64::consts::PI) as f32 - 90.0;
     let pitch = (dy.atan2(dist as f64) * 180.0 / std::f64::consts::PI) as f32;
     (clamp_inner(cur_yaw, yaw, max_turn), -clamp_inner(cur_pitch, pitch, max_turn))
-}
-
-pub fn ai_face_angles(
-    dx: f64,
-    dz: f64,
-    dy: f64,
-    cur_yaw: f32,
-    cur_pitch: f32,
-    max_turn: f32,
-    out_yaw: &mut f32,
-    out_pitch: &mut f32,
-) -> bool {
-    let (yaw, pitch) = face_run(dx, dz, dy, cur_yaw, cur_pitch, max_turn);
-    *out_yaw = yaw;
-    *out_pitch = pitch;
-    true
 }
 
 fn clamp_inner(current: f32, target: f32, max_delta: f32) -> f32 {
@@ -143,22 +124,6 @@ pub fn steer_run(
     SteerOut { new_yaw, strafe, forward, jump: dy > 0.0 }
 }
 
-pub fn ai_steer_to_point(
-    dx: f64,
-    dz: f64,
-    dy: f64,
-    cur_yaw: f32,
-    is_attacking: bool,
-    has_target: bool,
-    tgt_dx: f64,
-    tgt_dz: f64,
-    forward_in: f32,
-    out: &mut SteerOut,
-) -> bool {
-    *out = steer_run(dx, dz, dy, cur_yaw, is_attacking, has_target, tgt_dx, tgt_dz, forward_in);
-    true
-}
-
 /// Wander destination pick (mirrors `EntityCreature::pickWanderDestination`):
 /// best of 10 random points in the 13x7x13 area around `base`, strict `>`
 /// comparison from `bestWeight = -99999.0`, so ties keep the first
@@ -209,8 +174,7 @@ mod tests {
     #[test]
     fn test_face_angles_east() {
         // Target due east (+x): yaw = atan2(0,1)*180/pi - 90 = -90.
-        let (mut yaw, mut pitch) = (0.0f32, 0.0f32);
-        assert!(ai_face_angles(5.0, 0.0, 0.0, 0.0, 0.0, 30.0, &mut yaw, &mut pitch));
+        let (yaw, pitch) = face_run(5.0, 0.0, 0.0, 0.0, 0.0, 30.0);
         assert_eq!(yaw, -30.0); // clamped turn toward -90
         assert_eq!(pitch, -0.0);
     }
@@ -218,10 +182,7 @@ mod tests {
     #[test]
     fn test_steer_straight_ahead() {
         // Point due east of a creature facing east (yaw -90): no turn.
-        let mut out = SteerOut { new_yaw: 0.0, strafe: 0.0, forward: 0.0, jump: false };
-        assert!(
-            ai_steer_to_point(5.0, 0.0, 0.0, -90.0, false, false, 0.0, 0.0, 0.0, &mut out)
-        );
+        let out = steer_run(5.0, 0.0, 0.0, -90.0, false, false, 0.0, 0.0, 0.0);
         assert!((out.new_yaw + 90.0).abs() < 1e-4);
         assert_eq!(out.strafe, 0.0);
         assert!(!out.jump);
@@ -231,10 +192,7 @@ mod tests {
     fn test_steer_turn_rate_limited() {
         // Point due west while facing east: 180 normalised to -180,
         // clamped to a -30 turn.
-        let mut out = SteerOut { new_yaw: 0.0, strafe: 0.0, forward: 0.0, jump: false };
-        assert!(
-            ai_steer_to_point(-5.0, 0.0, 1.0, -90.0, false, false, 0.0, 0.0, 0.0, &mut out)
-        );
+        let out = steer_run(-5.0, 0.0, 1.0, -90.0, false, false, 0.0, 0.0, 0.0);
         assert!((out.new_yaw + 120.0).abs() < 1e-4);
         assert!(out.jump);
     }
@@ -242,10 +200,7 @@ mod tests {
         #[test]
     fn test_steer_strafe_uses_input_forward() {
         // Attacking: strafe formula applied to the passed forward value.
-        let mut out = SteerOut { new_yaw: 0.0, strafe: 0.0, forward: 0.0, jump: false };
-        assert!(
-            ai_steer_to_point(5.0, 0.0, 0.0, -90.0, true, true, 5.0, 0.0, 0.7, &mut out)
-        );
+        let out = steer_run(5.0, 0.0, 0.0, -90.0, true, true, 5.0, 0.0, 0.7);
         // Target straight ahead: strafe angle 90deg -> sin=1, cos~0.
         assert!((out.strafe + 0.7).abs() < 1e-4);
         assert!(out.forward.abs() < 1e-4);
@@ -253,19 +208,15 @@ mod tests {
 
     #[test]
     fn test_face_run() {
-        let (mut yaw, mut pitch) = (0.0f32, 0.0f32);
-        assert!(ai_face_angles(5.0, 0.0, 0.0, 0.0, 0.0, 30.0, &mut yaw, &mut pitch));
-        assert_eq!(face_run(5.0, 0.0, 0.0, 0.0, 0.0, 30.0), (yaw, pitch));
+        assert_eq!(face_run(5.0, 0.0, 0.0, 0.0, 0.0, 30.0), (-30.0, -0.0));
     }
 
     #[test]
     fn test_steer_run() {
+        // Point due east while facing east: no turn, jump from dy > 0.
         let a = steer_run(5.0, 1.0, 1.0, -90.0, true, true, 5.0, 0.0, 0.7);
-        let mut b = SteerOut { new_yaw: 0.0, strafe: 0.0, forward: 0.0, jump: false };
-        assert!(
-            ai_steer_to_point(5.0, 1.0, 1.0, -90.0, true, true, 5.0, 0.0, 0.7, &mut b)
-        );
-        assert_eq!((a.new_yaw, a.strafe, a.forward, a.jump), (b.new_yaw, b.strafe, b.forward, b.jump));
+        assert_eq!(a.new_yaw, -90.0);
+        assert!(a.jump);
     }
 
     #[test]

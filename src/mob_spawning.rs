@@ -64,9 +64,8 @@ pub fn spawn_too_close_to_spawn(
 /// RNG draws go through `spawn_next_int` / `spawn_next_float` into
 /// `World::rand`, preserving the exact historical draw sequence.
 /// `spawn_try_spawn` must construct `kind`, position it, run
-/// `getCanSpawnHere`, join the world on success, write
-/// `getMaxSpawnedInChunk` to `out_max_in_chunk`, and return the entity id
-/// (or negative on failure).
+/// `getCanSpawnHere`, join the world on success and return the entity id
+/// with `getMaxSpawnedInChunk` (`None` on failure).
 /// Kinds are 0=spider,1=zombie,2=skeleton,3=creeper for the hostile driver
 /// and 0=sheep,1=pig,2=chicken,3=cow for the passive driver.
 pub trait SpawnerWorld {
@@ -84,8 +83,7 @@ pub trait SpawnerWorld {
         fy: f32,
         fz: f32,
         yaw: f32,
-        out_max_in_chunk: &mut i32,
-    ) -> i32;
+    ) -> Option<(i32, i32)>;
     fn spawn_jockey(&mut self, fx: f32, fy: f32, fz: f32, yaw: f32, host_id: i32) -> bool;
 }
 
@@ -215,11 +213,11 @@ fn spawn_pass(
                 }
 
                 let yaw = world.spawn_next_float(0.0, 360.0);
-                let mut max_in_chunk = 4;
-                let id = world.spawn_try_spawn(hostile, kind, fx, fy, fz, yaw, &mut max_in_chunk);
-                if id < 0 {
+                let Some((id, max_in_chunk)) =
+                    world.spawn_try_spawn(hostile, kind, fx, fy, fz, yaw)
+                else {
                     continue;
-                }
+                };
                 spawned += 1;
 
                 // Alpha spider jockey chance (hostile only).
@@ -364,13 +362,11 @@ mod tests {
                 _fy: f32,
                 _fz: f32,
                 _yaw: f32,
-                out_max: &mut i32,
-            ) -> i32 {
+            ) -> Option<(i32, i32)> {
                 self.try_calls += 1;
-                *out_max = 4;
                 let id = self.next_id;
                 self.next_id += 1;
-                id
+                Some((id, 4))
             }
             fn spawn_jockey(&mut self, _fx: f32, _fy: f32, _fz: f32, _yaw: f32, _host: i32) -> bool {
                 self.jockey_calls += 1;

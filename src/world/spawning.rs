@@ -44,8 +44,7 @@ impl crate::mob_spawning::SpawnerWorld for World {
         fy: f32,
         fz: f32,
         yaw: f32,
-        out_max_in_chunk: &mut i32,
-    ) -> i32 {
+    ) -> Option<(i32, i32)> {
         let id = self.entities.alloc_id();
         if hostile {
             let mkind = match kind {
@@ -60,7 +59,7 @@ impl crate::mob_spawning::SpawnerWorld for World {
             self.entities.insert(Entity::Mob(m));
             if !self.spawner_mob_ok(id) {
                 self.entities.remove(id);
-                return -1;
+                return None;
             }
         } else {
             let akind = match kind {
@@ -80,11 +79,10 @@ impl crate::mob_spawning::SpawnerWorld for World {
             self.entities.insert(Entity::Animal(a));
             if !self.spawner_animal_ok(id) {
                 self.entities.remove(id);
-                return -1;
+                return None;
             }
         }
-        *out_max_in_chunk = 4;
-        id
+        Some((id, 4))
     }
 
     fn spawn_jockey(&mut self, fx: f32, fy: f32, fz: f32, yaw: f32, host_id: i32) -> bool {
