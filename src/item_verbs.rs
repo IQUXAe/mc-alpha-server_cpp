@@ -59,24 +59,20 @@ fn is_collidable(w: &World, x: i32, y: i32, z: i32) -> bool {
         && crate::world::has_collision_box(props.block_type)
 }
 
-/// canBlockStay drivers run on the block-tick table: bridge the live
-/// world through it for the call (the old USE+TICK shim nesting, now
-/// explicit; sound while `u` is untouched inside — see
-/// `with_tick_bridge`).
+/// canBlockStay drivers run straight on the live world now (the old
+/// USE+TICK shim nesting is gone with the bridges).
 fn can_stay(u: &mut ItemUseWorld, id: u8, x: i32, y: i32, z: i32) -> bool {
-    crate::world::shims::with_tick_bridge(u.world as *mut World, || {
-        let t = crate::world::shims::tick_table_ref();
-        match id {
-            37 | 38 => crate::block_ticks::block_flower_can_stay(t, x, y, z),
-            39 | 40 => crate::block_ticks::block_mushroom_can_stay(t, x, y, z),
-            50 => crate::block_ticks::block_torch_can_stay(t, x, y, z),
-            81 => crate::block_ticks::block_cactus_can_stay(t, x, y, z),
-            83 => crate::block_ticks::block_reed_can_stay(t, x, y, z),
-            6 => crate::block_ticks::block_sapling_can_stay(t, x, y, z),
-            59 => crate::block_ticks::block_crops_can_stay(t, id, x, y, z),
-            _ => true,
-        }
-    })
+    let w = &mut *u.world;
+    match id {
+        37 | 38 => crate::block_ticks::block_flower_can_stay(w, x, y, z),
+        39 | 40 => crate::block_ticks::block_mushroom_can_stay(w, x, y, z),
+        50 => crate::block_ticks::block_torch_can_stay(w, x, y, z),
+        81 => crate::block_ticks::block_cactus_can_stay(w, x, y, z),
+        83 => crate::block_ticks::block_reed_can_stay(w, x, y, z),
+        6 => crate::block_ticks::block_sapling_can_stay(w, x, y, z),
+        59 => crate::block_ticks::block_crops_can_stay(w, id, x, y, z),
+        _ => true,
+    }
 }
 
 /// Placement volume check (mirrors `isPlacementVolumeClear`): no live
@@ -112,23 +108,15 @@ fn placement_clear(u: &mut ItemUseWorld, id: u8, x: i32, y: i32, z: i32) -> bool
 }
 
 /// Torch facing like `onBlockPlaced` (the only `block_placed` override).
-/// The attach metadata is read under the tick bridge (see `can_stay`),
-/// then applied to the live world after it.
+/// The attach metadata reads straight from the live world.
 fn torch_placed(u: &mut ItemUseWorld, id: u8, x: i32, y: i32, z: i32, side: i32) {
     if id != 50 {
         return;
     }
-    let meta = crate::world::shims::with_tick_bridge(u.world as *mut World, || {
-        crate::block_ticks::block_torch_attach_meta(
-            crate::world::shims::tick_table_ref(),
-            side,
-            x,
-            y,
-            z,
-        )
-    });
-    u.world.set_block_id(x, y, z, id);
-    u.world.set_block_meta(x, y, z, meta);
+    let w = &mut *u.world;
+    let meta = crate::block_ticks::block_torch_attach_meta(w, side, x, y, z);
+    w.set_block_id(x, y, z, id);
+    w.set_block_meta(x, y, z, meta);
 }
 
 /// Loose-item spawn with motion (mirrors the old `spawn_item` shim).

@@ -12,8 +12,8 @@
 //! - `spawning` — spawn fitness, hostile/passive passes, world tick.
 //! - `blocks` — placement, neighbor updates, drops, tick scheduling.
 //! - `gen` — on-demand chunk generation/population.
-//! - `shims` — thread-local bridges into the stateless `block_*`
-//!   drivers (see that file's SAFETY docs).
+//! - `shims` — the last thread-local bridge (tree generation; the
+//!   block/spawn/item bridges are gone, see that file).
 //! - `tiles` — `TileData`, entity string-id helpers.
 //! - `tests` — unit tests (same module-tree access).
 //!
@@ -261,7 +261,7 @@ impl World {
         self.rng = JavaRandom::new(self.seed);
     }
 
-    /// Crate-visible RNG draws (driver shims share the world stream).
+    /// Crate-visible RNG draws (drivers share the world stream).
     pub(crate) fn rng_next_int(&mut self, bound: i32) -> i32 {
         if bound <= 0 {
             return 0;
@@ -275,6 +275,10 @@ impl World {
 
     pub(crate) fn rng_next_f32(&mut self) -> f32 {
         self.rng.next_float()
+    }
+
+    pub(crate) fn rng_next_u64(&mut self) -> u64 {
+        self.rng.next_long() as u64
     }
 
     pub fn has_chunk(&self, cx: i32, cz: i32) -> bool {

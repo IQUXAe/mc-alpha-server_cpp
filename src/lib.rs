@@ -2,8 +2,9 @@
 //!
 //! `repr(C)` structs are legacy FFI shapes kept for the packet/slot layout
 //! (no C++ bridge remains); the `unsafe` blocks left sit behind documented
-//! guards around thread-local world shims (see `world.rs`), and
-//! `unsafe_code` stays visible in review until those are dissolved too.
+//! guards around the world tree bridge and the generator canvas
+//! (see `world/shims.rs`), and `unsafe_code` stays visible in review
+//! until those are dissolved too.
 //!
 //! Layout: `world/` (storage in `mod`, one responsibility per submodule:
 //! physics, living, AI, combat, spawning, blocks, gen, shims) +

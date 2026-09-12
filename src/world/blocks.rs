@@ -18,7 +18,7 @@ use crate::world::{
     TileData, WORLD_HEIGHT, World, animal_kind_of, animal_string_id, is_air_material, material_of,
     mob_kind_of, mob_string_id, pending_creature,
 };
-use crate::world::shims::{TICK_TABLE, TickGuard, fire_table, tree_accessor, with_tick_world};
+use crate::world::shims::{TickGuard, tree_accessor};
 
 /// Alpha wheat/seeds item ids for the crops drivers.
 const WHEAT_ITEM_ID: i32 = 296;
@@ -110,31 +110,25 @@ impl World {
             }
             _ => {}
         }
-        let _guard = TickGuard::enter(self as *mut World);
         match bid {
-            12 | 13 => block_sand_added(&TICK_TABLE, bid, x, y, z),
+            12 | 13 => block_sand_added(&mut *self, bid, x, y, z),
             8 | 9 | 10 | 11 => {
-                let rate = with_tick_world(
-                    |w| {
-                        if w.material_at(x, y, z) == Material::LAVA {
-                            30
-                        } else {
-                            5
-                        }
-                    },
-                    5,
-                );
-                block_fluid_added(&TICK_TABLE, bid, rate, x, y, z);
+                let rate = if self.material_at(x, y, z) == Material::LAVA {
+                    30
+                } else {
+                    5
+                };
+                block_fluid_added(&mut *self, bid, rate, x, y, z);
                 self.fluid_lava_contact(x, y, z, bid);
             }
-            81 => block_cactus_added(&TICK_TABLE, bid, x, y, z),
-            83 => block_reed_added(&TICK_TABLE, bid, x, y, z),
-            50 => block_torch_added(&TICK_TABLE, bid, x, y, z),
-            18 => block_leaves_added(&TICK_TABLE, bid, x, y, z),
-            6 => block_sapling_added(&TICK_TABLE, bid, x, y, z),
-            59 => block_crops_added(&TICK_TABLE, bid, x, y, z),
-            60 => block_soil_added(&TICK_TABLE, bid, x, y, z),
-            51 => block_fire_added(&fire_table(), bid, 10, x, y, z),
+            81 => block_cactus_added(&mut *self, bid, x, y, z),
+            83 => block_reed_added(&mut *self, bid, x, y, z),
+            50 => block_torch_added(&mut *self, bid, x, y, z),
+            18 => block_leaves_added(&mut *self, bid, x, y, z),
+            6 => block_sapling_added(&mut *self, bid, x, y, z),
+            59 => block_crops_added(&mut *self, bid, x, y, z),
+            60 => block_soil_added(&mut *self, bid, x, y, z),
+            51 => block_fire_added(&mut *self, bid, 10, x, y, z),
             _ => {}
         }
     }
@@ -147,56 +141,50 @@ impl World {
             return;
         }
         let _meta = self.get_block_meta(x, y, z);
-        let _guard = TickGuard::enter(self as *mut World);
         match bid {
-            12 | 13 => block_sand_neighbor(&TICK_TABLE, bid, x, y, z),
+            12 | 13 => block_sand_neighbor(&mut *self, bid, x, y, z),
             8 | 9 | 10 | 11 => {
-                let rate = with_tick_world(
-                    |w| {
-                        if w.material_at(x, y, z) == Material::LAVA {
-                            30
-                        } else {
-                            5
-                        }
-                    },
-                    5,
-                );
-                block_fluid_neighbor(&TICK_TABLE, bid, rate, x, y, z);
+                let rate = if self.material_at(x, y, z) == Material::LAVA {
+                    30
+                } else {
+                    5
+                };
+                block_fluid_neighbor(&mut *self, bid, rate, x, y, z);
                 self.fluid_lava_contact(x, y, z, bid);
             }
             37 | 38 => {
                 let (d, q, g) = Self::native_drop_ids(bid);
-                block_flower_neighbor(&TICK_TABLE, d, q, g, x, y, z);
+                block_flower_neighbor(&mut *self, d, q, g, x, y, z);
             }
             39 | 40 => {
                 let (d, q, g) = Self::native_drop_ids(bid);
-                block_mushroom_neighbor(&TICK_TABLE, d, q, g, x, y, z);
+                block_mushroom_neighbor(&mut *self, d, q, g, x, y, z);
             }
             50 => {
                 let (d, q, g) = Self::native_drop_ids(bid);
-                block_torch_neighbor(&TICK_TABLE, d, q, g, x, y, z);
+                block_torch_neighbor(&mut *self, d, q, g, x, y, z);
             }
             78 => self.snow_neighbor(x, y, z),
             81 => {
                 let (d, q, g) = Self::native_drop_ids(bid);
-                block_cactus_neighbor(&TICK_TABLE, bid, d, q, g, x, y, z);
+                block_cactus_neighbor(&mut *self, bid, d, q, g, x, y, z);
             }
             83 => {
                 let (d, q, g) = Self::native_drop_ids(bid);
-                block_reed_neighbor(&TICK_TABLE, bid, d, q, g, x, y, z);
+                block_reed_neighbor(&mut *self, bid, d, q, g, x, y, z);
             }
             18 => {
-                let mut guard = with_tick_world(|w| w.leaves_guard, 0);
-                block_leaves_neighbor(&TICK_TABLE, bid, bid, &mut guard, x, y, z);
-                with_tick_world(|w| w.leaves_guard = guard, ());
+                let mut guard = self.leaves_guard;
+                block_leaves_neighbor(&mut *self, bid, bid, &mut guard, x, y, z);
+                self.leaves_guard = guard;
             }
             6 => {
                 let (d, q, g) = Self::native_drop_ids(bid);
-                block_sapling_neighbor(&TICK_TABLE, bid, d, q, g, x, y, z);
+                block_sapling_neighbor(&mut *self, bid, d, q, g, x, y, z);
             }
-            59 => block_crops_neighbor(&TICK_TABLE, bid, bid, WHEAT_ITEM_ID, SEEDS_ITEM_ID, x, y, z),
-            60 => block_soil_neighbor(&TICK_TABLE, bid, x, y, z),
-            51 => block_fire_neighbor(&fire_table(), x, y, z),
+            59 => block_crops_neighbor(&mut *self, bid, bid, WHEAT_ITEM_ID, SEEDS_ITEM_ID, x, y, z),
+            60 => block_soil_neighbor(&mut *self, bid, x, y, z),
+            51 => block_fire_neighbor(&mut *self, x, y, z),
             63 | 68 => {}
             _ => {}
         }
@@ -234,15 +222,14 @@ impl World {
         // Player harvest of crops (BlockCrops.onBlockDestroyedByPlayer):
         // wheat when mature + 3 seed rolls. Multi-drop, so spawn here.
         if bid == 59 {
-            let _guard = TickGuard::enter(self as *mut World);
             if meta >= 7 {
-                block_base_drop(&TICK_TABLE, 296, 1, 0, x, y, z, 1.0);
+                block_base_drop(&mut *self, 296, 1, 0, x, y, z, 1.0);
             }
             for _ in 0..3 {
                 // Draw from world RNG to keep the stream stable.
                 let r = self.rng.next_int_bound(15);
                 if r <= meta as i32 {
-                    block_base_drop(&TICK_TABLE, 295, 1, 0, x, y, z, 1.0);
+                    block_base_drop(&mut *self, 295, 1, 0, x, y, z, 1.0);
                 }
             }
             return;
@@ -252,8 +239,7 @@ impl World {
             return;
         }
         // Immature crops drop nothing (rolled returns 0,0) — no seeds here.
-        let _guard = TickGuard::enter(self as *mut World);
-        block_base_drop(&TICK_TABLE, drop, qty, 0, x, y, z, 1.0);
+        block_base_drop(&mut *self, drop, qty, 0, x, y, z, 1.0);
     }
 
     /// idDropped/quantityDropped rolls that need world RNG or metadata
@@ -318,54 +304,12 @@ impl World {
             Some(t) => *t,
             None => return,
         };
-        // ScatterWorld shims draw from the world RNG and spawn directly
-        // (mirroring the C++ global-RNG scatter table).
-        fn sc_next_int(bound: i32) -> i32 {
-            if bound <= 0 {
-                return 0;
-            }
-            with_tick_world(|w| w.rng.next_int_bound(bound), 0)
-        }
-        fn sc_next_f32() -> f32 {
-            with_tick_world(|w| w.rng.next_float(), 0.0)
-        }
-        fn sc_next_f64() -> f64 {
-            with_tick_world(|w| w.rng.next_double(), 0.0)
-        }
-        fn sc_spawn(
-            item_id: i32,
-            count: i32,
-            damage: i32,
-            fx: f64,
-            fy: f64,
-            fz: f64,
-            mx: f64,
-            my: f64,
-            mz: f64,
-        ) {
-            with_tick_world(
-                |w| {
-                    let eid = w.spawn_item_entity(item_id, count, damage, fx, fy, fz);
-                    if let Some(Entity::Item(e)) = w.entities.get_mut(eid) {
-                        e.body.motion = [mx, my, mz];
-                    }
-                },
-                (),
-            );
-        }
-        let table = crate::block_container::ScatterWorld {
-            next_int: Some(sc_next_int),
-            next_f32_01: Some(sc_next_f32),
-            next_f64_01: Some(sc_next_f64),
-            spawn_item: Some(sc_spawn),
-        };
-        let _guard = TickGuard::enter(self as *mut World);
         match tile {
             TileData::Furnace(s) => {
                 for slot in s.slots {
                     if slot.stack_size > 0 {
                         block_furnace_scatter_stack(
-                            &table,
+                            &mut *self,
                             slot.item_id,
                             slot.stack_size,
                             slot.item_damage,
@@ -380,7 +324,7 @@ impl World {
                 for slot in s.slots {
                     if slot.stack_size > 0 {
                         block_chest_scatter_stack(
-                            &table,
+                            &mut *self,
                             slot.item_id,
                             slot.stack_size,
                             slot.item_damage,
@@ -399,7 +343,7 @@ impl World {
     /// Sign support check (mirrors `BlockSign::onNeighborBlockChange`):
     /// wall signs need material-solid behind per facing, posts need solid
     /// below; otherwise drop 323 through the standard base-drop path and
-    /// clear. Requires the tick bridge pointer (callers hold the guard).
+    /// clear.
     fn sign_neighbor(&mut self, x: i32, y: i32, z: i32, bid: u8) {
         let supported = if bid == 68 {
             match self.get_block_meta(x, y, z) {
@@ -413,7 +357,7 @@ impl World {
             self.material_at(x, y - 1, z).is_solid()
         };
         if !supported {
-            block_base_drop(&TICK_TABLE, SIGN_ITEM_ID, 1, 0, x, y, z, 1.0);
+            block_base_drop(&mut *self, SIGN_ITEM_ID, 1, 0, x, y, z, 1.0);
             self.set_block_id(x, y, z, 0);
         }
     }
@@ -424,51 +368,47 @@ impl World {
         if bid == 0 {
             return;
         }
-        let _guard = TickGuard::enter(self as *mut World);
         match bid {
-            12 | 13 => block_sand_tick(&TICK_TABLE, bid, x, y, z),
+            12 | 13 => block_sand_tick(&mut *self, bid, x, y, z),
             8 | 9 | 10 | 11 => {
-                let lava = with_tick_world(|w| w.material_at(x, y, z) == Material::LAVA, false);
-                block_fluid_tick(&TICK_TABLE, bid, lava, x, y, z);
+                let lava = self.material_at(x, y, z) == Material::LAVA;
+                block_fluid_tick(&mut *self, bid, lava, x, y, z);
             }
             37 | 38 => {
                 let (d, q, g) = Self::native_drop_ids(bid);
-                block_flower_tick(&TICK_TABLE, d, q, g, x, y, z);
+                block_flower_tick(&mut *self, d, q, g, x, y, z);
             }
             81 => {
                 let (d, q, g) = Self::native_drop_ids(bid);
-                block_cactus_tick(&TICK_TABLE, bid, d, q, g, x, y, z);
+                block_cactus_tick(&mut *self, bid, d, q, g, x, y, z);
             }
             83 => {
                 let (d, q, g) = Self::native_drop_ids(bid);
-                block_reed_tick(&TICK_TABLE, bid, d, q, g, x, y, z);
+                block_reed_tick(&mut *self, bid, d, q, g, x, y, z);
             }
             18 => {
-                let mut guard = with_tick_world(|w| w.leaves_guard, 0);
+                let mut guard = self.leaves_guard;
                 // Decayed leaves drop a sapling 1/20 (BlockLeaves);
                 // the tick itself always clears the cell.
                 let (did, dqty) = if self.rng.next_int_bound(20) == 0 { (6, 1) } else { (0, 0) };
-                block_leaves_tick(&TICK_TABLE, bid, bid, did, dqty, 0, &mut guard, x, y, z);
-                with_tick_world(|w| w.leaves_guard = guard, ());
+                block_leaves_tick(&mut *self, bid, bid, did, dqty, 0, &mut guard, x, y, z);
+                self.leaves_guard = guard;
             }
             6 => {
                 let (d, q, g) = Self::native_drop_ids(bid);
-                let action = block_sapling_tick(&TICK_TABLE, bid, d, q, g, x, y, z);
-                drop(_guard);
+                let action = block_sapling_tick(&mut *self, bid, d, q, g, x, y, z);
                 if action.kind == 1 {
                     self.grow_sapling(x, y, z, bid, action.seed);
                 }
                 return;
             }
-            59 => block_crops_tick(&TICK_TABLE, bid, bid, WHEAT_ITEM_ID, SEEDS_ITEM_ID, x, y, z),
-            60 => block_soil_tick(&TICK_TABLE, bid, x, y, z),
-            51 => block_fire_tick(&fire_table(), bid, 10, x, y, z),
+            59 => block_crops_tick(&mut *self, bid, bid, WHEAT_ITEM_ID, SEEDS_ITEM_ID, x, y, z),
+            60 => block_soil_tick(&mut *self, bid, x, y, z),
+            51 => block_fire_tick(&mut *self, bid, 10, x, y, z),
             50 => {
                 // Torch re-seats meta 0 (Java BlockTorch.updateTick).
                 if self.get_block_meta(x, y, z) == 0 {
-                    drop(_guard);
-                    let _g2 = TickGuard::enter(self as *mut World);
-                    block_torch_added(&TICK_TABLE, bid, x, y, z);
+                    block_torch_added(&mut *self, bid, x, y, z);
                     return;
                 }
             }
