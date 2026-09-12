@@ -156,16 +156,21 @@ impl WorldGenFlowers {
 /// skylight is not computed yet during populate, so a light check here
 /// would veto every flower; the block tick pops wrongly lit plants right
 /// after, like vanilla self-correction). Flowers (37/38) need
-/// grass/dirt/tilled soil; mushrooms (39/40) need an opaque block below
-/// (`field_540_p`, i.e. occluding material — read from the canvas, which
-/// already holds the fresh terrain, unlike the live-world fallback).
+/// grass/dirt/tilled soil; mushrooms (39/40) need an attachable block
+/// below (`field_540_p`, read as the table flag off the canvas) AND shade:
+/// vanilla populate sees real skylight, so sunlit cells read ~15 (>13)
+/// and reject. The canvas has no light yet, so shade is approximated by
+/// the heightmap: a cell at/above the top is sunlit (reject), below it is
+/// shaded (accept, like the 15-opacity-minus-layers vanilla outcome).
 fn flower_soil_ok(accessor: &WorldAccessor, plant_id: u8, x: i32, y: i32, z: i32) -> bool {
     let below = (accessor.get_block_id)(x, y - 1, z);
     match plant_id {
         37 | 38 => below == 2 || below == 3 || below == 60,
         39 | 40 => {
-            below != 0
-                && material_of(alpha_block_properties_get(below as u32).material).is_solid()
+            if below == 0 || !alpha_block_properties_get(below as u32).allows_attachment {
+                return false;
+            }
+            y < (accessor.get_height_value)(x, z)
         }
         _ => false,
     }
@@ -490,6 +495,97 @@ fn dungeon_spawner_kind(rand: &mut JavaRandom) -> i32 {
         0 => 51,
         3 => 52,
         _ => 54,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    thread_local! {
+        static CELLS: RefCell<HashMap<(i32, i32, i32), u8>> = RefCell::new(HashMap::new());
+    }
+
+    fn t_get(x: i32, y: i32, z: i32) -> u8 {
+        CELLS.with(|c| c.borrow().get(&(x, y, z)).copied().unwrap_or(0))
+    }
+    fn t_set(x: i32, y: i32, z: i32, id: u8) {
+        CELLS.with(|c| c.borrow_mut().insert((x, y, z), id));
+    }
+    fn t_meta(_x: i32, _y: i32, _z: i32) -> u8 {
+        0
+    }
+    fn t_set_meta(_x: i32, _y: i32, _z: i32, _m: u8) {}
+    fn t_attach(_x: i32, _y: i32, _z: i32) -> bool {
+        false
+    }
+    fn t_solid(x: i32, y: i32, z: i32) -> bool {
+        t_get(x, y, z) != 0
+    }
+    fn t_height(x: i32, z: i32) -> i32 {
+        for y in (0..128).rev() {
+            if t_get(x, y, z) != 0 {
+                return y + 1;
+            }
+        }
+        0
+    }
+    fn t_accessor() -> WorldAccessor {
+        WorldAccessor {
+            get_block_id: t_get,
+            set_block_id: t_set,
+            get_block_meta: t_meta,
+            set_block_meta: t_set_meta,
+            allows_attachment: t_attach,
+            is_block_solid: t_solid,
+            get_height_value: t_height,
+        }
+    }
+    fn flat_grass() {
+        CELLS.with(|c| c.borrow_mut().clear());
+        for x in -16..16 {
+            for z in -16..16 {
+                t_set(x, 63, z, 2); // grass
+            }
+        }
+    }
+    fn planted(id: u8) -> usize {
+        CELLS.with(|c| c.borrow().values().filter(|v| **v == id).count())
+    }
+
+    #[test]
+    fn test_mushroom_rejects_sunlit_ground() {
+        // Open grass flat: vanilla reads skylight ~15 (>13) and plants no
+        // mushrooms; shaded cells (canopy above) accept.
+        flat_grass();
+        let acc = t_accessor();
+        let mut rand = JavaRandom::new(1234);
+        WorldGenFlowers::new(39).generate(&acc, &mut rand, 0, 64, 0);
+        WorldGenFlowers::new(40).generate(&acc, &mut rand, 0, 64, 0);
+        assert_eq!(planted(39), 0, "brown mushrooms must not plant on sunlit ground");
+        assert_eq!(planted(40), 0, "red mushrooms must not plant on sunlit ground");
+        // Same flat with a leaf canopy overhead: shade accepts.
+        for x in -16..16 {
+            for z in -16..16 {
+                t_set(x, 70, z, 18);
+            }
+        }
+        let mut rand = JavaRandom::new(1234);
+        WorldGenFlowers::new(39).generate(&acc, &mut rand, 0, 64, 0);
+        assert!(planted(39) > 0, "shaded mushrooms must plant");
+    }
+
+    #[test]
+    fn test_flowers_plant_on_open_grass() {
+        flat_grass();
+        let acc = t_accessor();
+        let mut rand = JavaRandom::new(42);
+        WorldGenFlowers::new(37).generate(&acc, &mut rand, 0, 64, 0);
+        WorldGenFlowers::new(38).generate(&acc, &mut rand, 0, 64, 0);
+        assert!(planted(37) > 0, "yellow flowers must plant on open grass");
+        assert!(planted(38) > 0, "red flowers must plant on open grass");
     }
 }
 
