@@ -5,6 +5,12 @@
 //! shims (see `world.rs`), and `unsafe_code` stays visible in review
 //! until those are dissolved too.
 
+//! Layout: `world/` (storage in `mod`, one responsibility per submodule:
+//! physics, living, AI, combat, spawning, blocks, gen, shims) +
+//! `session` (transport+play) + `server` (tick fan-out); packet builders
+//! live in `session_packets`, tile rows in `world::tiles`, and each
+//! god-object's tests in adjacent `tests` submodules.
+
 pub mod block;
 pub mod block_container;
 pub mod block_fire;

@@ -1,0 +1,431 @@
+//! Spawn fitness, hostile/passive spawn passes and the world tick.
+//! Split out of `world.rs`; behavior unchanged. The `SPAWN_*` bridge below
+//! feeds the stateless `mob_spawning` drivers (same thread-local pattern as
+//! `world_shims`; see that file's SAFETY docs).
+
+use crate::entity_table::{AnimalKind, Entity, EntityId, MobKind};
+use crate::math_helper::floor_double;
+use crate::world::{GRASS_BLOCK_ID, WORLD_HEIGHT, World, is_air_material};
+use crate::world::tiles::TileData;
+
+// Native spawner bridge: the existing `spawn_pass` drivers stay
+// untouched; these shims feed them the native world's RNG, chunk map,
+// and table through a thread-local pointer (the established `*World`
+// bridge pattern). Draws come from the world's own `JavaRandom`, so the
+// native stream is deterministic per seed but independent of the C++
+// mt19937 stream. No pending queue exists natively: inserts land
+// directly in the table, so no live-pointer workaround is needed.
+thread_local! {
+    static SPAWN_WORLD: std::cell::Cell<*mut World> = std::cell::Cell::new(std::ptr::null_mut());
+    static SPAWN_HOSTILE: std::cell::Cell<bool> = std::cell::Cell::new(true);
+}
+
+fn spawn_next_int(bound: i32) -> i32 {
+    if bound <= 0 {
+        return 0;
+    }
+    SPAWN_WORLD.with(|w| unsafe {
+        // SAFETY: the spawn driver sets this from a live `&mut World` and
+        // clears it right after; null (no driver) is checked below.
+        let world = w.get();
+        if world.is_null() {
+            return 0;
+        }
+        (*world).rng.next_int_bound(bound)
+    })
+}
+
+fn spawn_next_uniform_float(lo: f32, hi: f32) -> f32 {
+    SPAWN_WORLD.with(|w| unsafe {
+        // SAFETY: the spawn driver sets this from a live `&mut World` and
+        // clears it right after; null (no driver) is checked below.
+        let world = w.get();
+        if world.is_null() {
+            return lo;
+        }
+        lo + (hi - lo) * (*world).rng.next_float()
+    })
+}
+
+fn spawn_chunk_exists(x: i32, z: i32) -> bool {
+    SPAWN_WORLD.with(|w| unsafe {
+        // SAFETY: the spawn driver sets this from a live `&mut World` and
+        // clears it right after; null (no driver) is checked below.
+        let world = w.get();
+        if world.is_null() {
+            return false;
+        }
+        (*world).has_chunk(x, z)
+    })
+}
+
+fn spawn_is_solid(x: i32, y: i32, z: i32) -> bool {
+    SPAWN_WORLD.with(|w| unsafe {
+        // SAFETY: the spawn driver sets this from a live `&mut World` and
+        // clears it right after; null (no driver) is checked below.
+        let world = w.get();
+        if world.is_null() {
+            return false;
+        }
+        (*world).is_solid(x, y, z)
+    })
+}
+
+fn spawn_is_air(x: i32, y: i32, z: i32) -> bool {
+    SPAWN_WORLD.with(|w| unsafe {
+        // SAFETY: the spawn driver sets this from a live `&mut World` and
+        // clears it right after; null (no driver) is checked below.
+        let world = w.get();
+        if world.is_null() {
+            return false;
+        }
+        is_air_material((*world).get_block_id(x, y, z))
+    })
+}
+
+fn spawn_is_liquid(x: i32, y: i32, z: i32) -> bool {
+    SPAWN_WORLD.with(|w| unsafe {
+        // SAFETY: the spawn driver sets this from a live `&mut World` and
+        // clears it right after; null (no driver) is checked below.
+        let world = w.get();
+        if world.is_null() {
+            return false;
+        }
+        (*world).material_at(x, y, z).is_liquid()
+    })
+}
+
+fn spawn_try_spawn(
+    kind: u8,
+    fx: f32,
+    fy: f32,
+    fz: f32,
+    yaw: f32,
+    out_max_in_chunk: &mut i32,
+) -> i32 {
+    SPAWN_WORLD.with(|w| unsafe {
+        // SAFETY: the spawn driver sets this from a live `&mut World` and
+        // clears it right after; null (no driver) is checked below.
+        let world = w.get();
+        if world.is_null() {
+            return -1;
+        }
+        let world = &mut *world;
+        let hostile = SPAWN_HOSTILE.with(|h| h.get());
+        let id = world.entities.alloc_id();
+        if hostile {
+            let mkind = match kind {
+                0 => MobKind::Spider,
+                1 => MobKind::Zombie,
+                2 => MobKind::Skeleton,
+                _ => MobKind::Creeper,
+            };
+            let mut m = crate::entity_table::MobEnt::new(id, mkind);
+            m.living.body.set_position(fx as f64, fy as f64, fz as f64);
+            m.living.body.yaw = yaw;
+            world.entities.insert(Entity::Mob(m));
+            if !world.spawner_mob_ok(id) {
+                world.entities.remove(id);
+                return -1;
+            }
+        } else {
+            let akind = match kind {
+                0 => AnimalKind::Sheep,
+                1 => AnimalKind::Pig,
+                2 => AnimalKind::Chicken,
+                _ => AnimalKind::Cow,
+            };
+            let mut a = crate::entity_table::AnimalEnt::new(id, akind);
+            a.living.body.set_position(fx as f64, fy as f64, fz as f64);
+            a.living.body.yaw = yaw;
+            // The C++ chicken ctor rolls the egg clock at construction,
+            // before the spawn check below (draw consumed even on reject).
+            if akind == AnimalKind::Chicken {
+                a.egg_timer = 6000 + world.rng.next_int_bound(6000);
+            }
+            world.entities.insert(Entity::Animal(a));
+            if !world.spawner_animal_ok(id) {
+                world.entities.remove(id);
+                return -1;
+            }
+        }
+        *out_max_in_chunk = 4;
+        id
+    })
+}
+
+fn spawn_jockey(fx: f32, fy: f32, fz: f32, yaw: f32, host_id: i32) -> bool {
+    SPAWN_WORLD.with(|w| unsafe {
+        // SAFETY: the spawn driver sets this from a live `&mut World` and
+        // clears it right after; null (no driver) is checked below.
+        let world = w.get();
+        if world.is_null() {
+            return false;
+        }
+        let world = &mut *world;
+        if world.entities.get(host_id).is_none() {
+            return false;
+        }
+        let id = world.entities.alloc_id();
+        let mut m = crate::entity_table::MobEnt::new(id, MobKind::Skeleton);
+        m.living.body.set_position(fx as f64, fy as f64, fz as f64);
+        m.living.body.yaw = yaw;
+        world.entities.insert(Entity::Mob(m));
+        world.entities.mount(id, Some(host_id));
+        true
+    })
+}
+
+fn spawner_table() -> crate::mob_spawning::SpawnerWorld {
+    crate::mob_spawning::SpawnerWorld {
+        next_int: Some(spawn_next_int),
+        next_uniform_float: Some(spawn_next_uniform_float),
+        chunk_exists: Some(spawn_chunk_exists),
+        is_solid: Some(spawn_is_solid),
+        is_air: Some(spawn_is_air),
+        is_liquid: Some(spawn_is_liquid),
+        try_spawn: Some(spawn_try_spawn),
+        spawn_jockey: Some(spawn_jockey),
+    }
+}
+
+impl World {
+    /// Mob spawn fitness (mirrors `EntityMob::getCanSpawnHere`): dark
+    /// enough (two unconditional RNG draws like C++), collision-free, and
+    /// dry.
+    fn spawner_mob_ok(&mut self, id: EntityId) -> bool {
+        let (px, min_y, pz, bbox) = match self.entities.get(id) {
+            Some(e) => (e.body().pos[0], e.body().bounding_box.min_y, e.body().pos[2], e.body().bounding_box.clone()),
+            None => return false,
+        };
+        let (x, y, z) = (floor_double(px), floor_double(min_y), floor_double(pz));
+        if self.saved_light_value(0, x, y, z) as i32 > self.rng.next_int_bound(32) {
+            return false;
+        }
+        if self.block_light_value(x, y, z) as i32 > self.rng.next_int_bound(8) {
+            return false;
+        }
+        self.colliding_boxes(&bbox).is_empty() && !self.touching_liquid(id)
+    }
+
+    /// Animal spawn fitness (mirrors `EntityAnimals::getCanSpawnHere`):
+    /// grass below, bright, collision-free, and dry. No RNG draws.
+    fn spawner_animal_ok(&mut self, id: EntityId) -> bool {
+        let (px, min_y, pz, bbox) = match self.entities.get(id) {
+            Some(e) => (e.body().pos[0], e.body().bounding_box.min_y, e.body().pos[2], e.body().bounding_box.clone()),
+            None => return false,
+        };
+        let (x, y, z) = (floor_double(px), floor_double(min_y), floor_double(pz));
+        if self.get_block_id(x, y - 1, z) != GRASS_BLOCK_ID {
+            return false;
+        }
+        if self.block_light_value(x, y, z) <= 8 {
+            return false;
+        }
+        self.colliding_boxes(&bbox).is_empty() && !self.touching_liquid(id)
+    }
+
+    /// Player anchor positions for the spawn passes (mirrors
+    /// `gatherPlayerPositions`: every joined player, dead or not).
+    fn spawn_anchors(&self) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        let mut rows: Vec<(EntityId, [f64; 3])> = Vec::new();
+        for oid in self.entities.all_ids() {
+            if let Some(Entity::Player(p)) = self.entities.get(oid) {
+                rows.push((oid, p.living.body.pos));
+            }
+        }
+        rows.sort_by_key(|(oid, _)| *oid);
+        let mut xs = Vec::with_capacity(rows.len());
+        let mut ys = Vec::with_capacity(rows.len());
+        let mut zs = Vec::with_capacity(rows.len());
+        for (_, pos) in rows {
+            xs.push(pos[0]);
+            ys.push(pos[1]);
+            zs.push(pos[2]);
+        }
+        (xs, ys, zs)
+    }
+
+    /// Hostile spawn pass (mirrors `World::spawnHostileMobs`).
+    pub fn spawn_hostile_mobs(&mut self) -> i32 {
+        if !self.spawn_monsters {
+            return 0;
+        }
+        let (px, py, pz) = self.spawn_anchors();
+        let count = self.entities.count_mobs() as i32;
+        let (sx, sy, sz) = (self.spawn[0], self.spawn[1], self.spawn[2]);
+        SPAWN_WORLD.with(|w| w.set(self as *mut World));
+        SPAWN_HOSTILE.with(|h| h.set(true));
+        let table = spawner_table();
+        let n = crate::mob_spawning::rust_world_spawn_hostile(
+            &table, &px, &py, &pz, count, sx, sy, sz, WORLD_HEIGHT,
+        );
+        SPAWN_WORLD.with(|w| w.set(std::ptr::null_mut()));
+        n
+    }
+
+    /// Passive spawn pass (mirrors `World::spawnPassiveMobs`).
+    pub fn spawn_passive_mobs(&mut self) -> i32 {
+        if !self.spawn_animals {
+            return 0;
+        }
+        let (px, py, pz) = self.spawn_anchors();
+        let count = self.entities.count_animals() as i32;
+        let (sx, sy, sz) = (self.spawn[0], self.spawn[1], self.spawn[2]);
+        SPAWN_WORLD.with(|w| w.set(self as *mut World));
+        SPAWN_HOSTILE.with(|h| h.set(false));
+        let table = spawner_table();
+        let n = crate::mob_spawning::rust_world_spawn_passive(
+            &table, &px, &py, &pz, count, sx, sy, sz, WORLD_HEIGHT,
+        );
+        SPAWN_WORLD.with(|w| w.set(std::ptr::null_mut()));
+        n
+    }
+
+    /// Item pickup sweep (mirrors the in-loop pickup: ready items within
+    /// the expanded player box merge via `player_add_item`; packets are
+    /// the network slice's). Two-phase instead of interleaved, which is
+    /// equivalent here: fresh drops always carry a pickup delay, and
+    /// native players hold still between network ticks.
+    fn pickup_items(&mut self) {
+        let mut items: Vec<EntityId> = Vec::new();
+        for oid in self.entities.alive_ids() {
+            if let Some(Entity::Item(e)) = self.entities.get(oid) {
+                if e.pickup_delay <= 0 {
+                    items.push(oid);
+                }
+            }
+        }
+        items.sort_unstable();
+        let mut players: Vec<EntityId> = Vec::new();
+        for oid in self.entities.alive_ids() {
+            if self.target_alive(oid) {
+                players.push(oid);
+            }
+        }
+        players.sort_unstable();
+        for iid in items {
+            if self.entities.get(iid).map(|e| e.body().dead).unwrap_or(true) {
+                continue;
+            }
+            for pid in &players {
+                if self.entities.get(iid).map(|e| e.body().dead).unwrap_or(true) {
+                    break;
+                }
+                let hit = match (self.entities.get(iid), self.entities.get(*pid)) {
+                    (Some(Entity::Item(it)), Some(Entity::Player(p))) => {
+                        let ex = p.living.body.width as f64 / 2.0 + 1.0 + 0.125;
+                        let min_y = p.living.body.pos[1] - 0.25;
+                        let max_y = p.living.body.pos[1] + p.living.body.height as f64;
+                        (p.living.body.pos[0] - it.body.pos[0]).abs() < ex
+                            && it.body.pos[1] < max_y
+                            && it.body.pos[1] + 0.25 > min_y
+                            && (p.living.body.pos[2] - it.body.pos[2]).abs() < ex
+                    }
+                    _ => false,
+                };
+                if !hit {
+                    continue;
+                }
+                let (item_id, count, damage) = match self.entities.get(iid) {
+                    Some(Entity::Item(e)) => (e.item_id, e.count, e.damage),
+                    _ => continue,
+                };
+                let rem = self.player_add_item(
+                    *pid,
+                    crate::inventory::FfiItemStack {
+                        stack_size: count,
+                        animations_to_go: 0,
+                        item_id,
+                        item_damage: damage,
+                    },
+                );
+                if rem < count {
+                    if rem <= 0 {
+                        if let Some(e) = self.entities.get_mut(iid) {
+                            e.body_mut().dead = true;
+                        }
+                        self.item_pickups.push((iid, *pid));
+                    } else if let Some(Entity::Item(e)) = self.entities.get_mut(iid) {
+                        e.count = rem;
+                    }
+                }
+                if self.entities.get(iid).map(|e| e.body().dead).unwrap_or(true) {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Server tick (mirrors `World::tick` minus chunk I/O, lighting,
+    /// chest/sign-tile behavior, and packets): clock, spawners, furnace
+    /// tiles, scheduled and random block ticks, entity dispatch on a
+    /// snapshot (mid-tick spawns wait a tick like C++), item pickup,
+    /// dead-row purge, and periodic unload.
+    pub fn tick_world(&mut self) {
+        self.time += 1;
+        if self.spawn_monsters {
+            self.spawn_hostile_mobs();
+        }
+        if self.spawn_animals {
+            self.spawn_passive_mobs();
+        }
+        self.tick_furnaces();
+        self.tick_primed_tnt();
+        self.process_scheduled_ticks();
+        self.random_block_ticks();
+        let mut ids = self.entities.alive_ids();
+        ids.sort_unstable();
+        for id in ids {
+            if self.entities.get(id).map(|e| e.body().dead).unwrap_or(true) {
+                continue;
+            }
+            match self.entities.get(id) {
+                Some(Entity::Item(_)) => self.tick_item(id),
+                Some(Entity::Falling(_)) => self.tick_falling(id),
+                Some(Entity::Boat(_)) => self.tick_boat(id),
+                Some(Entity::Arrow(_)) => self.tick_arrow(id),
+                Some(Entity::Mob(_)) => self.tick_mob(id),
+                Some(Entity::Animal(_)) => self.tick_animal(id),
+                Some(Entity::Player(_)) => self.tick_player(id),
+                None => {}
+            }
+        }
+        self.pickup_items();
+        self.entities.purge_dead();
+        self.unload_chunks();
+    }
+
+    /// Native furnace ticking (mirrors the `World::tick` tile-entity pass
+    /// over `TileEntityFurnace::updateEntity`): every furnace tile looks
+    /// up fuel from its own slot and runs the shared core, then a burn
+    /// flip swaps the block 61 <-> 62 preserving metadata (mirrors
+    /// `updateFurnaceBlockState`, whose no-notify set keeps the tile
+    /// alive — here tiles live outside chunks, so any plain set is safe).
+    /// Swapped cells accumulate in `furnace_updates` for the server tick
+    /// to broadcast (the C++ `markBlockNeedsUpdate`).
+    pub fn tick_furnaces(&mut self) {
+        let cells: Vec<(i32, i32, i32)> = self.tiles.keys().copied().collect();
+        for (x, y, z) in cells {
+            let ticked = match self.tiles.get_mut(&(x, y, z)) {
+                Some(TileData::Furnace(state)) => {
+                    crate::tile_entity_furnace::furnace_tick_native(state)
+                }
+                _ => continue,
+            };
+            if !ticked.needs_block_update {
+                continue;
+            }
+            let burning = matches!(
+                self.tiles.get(&(x, y, z)),
+                Some(TileData::Furnace(state)) if state.burn_time > 0
+            );
+            let meta = self.get_block_meta(x, y, z);
+            let new_id = if burning { 62 } else { 61 };
+            if self.set_block_id(x, y, z, new_id) {
+                self.set_block_meta(x, y, z, meta);
+                self.furnace_updates.push([x, y, z]);
+            }
+        }
+    }
+}
