@@ -27,6 +27,11 @@ pub trait BlockAccess {
     fn allows_attachment(&mut self, x: i32, y: i32, z: i32) -> bool;
     fn is_block_solid(&mut self, x: i32, y: i32, z: i32) -> bool;
     fn get_height_value(&mut self, x: i32, z: i32) -> i32;
+    /// Queue one dungeon-chest loot stack. Only the canvas backend
+    /// collects (dungeons generate during populate); the default is a
+    /// no-op — trees never make chests, so the live path stays silent.
+    fn push_dungeon_loot(&mut self, _x: i32, _y: i32, _z: i32, _slot: i32, _item: i32, _count: i32) {
+    }
 }
 
 /// Live-world backend (sapling growth path): the chunk map plus the
@@ -74,6 +79,7 @@ pub struct CanvasAccess<'a> {
     chunk_x: i32,
     chunk_z: i32,
     fallback: &'a mut dyn BlockAccess,
+    loot: Vec<(i32, i32, i32, i32, i32, i32)>,
 }
 
 impl<'a> CanvasAccess<'a> {
@@ -104,8 +110,15 @@ impl<'a> CanvasAccess<'a> {
                 chunk_x,
                 chunk_z,
                 fallback,
+                loot: Vec::new(),
             }
         }
+    }
+
+    /// Drain the dungeon-chest loot queued during decoration (the canvas
+    /// holds no tiles; the world materializes chest rows on write-back).
+    pub fn take_loot(&mut self) -> Vec<(i32, i32, i32, i32, i32, i32)> {
+        std::mem::take(&mut self.loot)
     }
 
     /// (array slot, local x, local z) for in-canvas columns.
@@ -187,6 +200,9 @@ impl<'a> BlockAccess for CanvasAccess<'a> {
             }
             _ => self.fallback.get_height_value(x, z),
         }
+    }
+    fn push_dungeon_loot(&mut self, x: i32, y: i32, z: i32, slot: i32, item: i32, count: i32) {
+        self.loot.push((x, y, z, slot, item, count));
     }
 }
 

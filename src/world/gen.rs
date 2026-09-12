@@ -91,7 +91,7 @@ impl World {
                 },
             ],
         };
-        {
+        let dungeon_loot = {
             // Decoration sets bypass skylight regen (mirrors C++
             // isPopulating); the write-back below regenerates instead.
             self.populating = true;
@@ -108,7 +108,7 @@ impl World {
                 chunks: &mut self.chunks,
                 populating: self.populating,
             };
-            rust_chunk_provider_populate_batch(
+            let loot = rust_chunk_provider_populate_batch(
                 gen,
                 &batch,
                 &mut fallback,
@@ -118,7 +118,8 @@ impl World {
                 &center_temps,
             );
             self.populating = false;
-        }
+            loot
+        };
         // 3. Write back: insert missing, refresh present (tree spillover);
         // only the requested chunk is flagged (canvas neighbors decorate
         // on their own request, exactly once each).
@@ -146,7 +147,7 @@ impl World {
         }
         // 4. Dungeon-chest loot: the canvas holds no tiles, so materialize
         // chest rows for placed chests and deal the buffered stacks.
-        for (lx, ly, lz, slot, item, count) in crate::decorators::misc::drain_dungeon_loot() {
+        for (lx, ly, lz, slot, item, count) in dungeon_loot {
             if self.get_block_id(lx, ly, lz) != 54 {
                 continue;
             }

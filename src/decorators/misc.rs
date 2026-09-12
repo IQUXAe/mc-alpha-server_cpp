@@ -414,7 +414,7 @@ impl WorldGenDungeons {
                             for _ in 0..8 {
                                 if let Some((item, count)) = dungeon_loot(rand) {
                                     let slot = rand.next_int_bound(27);
-                                    push_dungeon_loot(cx, y, cz, slot, item, count);
+                                    accessor.push_dungeon_loot(cx, y, cz, slot, item, count);
                                 }
                             }
                             break;
@@ -431,24 +431,6 @@ impl WorldGenDungeons {
             false
         }
     }
-}
-
-/// Pending dungeon-chest loot as (x, y, z, slot, item_id, count), drained
-/// by the world after populate write-back (the canvas holds no tiles).
-/// Thread-local: decoration runs on one thread per chunk batch.
-use std::cell::RefCell;
-thread_local! {
-    static DUNGEON_LOOT: RefCell<Vec<(i32, i32, i32, i32, i32, i32)>> = RefCell::new(Vec::new());
-}
-
-/// Queue one loot stack for a dungeon chest.
-fn push_dungeon_loot(x: i32, y: i32, z: i32, slot: i32, item: i32, count: i32) {
-    DUNGEON_LOOT.with(|c| c.borrow_mut().push((x, y, z, slot, item, count)));
-}
-
-/// Drain all pending loot (world calls this after chunk write-back).
-pub fn drain_dungeon_loot() -> Vec<(i32, i32, i32, i32, i32, i32)> {
-    DUNGEON_LOOT.with(|c| std::mem::take(&mut *c.borrow_mut()))
 }
 
 /// Dungeon loot (Java WorldGenDungeons.func_434_a): (shiftedIndex, count).

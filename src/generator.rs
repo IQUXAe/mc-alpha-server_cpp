@@ -332,7 +332,7 @@ pub fn rust_chunk_provider_populate_batch(
     chunk_z: i32,
     biome_type_raw: i32,
     temperatures: &[f64],
-) {
+) -> Vec<(i32, i32, i32, i32, i32, i32)> {
     // Canvas over the 2x2 batch arrays with the live world behind it
     // (explicit borrows instead of the old thread-local state).
     let mut canvas = CanvasAccess::new(
@@ -353,7 +353,8 @@ pub fn rust_chunk_provider_populate_batch(
         fallback,
     );
 
-    // Call the existing decorator logic
+    // Call the existing decorator logic, then hand the queued
+    // dungeon-chest loot back (the canvas holds no tiles).
     alpha_decorate_chunk(
         &mut canvas,
         generator.world_seed,
@@ -363,6 +364,7 @@ pub fn rust_chunk_provider_populate_batch(
         &mut generator.tree_noise,
         temperatures,
     );
+    canvas.take_loot()
 }
 
 #[cfg(test)]
