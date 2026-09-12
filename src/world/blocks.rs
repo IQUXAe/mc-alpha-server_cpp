@@ -464,7 +464,7 @@ impl World {
         }
     }
 
-    /// Sapling growth (mirrors the C++ `GrowTree` tail): clear, roll the
+    /// Sapling growth: clear, roll the
     /// 1/10 big tree, generate through the tree accessor, restore the
     /// sapling on failure.
     pub(crate) fn grow_sapling(&mut self, x: i32, y: i32, z: i32, bid: u8, seed: u64) {

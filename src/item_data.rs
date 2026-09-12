@@ -143,7 +143,7 @@ pub fn item_is_valid(item_id: i32) -> bool {
 // Durability (`maxDamage`)
 // ---------------------------------------------------------------------------
 //
-// C++ sources:
+// Vanilla sources (see java/ reference):
 // - `ItemTool` ctor (Java `ItemTool.java`): `maxDamage = 32 << level`,
 //   `if (level == 3) maxDamage *= 4`.
 //   Gold tools are built with `level == 0`, so they share wood values.
@@ -184,9 +184,9 @@ pub fn item_max_damage(item_id: i32) -> i32 {
 }
 
 // ---------------------------------------------------------------------------
-// Food (`ItemFood` / `ItemSoup` heal amounts, `Item.cpp:239/261/276/298-301/328-329`)
+// Food (`ItemFood` / `ItemSoup` heal amounts)
 // ---------------------------------------------------------------------------
-// No string names exist in `Item.h` / `Item.cpp`, so no name table is ported.
+// Vanilla items have no string names, so no name table is ported.
 
 /// Heal amount for food items, 0 for non-food.
 /// Values: apple 4, soup 10, bread 5, pork raw 3, pork cooked 8,

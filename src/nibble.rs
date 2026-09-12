@@ -1,16 +1,14 @@
-//! Safe port of `src/core/NibbleArray.h`.
+//! Half-byte array for block light / sky light / metadata storage.
 //!
-//! The C++ class stores a raw `uint8_t*` plus an `owns_data` flag and deletes
-//! the copy constructor to avoid double-free. The Rust version owns a
-//! `Vec<u8>` instead, so move semantics are handled by the compiler.
+//! Owns a `Vec<u8>` (move semantics handled by the compiler).
 //!
-//! Layout is 1:1 with C++: nibble `index = (x << 11) | (z << 7) | y`, the low
+//! Layout: nibble `index = (x << 11) | (z << 7) | y`, the low
 //! nibble lives in even indices and the high nibble in odd indices. A chunk
 //! section holds 16 x 128 x 16 = 32768 nibbles = 16384 bytes.
 //!
-//! Differences: out-of-range coordinates return `0` on read and are ignored
-//! on write (C++ would read/write out of bounds), and an empty array reports
-//! invalid instead of dereferencing null.
+//! Differences from vanilla: out-of-range coordinates return `0` on read
+//! and are ignored on write, and an empty array reports invalid instead of
+//! dereferencing null.
 
 /// Half-byte array for block light / sky light / metadata storage.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

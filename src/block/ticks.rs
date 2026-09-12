@@ -1,18 +1,16 @@
 //! Block behavior (mirrors Java `Block*`).
 //!
 //! Every per-block event (`onBlockAdded`, `onNeighborBlockChange`,
-//! `updateTick`, `canBlockStay`, drops) lives here. C++ keeps the `Block`
-//! objects, the global registry, and scheduling plumbing; Rust owns the
-//! decisions. World access is a direct `&mut World` borrow, so draw
-//! sequences and check order are preserved exactly.
+//! `updateTick`, `canBlockStay`, drops) lives here. World access is a
+//! direct `&mut World` borrow, so draw sequences and check order are
+//! preserved exactly.
 //!
-//! Parameter notes (kept faithful to C++):
-//! - block ids the C++ side already knows (`leaves_id`, `crop_id`, item
+//! Parameter notes:
+//! - block ids the caller already knows (`leaves_id`, `crop_id`, item
 //!   ids, `is_lava`) are passed in instead of re-reading the registry.
-//! - the leaves recursion guard (`BlockLeaves::field_663_c`) stays a C++
-//!   member; Rust takes it as `*mut i32`, exactly where C++ read/wrote it.
-//! - sapling growth returns an action: tree generation itself runs in C++
-//!   through the existing `WorldAccessor` path.
+//! - the leaves recursion guard is a plain `&mut i32` counter.
+//! - sapling growth returns an action; tree generation itself runs through
+//!   the world accessor path (see `world::blocks`).
 
 use crate::entity::table::{Body, Entity};
 use crate::material::Material;
@@ -21,8 +19,8 @@ use crate::world::{World, has_collision_box, has_collision_id};
 pub const PLANT_GROWTH_STAGE_MAX: u8 = 15;
 pub const LEAVES_DECAY_GUARD_MAX: i32 = 100;
 
-/// Sapling tick outcome. `GrowTree` carries the `World::rand()` draw; C++
-/// runs the existing `WorldAccessor` tree generation for it.
+/// Sapling tick outcome. `GrowTree` carries the `World::rand()` draw; the
+/// caller runs tree generation for it.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SaplingAction {
@@ -586,7 +584,7 @@ pub fn block_reed_tick(
     stalk_tick(w, block_id, true, x, y, z);
 }
 
-// ---- leaves (counter lives in C++, passed by pointer) ----
+// ---- leaves (recursion guard passed by mutable borrow) ----
 
 fn leaf_propagate(w: &mut World, leaves_id: u8, x: i32, y: i32, z: i32, current: i32) -> i32 {
     let id = q_id_nc(w, x, y, z);
@@ -758,8 +756,8 @@ pub fn block_sapling_neighbor(
     u_schedule(w, x, y, z, block_id, 100);
 }
 
-/// Sapling tick. Returns GrowTree (with the rand draw) when C++ must run
-/// tree generation; C++ restores the sapling itself if generation fails.
+/// Sapling tick. Returns GrowTree (with the rand draw) when the caller
+/// should run tree generation; it restores the sapling if generation fails.
 pub fn block_sapling_tick(
     w: &mut World,
     block_id: u8,

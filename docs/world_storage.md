@@ -1,6 +1,6 @@
 # Legacy World Storage Support & On-the-fly Conversion
 
-This document describes how to configure and use the legacy world storage features in the Minecraft Alpha 1.2.6 C++ server.
+This document describes how to configure and use the legacy world storage features in the Minecraft Alpha 1.2.6 server.
 
 ---
 

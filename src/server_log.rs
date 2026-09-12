@@ -47,12 +47,12 @@ impl LogLevel {
 
 static MIN_LEVEL: AtomicU8 = AtomicU8::new(LogLevel::Info as u8);
 
-/// Mirrors `Logger::setLevel()`.
+/// Sets the minimum level; messages below it are dropped.
 pub fn set_level(level: LogLevel) {
     MIN_LEVEL.store(level as u8, Ordering::Relaxed);
 }
 
-/// Mirrors `Logger::getLevel()`.
+/// Returns the current minimum level.
 pub fn get_level() -> LogLevel {
     LogLevel::from_u8(MIN_LEVEL.load(Ordering::Relaxed))
 }
@@ -76,7 +76,7 @@ fn lock_slot() -> std::sync::MutexGuard<'static, Option<ConsoleLineProvider>> {
     }
 }
 
-/// Mirrors `Logger::setConsoleLineProvider()`.
+/// Installs the console-line provider re-printed after each line.
 pub fn set_console_line_provider(provider: ConsoleLineProvider) {
     *lock_slot() = Some(provider);
 }
@@ -151,13 +151,13 @@ fn unix_to_ymd_hms(secs: i64) -> (i32, u32, u32, u32, u32, u32) {
     )
 }
 
-/// Mirrors the C++ `formatMessage()`: timestamp, prefix and message.
+/// Formats one line: timestamp, prefix and message.
 pub fn format_message(level: LogLevel, msg: &str) -> String {
     format!("{}{} {}", current_timestamp(), level.prefix(), msg)
 }
 
-/// Mirrors `Logger::log()`: drops filtered levels, prints the formatted
-/// line (stderr for warnings/errors), then re-prints the console line.
+/// Logs one line if it passes the filter (stderr for warnings/errors),
+/// then re-prints the console line.
 pub fn log(level: LogLevel, msg: &str) {
     if !should_log(level) {
         return;
@@ -170,27 +170,27 @@ pub fn log(level: LogLevel, msg: &str) {
     print_console_line();
 }
 
-/// Mirrors `Logger::debug()`.
+/// Logs at DEBUG.
 pub fn debug(msg: &str) {
     log(LogLevel::Debug, msg);
 }
 
-/// Mirrors `Logger::info()`.
+/// Logs at INFO.
 pub fn info(msg: &str) {
     log(LogLevel::Info, msg);
 }
 
-/// Mirrors `Logger::warning()`.
+/// Logs at WARNING.
 pub fn warning(msg: &str) {
     log(LogLevel::Warning, msg);
 }
 
-/// Mirrors `Logger::severe()`.
+/// Logs at SEVERE.
 pub fn severe(msg: &str) {
     log(LogLevel::Severe, msg);
 }
 
-/// Mirrors `Logger::refreshConsoleLine()`.
+/// Re-prints the console line.
 pub fn refresh_console_line() {
     print_console_line();
 }
