@@ -7,7 +7,7 @@ use crate::inventory::ItemStack;
 use crate::item_data::{item_food_heal, item_max_damage};
 use crate::item_use::item_food_bite;
 use crate::item_verbs::{
-    BoatThrow, FlintOut, ItemUseWorld, item_block_use, item_boat_aim, item_boat_throw,
+    ItemUseWorld, item_block_use, item_boat_aim, item_boat_throw,
     item_flint_use, item_hoe_use, item_seeds_use, item_sign_use,
 };
 use crate::session::play::PlaySession;
@@ -253,16 +253,12 @@ impl PlaySession {
             }
             259 => {
                 let max = item_max_damage(s.item_id);
-                let mut out = FlintOut { placed: false, new_damage: 0, broke: false };
-                if !item_flint_use(&mut u, s.item_damage, max, x, y, z, side, &mut out) {
-                    false
-                } else {
-                    s.item_damage = out.new_damage;
-                    if out.broke {
-                        s.stack_size = 0;
-                    }
-                    true
+                let out = item_flint_use(&mut u, s.item_damage, max, x, y, z, side);
+                s.item_damage = out.new_damage;
+                if out.broke {
+                    s.stack_size = 0;
                 }
+                true
             }
             323 => {
                 if !item_sign_use(&mut u, x, y, z, side, yaw) {
@@ -337,18 +333,12 @@ impl PlaySession {
                     }
                     None => return false,
                 };
-            let mut aim = BoatThrow {
-                lx: 0.0, ly: 0.0, lz: 0.0, sx: 0.0, sy: 0.0, sz: 0.0, ex: 0.0, ey: 0.0, ez: 0.0,
-            };
-            if !item_boat_aim(
+            let aim = item_boat_aim(
                 prev_yaw, pyaw, prev_pitch, ppitch, prev_pos[0], ppos[0], prev_pos[1], ppos[1],
-                prev_pos[2], ppos[2], pyoff, &mut aim,
-            ) {
-                return false;
-            }
+                prev_pos[2], ppos[2], pyoff,
+            );
             let mut u = ItemUseWorld { world: &mut *ctx.world, session: &mut *self };
-            let (mut hx, mut hy, mut hz) = (0, 0, 0);
-            let ok = item_boat_throw(
+            let Some([hx, hy, hz]) = item_boat_throw(
                 &mut u,
                 aim.sx,
                 aim.sy,
@@ -356,14 +346,11 @@ impl PlaySession {
                 aim.ex,
                 aim.ey,
                 aim.ez,
-                &mut hx,
-                &mut hy,
-                &mut hz,
-            );
-            drop(u);
-            if !ok {
+            ) else {
+                drop(u);
                 return false;
-            }
+            };
+            drop(u);
             let bid = ctx.world.entities.alloc_id();
             let mut b = crate::entity::table::Body::new(bid, 1.5, 0.6, 0.3);
             b.set_position(hx as f64 + 0.5, hy as f64 + 1.5, hz as f64 + 0.5);

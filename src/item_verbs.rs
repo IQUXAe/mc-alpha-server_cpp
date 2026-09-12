@@ -151,23 +151,12 @@ fn ray_hit(
     ex: f64,
     ey: f64,
     ez: f64,
-    out_x: &mut i32,
-    out_y: &mut i32,
-    out_z: &mut i32,
-) -> bool {
-    match u.world.ray_trace_hit_liquids([sx, sy, sz], [ex, ey, ez]) {
-        Some([x, y, z]) => {
-            *out_x = x;
-            *out_y = y;
-            *out_z = z;
-            true
-        }
-        None => false,
-    }
+) -> Option<[i32; 3]> {
+    u.world.ray_trace_hit_liquids([sx, sy, sz], [ex, ey, ez])
 }
 
 /// Hoe tilling (mirrors `ItemHoe::onItemUse`): grass/dirt to soil, plus a
-/// 1/8 seed drop on grass. Returns true when C++ must damage the stack
+/// 1/8 seed drop on grass. Returns true when the caller should damage the stack
 /// (and possibly destroy it when depleted).
 pub fn item_hoe_use(
     w: &mut ItemUseWorld,
@@ -202,7 +191,7 @@ pub fn item_hoe_use(
     true
 }
 
-/// Seed planting (mirrors `ItemSeeds::onItemUse`). True means C++ must
+/// Seed planting (mirrors `ItemSeeds::onItemUse`). True means the caller should
 /// decrement the stack.
 pub fn item_seeds_use(w: &mut ItemUseWorld, x: i32, y: i32, z: i32, side: i32) -> bool {
     if side != 1 {
@@ -214,8 +203,8 @@ pub fn item_seeds_use(w: &mut ItemUseWorld, x: i32, y: i32, z: i32, side: i32) -
     w.world.apply_set_meta_notify(x, y + 1, z, 59, 0)
 }
 
-/// Flint and steel (mirrors `ItemFlintAndSteel::onItemUse`). On success
-/// writes the new damage; `broke` tells C++ to zero the stack.
+/// Flint result: whether fire was placed, the new damage, and whether the stack broke
+/// (caller zeroes it when `broke`).
 #[derive(Clone, Copy, Debug)]
 pub struct FlintOut {
     pub placed: bool,
@@ -225,8 +214,8 @@ pub struct FlintOut {
 
 /// Flint and steel (mirrors Java `ItemFlintAndSteel.onItemUse`): side offset
 /// 0=y-1,1=y+1,2=z-1,3=z+1,4=x-1,5=x+1; if the target cell is air, ignite it.
-/// Always damages the stack by 1 and always consumes the event (returns true),
-/// even when nothing ignited. `broke` follows `ItemStack.damageItem`: strict
+/// Always damages the stack by 1 and always consumes the event, even when
+/// nothing ignited. `broke` follows `ItemStack.damageItem`: strict
 /// `new_damage > max_damage` (65 uses at max 64).
 pub fn item_flint_use(
     w: &mut ItemUseWorld,
@@ -236,14 +225,12 @@ pub fn item_flint_use(
     y: i32,
     z: i32,
     side: i32,
-    out: &mut FlintOut,
-) -> bool {
+) -> FlintOut {
     let Some((dx, dy, dz)) = place_offset(side) else {
         // Invalid side: vanilla would still damage, but without a target cell
         // there is nothing to do — report no placement with damage applied.
         let new_damage = damage_in + 1;
-        *out = FlintOut { placed: false, new_damage, broke: new_damage > max_damage };
-        return true;
+        return FlintOut { placed: false, new_damage, broke: new_damage > max_damage };
     };
     let (fx, fy, fz) = (x + dx, y + dy, z + dz);
     let mut placed = false;
@@ -251,11 +238,10 @@ pub fn item_flint_use(
         placed = w.world.apply_set_notify(fx, fy, fz, 51);
     }
     let new_damage = damage_in + 1;
-    *out = FlintOut { placed, new_damage, broke: new_damage > max_damage };
-    true
+    FlintOut { placed, new_damage, broke: new_damage > max_damage }
 }
 
-/// Sign placement (mirrors `ItemSign::onItemUse`). True means C++ must
+/// Sign placement (mirrors `ItemSign::onItemUse`). True means the caller should
 /// send the edit packet and decrement the stack.
 pub fn item_sign_use(
     w: &mut ItemUseWorld,
@@ -297,7 +283,7 @@ pub fn item_sign_use(
     true
 }
 
-/// Block placement (mirrors `ItemBlock::onItemUse`). True means C++ must
+/// Block placement (mirrors `ItemBlock::onItemUse`). True means the caller should
 /// decrement the stack.
 #[allow(clippy::too_many_arguments)]
 pub fn item_block_use(
@@ -374,8 +360,7 @@ pub fn item_boat_aim(
     prev_z: f64,
     z: f64,
     y_offset: f64,
-    out: &mut BoatThrow,
-) -> bool {
+) -> BoatThrow {
     // partialTick is constant 1.0: prev + (cur - prev) * 1.0, in f32/f64
     // exactly like C++.
     let iyaw = prev_yaw + (yaw - prev_yaw) * 1.0f32;
@@ -391,7 +376,7 @@ pub fn item_boat_aim(
     let look_y = sin(-ipitch * half_pi);
     let (lx, lz) = (sin_yaw * look_h, cos_yaw * look_h);
     let (lx, ly, lz) = (lx as f64, look_y as f64, lz as f64);
-    *out = BoatThrow {
+    BoatThrow {
         lx,
         ly,
         lz,
@@ -401,13 +386,11 @@ pub fn item_boat_aim(
         ex: sx + lx * 5.0,
         ey: sy + ly * 5.0,
         ez: sz + lz * 5.0,
-    };
-    true
+    }
 }
 
 /// Boat raycast resolution (mirrors the tail of `ItemBoat::onItemRightClick`).
-/// Writes the hit cell and returns true when C++ must spawn the boat and
-/// decrement the stack.
+/// Returns the hit cell when the boat should spawn and the stack decrement.
 pub fn item_boat_throw(
     w: &mut ItemUseWorld,
     sx: f64,
@@ -416,18 +399,8 @@ pub fn item_boat_throw(
     ex: f64,
     ey: f64,
     ez: f64,
-    out_x: &mut i32,
-    out_y: &mut i32,
-    out_z: &mut i32,
-) -> bool {
-    let (mut hx, mut hy, mut hz) = (0, 0, 0);
-    if !ray_hit(w, sx, sy, sz, ex, ey, ez, &mut hx, &mut hy, &mut hz) {
-        return false;
-    }
-    *out_x = hx;
-    *out_y = hy;
-    *out_z = hz;
-    true
+) -> Option<[i32; 3]> {
+    ray_hit(w, sx, sy, sz, ex, ey, ez)
 }
 
 #[cfg(test)]
@@ -511,21 +484,18 @@ mod tests {
         // extinguished on placement, like vanilla.
         let (mut w, mut s) = harness(7);
         stage(&mut w, &[(0, 64, 0, 1), (0, 63, 1, 1)]);
-        let mut out = FlintOut { placed: false, new_damage: 0, broke: false };
-        assert!(item_flint_use(&mut use_ctx(&mut w, &mut s), 3, 64, 0, 64, 0, 3, &mut out));
+        let out = item_flint_use(&mut use_ctx(&mut w, &mut s), 3, 64, 0, 64, 0, 3);
         assert!(out.placed && out.new_damage == 4 && !out.broke);
         assert_eq!(w.get_block_id(0, 64, 1), 51);
         // Breaks strictly above max (65 uses at max 64).
         let (mut w, mut s) = harness(7);
         stage(&mut w, &[(0, 64, 0, 1), (0, 63, 1, 1)]);
-        let mut out = FlintOut { placed: false, new_damage: 0, broke: false };
-        assert!(item_flint_use(&mut use_ctx(&mut w, &mut s), 64, 64, 0, 64, 0, 3, &mut out));
+        let out = item_flint_use(&mut use_ctx(&mut w, &mut s), 64, 64, 0, 64, 0, 3);
         assert!(out.broke && out.new_damage == 65);
         // Occupied target: no placement but still damages + consumes.
         let (mut w, mut s) = harness(7);
         stage(&mut w, &[(0, 64, 0, 1), (0, 64, 1, 1)]);
-        let mut out = FlintOut { placed: false, new_damage: 0, broke: false };
-        assert!(item_flint_use(&mut use_ctx(&mut w, &mut s), 0, 64, 0, 64, 0, 3, &mut out));
+        let out = item_flint_use(&mut use_ctx(&mut w, &mut s), 0, 64, 0, 64, 0, 3);
         assert!(!out.placed && out.new_damage == 1);
         assert_eq!(w.get_block_id(0, 64, 1), 1);
 
@@ -566,18 +536,20 @@ mod tests {
         // a ray across empty sky misses.
         let (mut w, mut s) = harness(7);
         stage(&mut w, &[(0, 64, 0, 9)]);
-        let (mut hx, mut hy, mut hz) = (0, 0, 0);
-        assert!(item_boat_throw(&mut use_ctx(&mut w, &mut s), 0.5, 66.0, 0.5, 0.5, 60.0, 0.5, &mut hx, &mut hy, &mut hz));
-        assert_eq!((hx, hy, hz), (0, 64, 0));
-        let (mut hx, mut hy, mut hz) = (0, 0, 0);
-        assert!(!item_boat_throw(&mut use_ctx(&mut w, &mut s), 0.5, 100.0, 0.5, 200.5, 100.0, 0.5, &mut hx, &mut hy, &mut hz));
+        assert_eq!(
+            item_boat_throw(&mut use_ctx(&mut w, &mut s), 0.5, 66.0, 0.5, 0.5, 60.0, 0.5),
+            Some([0, 64, 0])
+        );
+        assert_eq!(
+            item_boat_throw(&mut use_ctx(&mut w, &mut s), 0.5, 100.0, 0.5, 200.5, 100.0, 0.5),
+            None
+        );
     }
 
     #[test]
     fn test_boat_aim_interpolation() {
-        // partialTick is constant 1.0 (kept from the old harness verbatim).
-        let mut aim = BoatThrow { lx: 0.0, ly: 0.0, lz: 0.0, sx: 0.0, sy: 0.0, sz: 0.0, ex: 0.0, ey: 0.0, ez: 0.0 };
-        assert!(item_boat_aim(0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 64.0, 64.0, 0.5, 0.5, 0.0, &mut aim));
+        // partialTick is constant 1.0.
+        let aim = item_boat_aim(0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 64.0, 64.0, 0.5, 0.5, 0.0);
         assert!((aim.sy - 65.62).abs() < 1e-9);
     }
 }
