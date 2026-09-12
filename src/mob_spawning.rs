@@ -170,9 +170,12 @@ fn spawn_pass(
                 break;
             }
             let mut group_count = 0;
-            let (mut x, y, mut z) = (origin_x, origin_y, origin_z);
+            let (mut x, mut y, mut z) = (origin_x, origin_y, origin_z);
             for _ in 0..PACK_ATTEMPTS {
+                // Java order per attempt: x-pair, y-pair, z-pair. The y draws
+                // are nextInt(1) (always 0) but still consume RNG state.
                 x += alpha_spawn_pack_offset(next_int(PACK_SPREAD), next_int(PACK_SPREAD));
+                y += alpha_spawn_pack_offset(next_int(1), next_int(1));
                 z += alpha_spawn_pack_offset(next_int(PACK_SPREAD), next_int(PACK_SPREAD));
 
                 if !is_solid(x, y - 1, z)
@@ -185,7 +188,7 @@ fn spawn_pass(
 
                 let fx = x as f32 + 0.5;
                 let fy = y as f32;
-                let fz = z as f32;
+                let fz = z as f32 + 0.5;
                 // 24-block nearest-player check (mirrors getClosestPlayer 3D scan).
                 let mut too_close = false;
                 for i in 0..players_x.len() {

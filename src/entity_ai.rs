@@ -79,18 +79,18 @@ fn clamp_inner(current: f32, target: f32, max_delta: f32) -> f32 {
 }
 
 /// Wander weights (mirrors `getBlockPathWeight`): animals prefer grass
-/// (10.0), else light level minus a half; mobs score everything 0.0, so
-/// the first candidate wins like C++ (`bestWeight` starts at -99999).
-pub fn alpha_ai_animal_path_weight(below_grass: bool, light: i32) -> f32 {
+/// (10.0), else light brightness (0..1 float) minus a half; mobs score
+/// 0.5 minus brightness, so the darkest candidate wins.
+pub fn alpha_ai_animal_path_weight(below_grass: bool, brightness: f32) -> f32 {
     if below_grass {
         10.0
     } else {
-        light as f32 - 0.5
+        brightness - 0.5
     }
 }
 
-pub fn alpha_ai_mob_path_weight() -> f32 {
-    0.0
+pub fn alpha_ai_mob_path_weight(brightness: f32) -> f32 {
+    0.5 - brightness
 }
 
 /// Path-point steering intent (mirrors the steering block in
@@ -189,10 +189,11 @@ pub fn wander_pick(
     best
 }
 
-/// Chase-speed factor (mirrors the tail of `EntityMob::updateAI`): full
-/// speed plus 20% beyond attack reach + 1, backed off to 85% up close.
-pub fn chase_speed(base: f32, dist: f32, reach: f32) -> f32 {
-    base * if dist > reach + 1.0 { 1.2 } else { 0.85 }
+/// Chase speed: vanilla `EntityCreature` uses `moveSpeed` directly
+/// (`field_9130_bp = field_9126_bt`); no 1.2x/0.85x factor exists.
+/// Kept as a function so call sites stay explicit.
+pub fn chase_speed(base: f32, _dist: f32, _reach: f32) -> f32 {
+    base
 }
 
 #[cfg(test)]
@@ -303,10 +304,9 @@ mod tests {
     }
 
     #[test]
-    fn test_chase_speed_factors() {
-        assert_eq!(chase_speed(0.5, 5.0, 2.5), 0.5 * 1.2);
-        assert_eq!(chase_speed(0.5, 3.0, 2.5), 0.5 * 0.85);
-        // Boundary is strict like C++ (`>`).
-        assert_eq!(chase_speed(0.5, 3.5, 2.5), 0.5 * 0.85);
+    fn test_chase_speed_is_base() {
+        // Vanilla uses moveSpeed directly, no distance factor.
+        assert_eq!(chase_speed(0.5, 5.0, 2.5), 0.5);
+        assert_eq!(chase_speed(0.5, 3.0, 2.5), 0.5);
     }
 }

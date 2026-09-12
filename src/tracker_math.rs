@@ -6,20 +6,30 @@
 //! This module is the single source of truth. All functions are pure
 //! (no pointers, no allocation, no `unwrap()`) and unit-tested.
 
-/// Network fixed-point position: `(int)(pos * 32.0)`.
+/// Network fixed-point position: `MathHelper.floor_double(pos * 32.0)`.
 ///
-/// Matches the C++ C-style cast (truncation toward zero) via `as`,
-/// which also truncates toward zero for float->int.
+/// Java uses floor everywhere for positions (`EntityTrackerEntry:37-39`,
+/// `Packet20:23, Packet24:22, Packet34:20`). Truncation is wrong for
+/// negative coordinates (e.g. -10.5 -> -336 trunc vs -337 floor).
 pub fn alpha_tracker_encode_pos(pos: f64) -> i32 {
-    (pos * 32.0) as i32
+    (pos * 32.0).floor() as i32
 }
 
-/// Network angle byte: `(int8_t)((int)floor(deg * 256 / 360) & 0xFF)`.
+/// Network angle byte for tracker deltas: `floor(yaw * 256 / 360)`.
 ///
-/// The masking makes negative angles wrap exactly like the C++ code
-/// (e.g. -1 degree -> 0xFF -> -1 as i8).
+/// `EntityTrackerEntry:40-41,67-68` uses `floor_float`. Spawn/teleport
+/// packets (`Packet20:26, Packet24:25, Packet34:23`) use a truncating
+/// `(int)` cast instead — see `alpha_tracker_encode_rot_spawn`.
 pub fn alpha_tracker_encode_rot(degrees: f32) -> i8 {
     let v = (degrees * 256.0 / 360.0).floor() as i32 & 0xFF;
+    v as u8 as i8
+}
+
+/// Network angle byte for spawn/teleport packets: `(byte)((int)(deg*256/360))`.
+///
+/// Truncation toward zero (Java float->int cast), then low 8 bits.
+pub fn alpha_tracker_encode_rot_spawn(degrees: f32) -> i8 {
+    let v = (degrees * 256.0 / 360.0) as i32 & 0xFF;
     v as u8 as i8
 }
 
@@ -90,8 +100,10 @@ pub fn alpha_tracker_in_range(
     last_fixed_z: i32,
     tracking_range: i32,
 ) -> bool {
-    let dx = player_x - last_fixed_x as f64 / 32.0;
-    let dz = player_z - last_fixed_z as f64 / 32.0;
+    // Java EntityTrackerEntry:178: (double)(lastFixed / 32) — integer division
+    // first (trunc toward zero), then widen. Not float division.
+    let dx = player_x - (last_fixed_x / 32) as f64;
+    let dz = player_z - (last_fixed_z / 32) as f64;
     let r = tracking_range as f64;
     dx >= -r && dx <= r && dz >= -r && dz <= r
 }
@@ -101,22 +113,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_encode_pos_truncates_like_cpp_cast() {
+    fn test_encode_pos_floors_like_java() {
         assert_eq!(alpha_tracker_encode_pos(10.5), 336);
         assert_eq!(alpha_tracker_encode_pos(0.0), 0);
-        // C-style cast truncates toward zero, it does not floor:
+        // Java floor_double, not trunc: -10.5*32=-336.0 -> -336 exactly,
+        // but -10.51*32=-336.32 -> -337.
         assert_eq!(alpha_tracker_encode_pos(-10.5), -336);
+        assert_eq!(alpha_tracker_encode_pos(-10.51), -337);
     }
 
     #[test]
-    fn test_encode_rot_wraps_like_cpp() {
+    fn test_encode_rot_tracker_vs_spawn() {
         assert_eq!(alpha_tracker_encode_rot(0.0), 0);
         // 90 deg -> 64
         assert_eq!(alpha_tracker_encode_rot(90.0), 64);
         // 360 deg -> 256 & 0xFF = 0
         assert_eq!(alpha_tracker_encode_rot(360.0), 0);
-        // -1 deg -> floor(-0.71) = -1 -> & 0xFF = 255 -> -1 as i8
+        // tracker floor: -1 deg -> floor(-0.71) = -1 -> 255 -> -1 as i8
         assert_eq!(alpha_tracker_encode_rot(-1.0), -1);
+        // spawn trunc: -1 deg -> (int)(-0.71) = 0
+        assert_eq!(alpha_tracker_encode_rot_spawn(-1.0), 0);
+        assert_eq!(alpha_tracker_encode_rot_spawn(90.0), 64);
     }
 
     #[test]

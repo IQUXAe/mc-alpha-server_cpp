@@ -1567,7 +1567,7 @@ fn use_can_stay(id: u8, x: i32, y: i32, z: i32) -> bool {
             crate::world::with_tick_bridge(w as *mut World, || {
                 let t = crate::world::tick_table_ref();
                 match id {
-                    37 | 38 | 31 => crate::block_ticks::block_flower_can_stay(t, x, y, z),
+                    37 | 38 => crate::block_ticks::block_flower_can_stay(t, x, y, z),
                     39 | 40 => crate::block_ticks::block_mushroom_can_stay(t, x, y, z),
                     50 => crate::block_ticks::block_torch_can_stay(t, x, y, z),
                     81 => crate::block_ticks::block_cactus_can_stay(t, x, y, z),

@@ -132,23 +132,23 @@ pub enum AnimalKind {
     Cow,
 }
 
-/// Mob body size (width, height) mirroring the C++ constructors
-/// (zombie/skeleton 0.6x1.8, spider 1.4x0.9, creeper 0.6x1.7).
+/// Mob body size (width, height): Java defaults 0.6x1.8 (Entity.java:36-37);
+/// only spider/zombie override. Creeper keeps the default 1.8 height.
 pub fn mob_dims(kind: MobKind) -> (f32, f32) {
     match kind {
         MobKind::Zombie => (0.6, 1.8),
         MobKind::Skeleton => (0.6, 1.8),
         MobKind::Spider => (1.4, 0.9),
-        MobKind::Creeper => (0.6, 1.7),
+        MobKind::Creeper => (0.6, 1.8),
     }
 }
 
-/// Base move speed mirroring the C++ constructors (zombie 0.5, skeleton
-/// 0.65, spider 0.8, creeper 0.7; animals keep the 0.7 living default).
+/// Base move speed: living default 0.7 (EntityLiving.java:57); zombie 0.5,
+/// spider 0.8; skeleton/creeper keep 0.7.
 pub fn mob_base_speed(kind: MobKind) -> f32 {
     match kind {
         MobKind::Zombie => 0.5,
-        MobKind::Skeleton => 0.65,
+        MobKind::Skeleton => 0.7,
         MobKind::Spider => 0.8,
         MobKind::Creeper => 0.7,
     }
@@ -301,7 +301,7 @@ impl MobEnt {
         let mut living = LivingBody::new(id, w, h, 0.0);
         living.move_speed = mob_base_speed(kind);
         living.body.step_height = 0.5; // EntityLiving ctor (players stay 0.0 like EntityPlayerMP)
-        living.max_hurt_resist = 12; // EntityMob ctor
+        living.max_hurt_resist = 20; // EntityLiving.java:6 (mobs never change it)
         Self {
             living,
             kind,
@@ -337,7 +337,12 @@ impl AnimalEnt {
         let (w, h) = animal_dims(kind);
         let mut living = LivingBody::new(id, w, h, 0.0);
         living.body.step_height = 0.5; // EntityLiving ctor (players stay 0.0 like EntityPlayerMP)
-        living.max_hurt_resist = 12; // EntityAnimals ctor
+        living.max_hurt_resist = 20; // EntityLiving.java:6 (animals never change it)
+        // Java EntityChicken.java:16 — chickens have 4 HP, not 20.
+        if kind == AnimalKind::Chicken {
+            living.health = 4;
+            living.max_health = 4;
+        }
         Self {
             living,
             kind,

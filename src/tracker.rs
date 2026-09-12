@@ -18,8 +18,8 @@ use std::collections::{HashMap, HashSet};
 use crate::entity_table::{Entity, EntityId, MobKind, NO_ENTITY, animal_type_id, mob_type_id};
 use crate::network::{RustPacket, encode_packet};
 use crate::tracker_math::{
-    alpha_tracker_encode_pos, alpha_tracker_encode_rot, alpha_tracker_in_range, alpha_tracker_move_kind,
-    alpha_tracker_velocity_changed,
+    alpha_tracker_encode_pos, alpha_tracker_encode_rot, alpha_tracker_encode_rot_spawn,
+    alpha_tracker_in_range, alpha_tracker_move_kind, alpha_tracker_velocity_changed,
 };
 
 /// Tracked kind with the fields its spawn packet needs.
@@ -218,8 +218,9 @@ fn encode_spawn(e: &TrackedEntity) -> Vec<u8> {
     let fx = alpha_tracker_encode_pos(e.pos[0]);
     let fy = alpha_tracker_encode_pos(e.pos[1]);
     let fz = alpha_tracker_encode_pos(e.pos[2]);
-    let yaw = alpha_tracker_encode_rot(e.yaw);
-    let pitch = alpha_tracker_encode_rot(e.pitch);
+    // Spawn packets use truncating (int) cast (Packet20/24), not floor.
+    let yaw = alpha_tracker_encode_rot_spawn(e.yaw);
+    let pitch = alpha_tracker_encode_rot_spawn(e.pitch);
     match &e.kind {
         TrackKind::Player { username, held } => encode(RustPacket::NamedEntitySpawn {
             entity_id: e.id,
@@ -441,6 +442,9 @@ impl Tracker {
         let fz = alpha_tracker_encode_pos(e.pos[2]);
         let yaw = alpha_tracker_encode_rot(e.yaw);
         let pitch = alpha_tracker_encode_rot(e.pitch);
+        // Teleport packet angles use trunc (Packet34), unlike tracker deltas.
+        let tyaw = alpha_tracker_encode_rot_spawn(e.yaw);
+        let tpitch = alpha_tracker_encode_rot_spawn(e.pitch);
         let dx = fx - entry.last_fixed[0];
         let dy = fy - entry.last_fixed[1];
         let dz = fz - entry.last_fixed[2];
@@ -480,8 +484,8 @@ impl Tracker {
                 x: fx,
                 y: fy,
                 z: fz,
-                yaw,
-                pitch,
+                yaw: tyaw,
+                pitch: tpitch,
             }),
             _ => encode(RustPacket::Entity { entity_id: e.id }),
         };
