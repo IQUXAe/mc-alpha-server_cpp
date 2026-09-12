@@ -1,17 +1,15 @@
-//! Pure mob-spawning math ported from C++ `World::spawnHostileMobs` /
-//! `World::spawnPassiveMobs` (which mirror Java `SpawnerAnimals::func_4111_a`).
+//! Pure mob-spawning math (mirrors Java `SpawnerAnimals::func_4111_a`).
 //!
 //! Two layers:
-//! - `alpha_spawn_*` helpers: the cap formula, pack-spread step, and
-//!   world-spawn exclusion check. Pure (no pointers, no allocation), the
-//!   single source of truth, unit-tested on both sides of the FFI.
-//! - `rust_world_spawn_hostile` / `rust_world_spawn_passive`: batch drivers
+//! - `spawn_*` helpers: the cap formula, pack-spread step, and
+//!   world-spawn exclusion check. Pure (no allocation), the single source of truth.
+//! - `spawn_hostile` / `spawn_passive`: batch drivers
 //!   that run the whole per-tick spawn pass against a `SpawnerWorld`.
 //!   The live `World` implements the trait directly (explicit borrows, no
-//!   thread-local bridge); tests implement it on a scripted fake, so draw
+//!   tests implement it on a scripted fake, so draw
 //!   sequences and check order stay exactly covered.
 //!
-//! NOTE on draw order: the old C++ loop drew the four pack-spread values as
+//! NOTE on draw order: the original loop drew the four pack-spread values as
 //! `x += spread6(rand) - spread6(rand)`, whose evaluation order was
 //! unspecified. The driver below fixes the order (x-pair, then z-pair);
 //! the draw *count* per attempt is unchanged.
@@ -26,7 +24,7 @@
 /// `World::spawnPassiveMobs` (`20 * n / 256`), which mirror Java
 /// `var29.field_4220_d * field_4311_a.size() / 256` per creature type.
 /// Multiplication first, then truncating division, exactly like C++ `int`.
-pub fn alpha_spawn_max_count(num_eligible_chunks: i32, budget_per_256: i32) -> i32 {
+pub fn spawn_max_count(num_eligible_chunks: i32, budget_per_256: i32) -> i32 {
     budget_per_256.wrapping_mul(num_eligible_chunks).wrapping_div(256)
 }
 
@@ -36,7 +34,7 @@ pub fn alpha_spawn_max_count(num_eligible_chunks: i32, budget_per_256: i32) -> i
 /// `var15 += rand.nextInt(6) - rand.nextInt(6)`). Each draw is uniform in
 /// `[0, 6)`, so the step is triangular in `[-5, 5]`. The two draws are
 /// passed in (C++ owns the RNG stream); this function only owns the shape.
-pub fn alpha_spawn_pack_offset(first: i32, second: i32) -> i32 {
+pub fn spawn_pack_offset(first: i32, second: i32) -> i32 {
     first.wrapping_sub(second)
 }
 
@@ -46,7 +44,7 @@ pub fn alpha_spawn_pack_offset(first: i32, second: i32) -> i32 {
 /// Mirrors the `dsx*dsx + dsy*dsy + dsz*dsz < 576.0f` check in both spawn
 /// functions (Java `var26 >= 576.0F` gate). `f32` arithmetic matches the
 /// C++ `float` computation bit-for-bit for the same inputs.
-pub fn alpha_spawn_too_close_to_spawn(
+pub fn spawn_too_close_to_spawn(
     fx: f32,
     fy: f32,
     fz: f32,
@@ -60,9 +58,8 @@ pub fn alpha_spawn_too_close_to_spawn(
     dsx * dsx + dsy * dsy + dsz * dsz < 576.0
 }
 
-/// World access for the spawn drivers, as an explicit trait (no
-/// thread-local bridge). The live world implements it with direct
-/// borrows; tests implement it on a scripted fake.
+/// World access for the spawn drivers as an explicit trait. The live world
+/// implements it with direct borrows; tests implement it on a scripted fake.
 ///
 /// RNG draws go through `spawn_next_int` / `spawn_next_float` into
 /// `World::rand`, preserving the exact historical draw sequence.
@@ -140,7 +137,7 @@ fn spawn_pass(
     eligible.dedup();
 
     let budget = if hostile { HOSTILE_BUDGET } else { PASSIVE_BUDGET };
-    if current_count > alpha_spawn_max_count(eligible.len() as i32, budget) {
+    if current_count > spawn_max_count(eligible.len() as i32, budget) {
         return 0;
     }
 
@@ -178,12 +175,12 @@ fn spawn_pass(
             for _ in 0..PACK_ATTEMPTS {
                 // Java order per attempt: x-pair, y-pair, z-pair. The y draws
                 // are nextInt(1) (always 0) but still consume RNG state.
-                x += alpha_spawn_pack_offset(
+                x += spawn_pack_offset(
                     world.spawn_next_int(PACK_SPREAD),
                     world.spawn_next_int(PACK_SPREAD),
                 );
-                y += alpha_spawn_pack_offset(world.spawn_next_int(1), world.spawn_next_int(1));
-                z += alpha_spawn_pack_offset(
+                y += spawn_pack_offset(world.spawn_next_int(1), world.spawn_next_int(1));
+                z += spawn_pack_offset(
                     world.spawn_next_int(PACK_SPREAD),
                     world.spawn_next_int(PACK_SPREAD),
                 );
@@ -213,7 +210,7 @@ fn spawn_pass(
                 if too_close {
                     continue;
                 }
-                if alpha_spawn_too_close_to_spawn(fx, fy, fz, spawn_x, spawn_y, spawn_z) {
+                if spawn_too_close_to_spawn(fx, fy, fz, spawn_x, spawn_y, spawn_z) {
                     continue;
                 }
 
@@ -243,7 +240,7 @@ fn spawn_pass(
 
 /// Batch driver for `World::spawnHostileMobs`: parallel player-position
 /// slices. Returns the primary spawn count.
-pub fn rust_world_spawn_hostile(
+pub fn spawn_hostile(
     world: &mut impl SpawnerWorld,
     players_x: &[f64],
     players_y: &[f64],
@@ -259,7 +256,7 @@ pub fn rust_world_spawn_hostile(
 
 /// Batch driver for `World::spawnPassiveMobs`. Same contract as hostile;
 /// spider-jockey logic is skipped.
-pub fn rust_world_spawn_passive(
+pub fn spawn_passive(
     world: &mut impl SpawnerWorld,
     players_x: &[f64],
     players_y: &[f64],
@@ -280,31 +277,31 @@ mod tests {
     #[test]
     fn test_max_count_hostile_budget() {
         // 100 per 256 chunks (World::spawnHostileMobs).
-        assert_eq!(alpha_spawn_max_count(256, 100), 100);
-        assert_eq!(alpha_spawn_max_count(128, 100), 50);
-        assert_eq!(alpha_spawn_max_count(0, 100), 0);
+        assert_eq!(spawn_max_count(256, 100), 100);
+        assert_eq!(spawn_max_count(128, 100), 50);
+        assert_eq!(spawn_max_count(0, 100), 0);
         // Truncation like C++ int division: 100*1/256 == 0.
-        assert_eq!(alpha_spawn_max_count(1, 100), 0);
-        assert_eq!(alpha_spawn_max_count(3, 100), 1);
+        assert_eq!(spawn_max_count(1, 100), 0);
+        assert_eq!(spawn_max_count(3, 100), 1);
     }
 
     #[test]
     fn test_max_count_passive_budget() {
         // 20 per 256 chunks (World::spawnPassiveMobs).
-        assert_eq!(alpha_spawn_max_count(256, 20), 20);
-        assert_eq!(alpha_spawn_max_count(128, 20), 10);
-        assert_eq!(alpha_spawn_max_count(0, 20), 0);
+        assert_eq!(spawn_max_count(256, 20), 20);
+        assert_eq!(spawn_max_count(128, 20), 10);
+        assert_eq!(spawn_max_count(0, 20), 0);
     }
 
     #[test]
     fn test_pack_offset_shape() {
-        assert_eq!(alpha_spawn_pack_offset(5, 0), 5);
-        assert_eq!(alpha_spawn_pack_offset(0, 5), -5);
-        assert_eq!(alpha_spawn_pack_offset(3, 3), 0);
+        assert_eq!(spawn_pack_offset(5, 0), 5);
+        assert_eq!(spawn_pack_offset(0, 5), -5);
+        assert_eq!(spawn_pack_offset(3, 3), 0);
         // Triangular step always fits in [-5, 5] for spread6 draws.
         for a in 0..6 {
             for b in 0..6 {
-                let d = alpha_spawn_pack_offset(a, b);
+                let d = spawn_pack_offset(a, b);
                 assert!((-5..=5).contains(&d));
             }
         }
@@ -313,13 +310,13 @@ mod tests {
     #[test]
     fn test_too_close_to_spawn() {
         // On the spawn point: excluded.
-        assert!(alpha_spawn_too_close_to_spawn(0.5, 64.0, 0.5, 0, 64, 0));
+        assert!(spawn_too_close_to_spawn(0.5, 64.0, 0.5, 0, 64, 0));
         // Clearly outside: allowed.
-        assert!(!alpha_spawn_too_close_to_spawn(100.5, 64.0, 100.5, 0, 64, 0));
+        assert!(!spawn_too_close_to_spawn(100.5, 64.0, 100.5, 0, 64, 0));
         // Boundary is exclusive: exactly 24 blocks away (576.0) is allowed.
-        assert!(!alpha_spawn_too_close_to_spawn(24.0, 64.0, 0.0, 0, 64, 0));
+        assert!(!spawn_too_close_to_spawn(24.0, 64.0, 0.0, 0, 64, 0));
         // Just inside: excluded.
-        assert!(alpha_spawn_too_close_to_spawn(23.5, 64.0, 0.0, 0, 64, 0));
+        assert!(spawn_too_close_to_spawn(23.5, 64.0, 0.0, 0, 64, 0));
     }
 
     // Batch-driver tests with a scripted fake world. Each scenario owns
@@ -391,7 +388,7 @@ mod tests {
             // No players, no chunks, no spawns.
             let mut world = fake();
             assert_eq!(
-                rust_world_spawn_hostile(&mut world, &[], &[], &[], 0, 1000, 64, 1000, 128),
+                spawn_hostile(&mut world, &[], &[], &[], 0, 1000, 64, 1000, 128),
                 0
             );
             assert_eq!(world.try_calls, 0);
@@ -399,7 +396,7 @@ mod tests {
             // Cap gate: 1 player -> 289 chunks -> max 112 hostile; 113 blocks everything.
             let mut world = fake();
             assert_eq!(
-                rust_world_spawn_hostile(&mut world, &px, &py, &pz, 113, 1000, 64, 1000, 128),
+                spawn_hostile(&mut world, &px, &py, &pz, 113, 1000, 64, 1000, 128),
                 0
             );
             assert_eq!(world.try_calls, 0);
@@ -409,14 +406,14 @@ mod tests {
             // triggers the per-spawn jockey roll (always 0).
             // 17x17 = 289 chunks -> 289*4 primary + 289*4 jockeys.
             let mut world = fake();
-            let n = rust_world_spawn_hostile(&mut world, &px, &py, &pz, 0, 1000, 64, 1000, 128);
+            let n = spawn_hostile(&mut world, &px, &py, &pz, 0, 1000, 64, 1000, 128);
             assert_eq!(n, 289 * 4);
             assert_eq!(world.try_calls, 289 * 4);
             assert_eq!(world.jockey_calls, 289 * 4);
 
             // Happy passive path: same totals, no jockeys.
             let mut world = fake();
-            let n = rust_world_spawn_passive(&mut world, &px, &py, &pz, 0, 1000, 64, 1000, 128);
+            let n = spawn_passive(&mut world, &px, &py, &pz, 0, 1000, 64, 1000, 128);
             assert_eq!(n, 289 * 4);
             assert_eq!(world.try_calls, 289 * 4);
             assert_eq!(world.jockey_calls, 0);
@@ -424,7 +421,7 @@ mod tests {
             // World-spawn exclusion: spawn at y=0 inside the eligible area
             // removes candidates (strictly fewer spawns than the happy path).
             let mut world = fake();
-            let n_excl = rust_world_spawn_hostile(&mut world, &px, &py, &pz, 0, 8, 0, 8, 128);
+            let n_excl = spawn_hostile(&mut world, &px, &py, &pz, 0, 8, 0, 8, 128);
             assert!(n_excl < 289 * 4);
             assert_eq!(world.try_calls, n_excl);
         }

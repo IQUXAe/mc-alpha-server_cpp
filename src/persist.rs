@@ -22,7 +22,7 @@ use crate::chunk::{
     Chunk, PendingBoat, PendingCreature, PendingItem, CHUNK_AREA, CHUNK_NIBBLE_BYTES, CHUNK_VOLUME,
 };
 use crate::entity::table::Entity;
-use crate::inventory::FfiItemStack;
+use crate::inventory::ItemStack;
 use crate::nbt::{NbtCompound, NbtList, NbtTag, read_root, write_root};
 use crate::tile_entity::sign::SIGN_LINES;
 use crate::world::{TileData, World};
@@ -197,14 +197,14 @@ fn rot_list(yaw: f32, pitch: f32) -> NbtTag {
     })
 }
 
-fn write_stack(m: &mut BTreeMap<String, NbtTag>, s: &FfiItemStack) {
+fn write_stack(m: &mut BTreeMap<String, NbtTag>, s: &ItemStack) {
     m.insert("id".to_string(), NbtTag::Short(s.item_id as i16));
     m.insert("Count".to_string(), NbtTag::Byte(s.stack_size as i8));
     m.insert("Damage".to_string(), NbtTag::Short(s.item_damage as i16));
 }
 
-pub(crate) fn read_stack(m: &BTreeMap<String, NbtTag>) -> FfiItemStack {
-    FfiItemStack {
+pub(crate) fn read_stack(m: &BTreeMap<String, NbtTag>) -> ItemStack {
+    ItemStack {
         item_id: get_short(m, "id") as i32,
         stack_size: get_byte(m, "Count") as i32,
         item_damage: get_short(m, "Damage") as i32,
@@ -216,7 +216,7 @@ pub(crate) fn read_stack(m: &BTreeMap<String, NbtTag>) -> FfiItemStack {
 
 /// Encode one loaded chunk (blocks, light, tiles, spill, and live rows in
 /// the chunk) to an NBT blob, gzip- or zstd-compressed like
-/// `alpha_chunk_nbt_serialize` (zstd for LevelDB values, gzip for legacy
+/// `chunk_nbt_serialize` (zstd for LevelDB values, gzip for legacy
 /// files). Live rows mirror the C++ save gather (pending spill plus
 /// entities standing in the chunk).
 pub fn encode_chunk_blob(world: &World, cx: i32, cz: i32, zstd: bool) -> Option<Vec<u8>> {
@@ -391,9 +391,9 @@ pub struct DecodedChunk {
     pub sky: Vec<u8>,
     pub light: Vec<u8>,
     pub height: Vec<u8>,
-    pub furnaces: Vec<((i32, i32, i32), crate::tile_entity::furnace::FfiFurnaceState)>,
-    pub chests: Vec<((i32, i32, i32), crate::tile_entity::chest::FfiChestState)>,
-    pub signs: Vec<((i32, i32, i32), crate::tile_entity::sign::FfiSignState)>,
+    pub furnaces: Vec<((i32, i32, i32), crate::tile_entity::furnace::FurnaceState)>,
+    pub chests: Vec<((i32, i32, i32), crate::tile_entity::chest::ChestState)>,
+    pub signs: Vec<((i32, i32, i32), crate::tile_entity::sign::SignState)>,
     pub items: Vec<PendingItem>,
     pub animals: Vec<PendingCreature>,
     pub monsters: Vec<PendingCreature>,
@@ -451,7 +451,7 @@ pub(crate) fn tile_nbt(x: i32, y: i32, z: i32, tile: &TileData) -> NbtCompound {
 
 fn read_stack_slots(
     m: &BTreeMap<String, NbtTag>,
-    out: &mut [FfiItemStack],
+    out: &mut [ItemStack],
 ) {
     if let Some(NbtTag::List(l)) = m.get("Items") {
         for elem in &l.elements {
@@ -675,9 +675,9 @@ pub struct DecodedPlayer {
     pub dimension: i32,
     pub score: i32,
     pub held_item_id: i32,
-    pub main: [Option<FfiItemStack>; 36],
-    pub armor: [Option<FfiItemStack>; 4],
-    pub crafting: [Option<FfiItemStack>; 4],
+    pub main: [Option<ItemStack>; 36],
+    pub armor: [Option<ItemStack>; 4],
+    pub crafting: [Option<ItemStack>; 4],
 }
 
 /// Encode one player row to a `.dat` file image (schema mirrors
@@ -709,7 +709,7 @@ pub fn encode_player(world: &World, id: crate::entity::table::EntityId) -> Optio
     root.insert("Score".to_string(), NbtTag::Int(p.score));
     root.insert("HeldItemId".to_string(), NbtTag::Int(p.held_item_id));
     let mut inv = Vec::new();
-    let mut push_bank = |bank: &[Option<FfiItemStack>], base: i32| {
+    let mut push_bank = |bank: &[Option<ItemStack>], base: i32| {
         for (i, slot) in bank.iter().enumerate() {
             if let Some(s) = slot {
                 if s.stack_size > 0 {
@@ -956,8 +956,7 @@ fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> bool {
 mod tests {
     use super::*;
     use crate::entity::table::{AnimalEnt, AnimalKind, MobEnt, MobKind, PlayerEnt};
-    use crate::inventory::FfiItemStack;
-    use crate::tile_entity::chest::CHEST_SIZE;
+    use crate::inventory::ItemStack;
     use crate::world::World;
 
     fn tmp_dir(name: &str) -> std::path::PathBuf {
@@ -968,8 +967,8 @@ mod tests {
         dir
     }
 
-    fn stk(item_id: i32, count: i32, damage: i32) -> FfiItemStack {
-        FfiItemStack { stack_size: count, animations_to_go: 0, item_id, item_damage: damage }
+    fn stk(item_id: i32, count: i32, damage: i32) -> ItemStack {
+        ItemStack { stack_size: count, animations_to_go: 0, item_id, item_damage: damage }
     }
 
     /// World with a furnished chunk: torch w/ meta, furnace + chest +

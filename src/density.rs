@@ -1,6 +1,6 @@
 use crate::noise::NoiseGeneratorOctaves;
 
-pub fn alpha_density_generate_field(
+pub fn density_generate_field(
     field: &mut [f64],
     var2: i32,
     var3: i32,

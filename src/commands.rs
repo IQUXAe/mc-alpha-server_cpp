@@ -1,9 +1,6 @@
-use libc::{c_char, size_t};
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConsoleCommandTag {
-    Help = 0,
+    Help,
     List,
     Stop,
     SaveAll,
@@ -24,35 +21,11 @@ pub enum ConsoleCommandTag {
     Unknown,
 }
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug)]
-pub struct FfiString {
-    pub ptr: *const c_char,
-    pub len: size_t,
-}
-
-impl FfiString {
-    pub fn from_str(s: &str) -> Self {
-        // Never hand out null: an empty arg points at a static NUL so
-        // callers can always read `len` bytes safely.
-        static NUL: u8 = 0;
-        Self {
-            ptr: if s.is_empty() {
-                &NUL as *const u8 as *const c_char
-            } else {
-                s.as_ptr() as *const c_char
-            },
-            len: s.len() as size_t,
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug)]
-pub struct RustParsedCommand {
+#[derive(Clone, Debug)]
+pub struct ParsedCommand {
     pub tag: ConsoleCommandTag,
-    pub arg1: FfiString,
-    pub arg2: FfiString,
+    pub arg1: String,
+    pub arg2: String,
     pub count: i32,
 }
 
@@ -79,12 +52,12 @@ fn arg_of(sv: &str, prefix_len: usize) -> &str {
     }
 }
 
-pub fn rust_parse_console_command(cmd: &str) -> RustParsedCommand {
+pub fn parse_console_command(cmd: &str) -> ParsedCommand {
     if cmd.is_empty() {
-        return RustParsedCommand {
+        return ParsedCommand {
             tag: ConsoleCommandTag::Unknown,
-            arg1: FfiString::from_str(""),
-            arg2: FfiString::from_str(""),
+            arg1: String::new(),
+            arg2: String::new(),
             count: 1,
         };
     }
@@ -160,8 +133,8 @@ pub fn rust_parse_console_command(cmd: &str) -> RustParsedCommand {
     } else if lower.starts_with("summon ") {
         tag = ConsoleCommandTag::Summon;
         let rest = arg_of(cmd, 7);
-        let (entity_name_raw, tail) = split_two(rest);
-        arg1 = entity_name_raw;
+        let (entity_name, tail) = split_two(rest);
+        arg1 = entity_name;
 
         if !tail.is_empty() {
             let (arg1_str, arg2_str) = split_two(tail);
@@ -179,10 +152,10 @@ pub fn rust_parse_console_command(cmd: &str) -> RustParsedCommand {
         }
     }
 
-    RustParsedCommand {
+    ParsedCommand {
         tag,
-        arg1: FfiString::from_str(arg1),
-        arg2: FfiString::from_str(arg2),
+        arg1: arg1.to_owned(),
+        arg2: arg2.to_owned(),
         count,
     }
 }

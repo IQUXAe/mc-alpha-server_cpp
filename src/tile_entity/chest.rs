@@ -1,15 +1,14 @@
-use crate::inventory::FfiItemStack;
+use crate::inventory::ItemStack;
 
 pub const CHEST_SIZE: usize = 27;
 
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct FfiChestState {
-    pub slots: [FfiItemStack; CHEST_SIZE],
+pub struct ChestState {
+    pub slots: [ItemStack; CHEST_SIZE],
 }
 
-pub fn chest_create() -> FfiChestState {
-    FfiChestState {
-        slots: [FfiItemStack { stack_size: 0, animations_to_go: 0, item_id: -1, item_damage: 0 }; CHEST_SIZE],
+pub fn chest_create() -> ChestState {
+    ChestState {
+        slots: [ItemStack { stack_size: 0, animations_to_go: 0, item_id: -1, item_damage: 0 }; CHEST_SIZE],
     }
 }

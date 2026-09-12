@@ -8,9 +8,8 @@ pub enum MovementValidationStatus {
     MovedWrongly = 4, // Soft reject (> 225.0, requires teleport reset)
 }
 
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct FfiMovementInput {
+pub struct MovementInput {
     pub from_x: f64,
     pub from_y: f64,
     pub from_z: f64,
@@ -23,9 +22,8 @@ pub struct FfiMovementInput {
     pub fall_distance: f32,
 }
 
-#[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FfiMovementResult {
+pub struct MovementResult {
     pub status: u8,
     pub new_fall_distance: f32,
     pub fall_damage: i32,
@@ -40,7 +38,7 @@ pub const MAX_COORDINATE: f64 = 3.2e7;
 pub const VANILLA_WRONGLY_SQ: f64 = 1.0 / 16.0;
 
 /// Validates movement packet inputs and updates fall distance / damage according to Alpha 1.2.6 rules.
-pub fn alpha_movement_validate(input: &FfiMovementInput) -> FfiMovementResult {
+pub fn movement_validate(input: &MovementInput) -> MovementResult {
     let inp = input;
 
     // 0. Non-finite coordinates poison pos (NaN passes every `>` check).
@@ -54,7 +52,7 @@ pub fn alpha_movement_validate(input: &FfiMovementInput) -> FfiMovementResult {
         || !inp.from_y.is_finite()
         || !inp.from_z.is_finite()
     {
-        return FfiMovementResult {
+        return MovementResult {
             status: MovementValidationStatus::IllegalPosition as u8,
             new_fall_distance: inp.fall_distance,
             fall_damage: 0,
@@ -65,7 +63,7 @@ pub fn alpha_movement_validate(input: &FfiMovementInput) -> FfiMovementResult {
     // 1. Check stance: stance - y must be within [0.1, 1.65]
     let stance_diff = inp.stance - inp.to_y;
     if stance_diff < 0.1 || stance_diff > 1.65 {
-        return FfiMovementResult {
+        return MovementResult {
             status: MovementValidationStatus::IllegalStance as u8,
             new_fall_distance: inp.fall_distance,
             fall_damage: 0,
@@ -75,7 +73,7 @@ pub fn alpha_movement_validate(input: &FfiMovementInput) -> FfiMovementResult {
 
     // 2. Check world boundary
     if inp.to_x.abs() > MAX_COORDINATE || inp.to_z.abs() > MAX_COORDINATE {
-        return FfiMovementResult {
+        return MovementResult {
             status: MovementValidationStatus::IllegalPosition as u8,
             new_fall_distance: inp.fall_distance,
             fall_damage: 0,
@@ -90,7 +88,7 @@ pub fn alpha_movement_validate(input: &FfiMovementInput) -> FfiMovementResult {
     let move_sq = dx * dx + dy * dy + dz * dz;
 
     if move_sq > HARD_MOVEMENT_REJECT_SQ {
-        return FfiMovementResult {
+        return MovementResult {
             status: MovementValidationStatus::MovedTooQuickly as u8,
             new_fall_distance: inp.fall_distance,
             fall_damage: 0,
@@ -99,7 +97,7 @@ pub fn alpha_movement_validate(input: &FfiMovementInput) -> FfiMovementResult {
     }
 
     if move_sq > SOFT_MOVEMENT_REJECT_SQ {
-        return FfiMovementResult {
+        return MovementResult {
             status: MovementValidationStatus::MovedWrongly as u8,
             new_fall_distance: inp.fall_distance,
             fall_damage: 0,
@@ -116,7 +114,7 @@ pub fn alpha_movement_validate(input: &FfiMovementInput) -> FfiMovementResult {
 
     if inp.is_in_water {
         fall_distance = 0.0;
-        return FfiMovementResult {
+        return MovementResult {
             status: MovementValidationStatus::Ok as u8,
             new_fall_distance: fall_distance,
             fall_damage,
@@ -136,7 +134,7 @@ pub fn alpha_movement_validate(input: &FfiMovementInput) -> FfiMovementResult {
         fall_distance -= dy as f32;
     }
 
-    FfiMovementResult {
+    MovementResult {
         status: MovementValidationStatus::Ok as u8,
         new_fall_distance: fall_distance,
         fall_damage,
@@ -150,7 +148,7 @@ mod tests {
 
     #[test]
     fn test_valid_movement_on_ground() {
-        let input = FfiMovementInput {
+        let input = MovementInput {
             from_x: 0.0,
             from_y: 64.0,
             from_z: 0.0,
@@ -162,7 +160,7 @@ mod tests {
             is_in_water: false,
             fall_distance: 0.0,
         };
-        let res = alpha_movement_validate(&input);
+        let res = movement_validate(&input);
         assert_eq!(res.status, MovementValidationStatus::Ok as u8);
         assert_eq!(res.fall_damage, 0);
         assert_eq!(res.new_fall_distance, 0.0);
@@ -170,7 +168,7 @@ mod tests {
 
     #[test]
     fn test_illegal_stance() {
-        let input = FfiMovementInput {
+        let input = MovementInput {
             from_x: 0.0,
             from_y: 64.0,
             from_z: 0.0,
@@ -182,13 +180,13 @@ mod tests {
             is_in_water: false,
             fall_distance: 0.0,
         };
-        let res = alpha_movement_validate(&input);
+        let res = movement_validate(&input);
         assert_eq!(res.status, MovementValidationStatus::IllegalStance as u8);
     }
 
     #[test]
     fn test_illegal_position() {
-        let input = FfiMovementInput {
+        let input = MovementInput {
             from_x: 0.0,
             from_y: 64.0,
             from_z: 0.0,
@@ -200,13 +198,13 @@ mod tests {
             is_in_water: false,
             fall_distance: 0.0,
         };
-        let res = alpha_movement_validate(&input);
+        let res = movement_validate(&input);
         assert_eq!(res.status, MovementValidationStatus::IllegalPosition as u8);
     }
 
     #[test]
     fn test_moved_too_quickly() {
-        let input = FfiMovementInput {
+        let input = MovementInput {
             from_x: 0.0,
             from_y: 64.0,
             from_z: 0.0,
@@ -218,7 +216,7 @@ mod tests {
             is_in_water: false,
             fall_distance: 0.0,
         };
-        let res = alpha_movement_validate(&input);
+        let res = movement_validate(&input);
         assert_eq!(res.status, MovementValidationStatus::MovedTooQuickly as u8);
     }
 
@@ -231,7 +229,7 @@ mod tests {
         let mut y: f64 = 74.0;
         while y > 64.0 {
             let ny = (y - 1.0).max(64.0);
-            let input = FfiMovementInput {
+            let input = MovementInput {
                 from_x: 0.0,
                 from_y: y,
                 from_z: 0.0,
@@ -243,7 +241,7 @@ mod tests {
                 is_in_water: false,
                 fall_distance: fall,
             };
-            let res = alpha_movement_validate(&input);
+            let res = movement_validate(&input);
             assert_eq!(res.status, MovementValidationStatus::Ok as u8);
             assert_eq!(res.fall_damage, 0);
             fall = res.new_fall_distance;
@@ -252,7 +250,7 @@ mod tests {
         assert_eq!(fall, 10.0);
 
         // Land on ground: damage = ceil(10.0 - 3.0) = 7
-        let input_landing = FfiMovementInput {
+        let input_landing = MovementInput {
             from_x: 0.0,
             from_y: 64.0,
             from_z: 0.0,
@@ -264,7 +262,7 @@ mod tests {
             is_in_water: false,
             fall_distance: fall,
         };
-        let res2 = alpha_movement_validate(&input_landing);
+        let res2 = movement_validate(&input_landing);
         assert_eq!(res2.status, MovementValidationStatus::Ok as u8);
         assert_eq!(res2.fall_damage, 7);
         assert_eq!(res2.new_fall_distance, 0.0);
@@ -272,7 +270,7 @@ mod tests {
 
     #[test]
     fn test_water_landing_negates_fall() {
-        let input = FfiMovementInput {
+        let input = MovementInput {
             from_x: 0.0,
             from_y: 64.0,
             from_z: 0.0,
@@ -284,7 +282,7 @@ mod tests {
             is_in_water: true,
             fall_distance: 20.0,
         };
-        let res = alpha_movement_validate(&input);
+        let res = movement_validate(&input);
         assert_eq!(res.status, MovementValidationStatus::Ok as u8);
         assert_eq!(res.fall_damage, 0);
         assert_eq!(res.new_fall_distance, 0.0);
@@ -292,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_nan_rejected_as_illegal_position() {
-        let input = FfiMovementInput {
+        let input = MovementInput {
             from_x: 0.0,
             from_y: 64.0,
             from_z: 0.0,
@@ -304,7 +302,7 @@ mod tests {
             is_in_water: false,
             fall_distance: 0.0,
         };
-        let res = alpha_movement_validate(&input);
+        let res = movement_validate(&input);
         assert_eq!(res.status, MovementValidationStatus::IllegalPosition as u8);
     }
 
@@ -312,7 +310,7 @@ mod tests {
     fn test_water_resets_fall_midair() {
         // Swimming down must not accumulate fall (vanilla func_84_k resets
         // unconditionally in water; the old code only reset on ground).
-        let input = FfiMovementInput {
+        let input = MovementInput {
             from_x: 0.0,
             from_y: 64.0,
             from_z: 0.0,
@@ -324,7 +322,7 @@ mod tests {
             is_in_water: true,
             fall_distance: 5.0,
         };
-        let res = alpha_movement_validate(&input);
+        let res = movement_validate(&input);
         assert_eq!(res.status, MovementValidationStatus::Ok as u8);
         assert_eq!(res.new_fall_distance, 0.0);
         assert_eq!(res.fall_damage, 0);
@@ -333,7 +331,7 @@ mod tests {
     #[test]
     fn test_soft_reject_at_four_blocks() {
         // 5-block jump in one packet (25 sq > 16) → teleport-back, not kick.
-        let input = FfiMovementInput {
+        let input = MovementInput {
             from_x: 0.0,
             from_y: 64.0,
             from_z: 0.0,
@@ -345,7 +343,7 @@ mod tests {
             is_in_water: false,
             fall_distance: 0.0,
         };
-        let res = alpha_movement_validate(&input);
+        let res = movement_validate(&input);
         assert_eq!(res.status, MovementValidationStatus::MovedWrongly as u8);
     }
 }

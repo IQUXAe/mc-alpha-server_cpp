@@ -1,7 +1,7 @@
 //! Block placement, neighbor updates, drops and tick scheduling on [`World`].
 //! Split out of `world.rs`; behavior unchanged.
 
-use crate::block::table::alpha_block_properties_get;
+use crate::block::table::block_properties_get;
 use crate::block::fire::{block_fire_added, block_fire_neighbor, block_fire_tick};
 use crate::block::ticks::{
      block_base_drop, block_cactus_added, block_cactus_neighbor, block_cactus_tick,
@@ -30,7 +30,7 @@ impl World {
     /// quantityDropped call sites. No damageDropped overrides exist, so
     /// damage is always 0.
     pub(crate) fn native_drop_ids(bid: u8) -> (i32, i32, i32) {
-        let p = alpha_block_properties_get(bid as u32);
+        let p = block_properties_get(bid as u32);
         (if p.id_dropped != 0 { p.id_dropped } else { bid as i32 }, p.quantity_dropped, 0)
     }
 
@@ -197,8 +197,8 @@ impl World {
     fn snow_neighbor(&mut self, x: i32, y: i32, z: i32) {
         let below = self.get_block_id(x, y - 1, z);
         let ok = below != 0
-            && alpha_block_properties_get(below as u32).allows_attachment
-            && material_of(alpha_block_properties_get(below as u32).material).is_solid();
+            && block_properties_get(below as u32).allows_attachment
+            && material_of(block_properties_get(below as u32).material).is_solid();
         if !ok {
             self.drop_block_for(78, 0, x, y, z);
             self.apply_set_notify(x, y, z, 0);
@@ -582,7 +582,7 @@ impl World {
                 if id == 0 {
                     continue;
                 }
-                if alpha_block_properties_get(id as u32).tick_on_load {
+                if block_properties_get(id as u32).tick_on_load {
                     self.update_block_tick(bx, by, bz);
                 }
             }

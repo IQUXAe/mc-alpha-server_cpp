@@ -10,7 +10,7 @@
 /// `EntityItem::pushOutOfBlocks` scoring). Free-face flags come in
 /// W,E,D,U,N,S order with the fractional position; returns the side
 /// (0..5) or -1 when fully buried.
-pub fn alpha_item_push_side(
+pub fn item_push_side(
     free_w: bool,
     free_e: bool,
     free_d: bool,
@@ -51,7 +51,6 @@ pub fn alpha_item_push_side(
 
 /// In-place motion for the item friction block (mirrors `EntityItem::tick`
 /// damping; gravity and aging stay in C++).
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct ItemMotion {
     pub mx: f64,
@@ -59,7 +58,7 @@ pub struct ItemMotion {
     pub mz: f64,
 }
 
-pub fn alpha_item_damp(on_ground: bool, io: &mut ItemMotion) -> bool {
+pub fn item_damp(on_ground: bool, io: &mut ItemMotion) -> bool {
     // Java: 0.98 air, slipperiness(0.6) * 0.98 on ground.
     let var1: f32 = if on_ground { 0.6f32 * 0.98f32 } else { 0.98f32 };
     io.mx *= var1 as f64;
@@ -75,7 +74,7 @@ pub fn alpha_item_damp(on_ground: bool, io: &mut ItemMotion) -> bool {
 /// Fact gathering (block id, replaceability, registry presence) stays in
 /// C++; returns 0 = keep falling, 1 = place block, 2 = drop as item,
 /// 3 = die (air id).
-pub fn alpha_falling_land(
+pub fn falling_land(
     block_id: i32,
     on_ground: bool,
     by: i32,
@@ -135,7 +134,7 @@ pub fn water_fraction_scan(
     fraction
 }
 
-pub fn alpha_boat_water_fraction(
+pub fn boat_water_fraction(
     min_x: f64,
     min_y: f64,
     min_z: f64,
@@ -154,7 +153,7 @@ pub fn alpha_boat_water_fraction(
 /// Writes the new yaw; returns false when still. Threshold `0.001`
 /// (squared movement) and the ±20 clamp are preserved exactly, including
 /// the asymmetric wrap (`>= 180` first, then `< -180`).
-pub fn alpha_boat_steer(delta_x: f64, delta_z: f64, cur_yaw: f32, out_yaw: &mut f32) -> bool {
+pub fn boat_steer(delta_x: f64, delta_z: f64, cur_yaw: f32, out_yaw: &mut f32) -> bool {
     if delta_x * delta_x + delta_z * delta_z <= 0.001 {
         return false;
     }
@@ -178,7 +177,7 @@ pub fn alpha_boat_steer(delta_x: f64, delta_z: f64, cur_yaw: f32, out_yaw: &mut 
 
 /// Rider seat offset (mirrors `EntityBoat::updateRiderPosition` geometry;
 /// rider lookup and positioning stay in C++). Plain `std` trig like C++.
-pub fn alpha_boat_rider_offset(yaw: f32, out_x: &mut f64, out_z: &mut f64) -> bool {
+pub fn boat_rider_offset(yaw: f32, out_x: &mut f64, out_z: &mut f64) -> bool {
     let radians = yaw as f64 * std::f64::consts::PI / 180.0;
     *out_x = radians.cos() * 0.4;
     *out_z = radians.sin() * 0.4;
@@ -212,7 +211,7 @@ pub fn arrow_shoot_run(
 
 /// Yaw/pitch from velocity (mirrors the arrow orientation init:
 /// `atan2(vx, vz)` yaw, `atan2(vy, horizontal)` pitch with `sqrt_float`).
-pub fn alpha_arrow_face_velocity(
+pub fn arrow_face_velocity(
     mx: f64,
     my: f64,
     mz: f64,
@@ -232,37 +231,37 @@ mod tests {
     #[test]
     fn test_push_side_picks_nearest_free_face() {
         // Free west face, close to it.
-        assert_eq!(alpha_item_push_side(true, false, false, false, false, false, 0.1, 0.5, 0.5), 0);
+        assert_eq!(item_push_side(true, false, false, false, false, false, 0.1, 0.5, 0.5), 0);
         // Buried: nothing free.
-        assert_eq!(alpha_item_push_side(false, false, false, false, false, false, 0.1, 0.5, 0.5), -1);
+        assert_eq!(item_push_side(false, false, false, false, false, false, 0.1, 0.5, 0.5), -1);
         // East closer than west.
-        assert_eq!(alpha_item_push_side(true, true, false, false, false, false, 0.9, 0.5, 0.5), 1);
+        assert_eq!(item_push_side(true, true, false, false, false, false, 0.9, 0.5, 0.5), 1);
         // Down wins over far west.
-        assert_eq!(alpha_item_push_side(true, false, true, false, false, false, 0.4, 0.1, 0.5), 2);
+        assert_eq!(item_push_side(true, false, true, false, false, false, 0.4, 0.1, 0.5), 2);
     }
 
     #[test]
     fn test_item_damp_ground_and_air() {
         let mut m = ItemMotion { mx: 1.0, my: -2.0, mz: 1.0 };
-        assert!(alpha_item_damp(false, &mut m));
+        assert!(item_damp(false, &mut m));
         assert!((m.mx - 0.98).abs() < 1e-6);
         assert!((m.my + 1.96).abs() < 1e-9);
         let mut m = ItemMotion { mx: 1.0, my: -2.0, mz: 1.0 };
-        assert!(alpha_item_damp(true, &mut m));
+        assert!(item_damp(true, &mut m));
         assert!((m.mx - 0.588).abs() < 1e-6);
         assert!((m.my - 0.98).abs() < 1e-6);
     }
 
     #[test]
     fn test_falling_land_table() {
-        assert_eq!(alpha_falling_land(0, false, 60, 0, false, true, 0), 3);
-        assert_eq!(alpha_falling_land(12, false, 60, 0, false, true, 0), 0);
-        assert_eq!(alpha_falling_land(12, false, 60, 0, false, true, 101), 2);
-        assert_eq!(alpha_falling_land(12, true, 60, 0, false, true, 5), 1);
-        assert_eq!(alpha_falling_land(12, true, 60, 3, false, true, 5), 2);
-        assert_eq!(alpha_falling_land(12, true, 60, 3, true, true, 5), 1);
-        assert_eq!(alpha_falling_land(12, true, 60, 3, true, false, 5), 2);
-        assert_eq!(alpha_falling_land(12, true, 200, 0, false, true, 5), 2);
+        assert_eq!(falling_land(0, false, 60, 0, false, true, 0), 3);
+        assert_eq!(falling_land(12, false, 60, 0, false, true, 0), 0);
+        assert_eq!(falling_land(12, false, 60, 0, false, true, 101), 2);
+        assert_eq!(falling_land(12, true, 60, 0, false, true, 5), 1);
+        assert_eq!(falling_land(12, true, 60, 3, false, true, 5), 2);
+        assert_eq!(falling_land(12, true, 60, 3, true, true, 5), 1);
+        assert_eq!(falling_land(12, true, 60, 3, true, false, 5), 2);
+        assert_eq!(falling_land(12, true, 200, 0, false, true, 5), 2);
     }
 
     fn wet_everywhere(_x: i32, _y: i32, _z: i32) -> bool {
@@ -274,28 +273,28 @@ mod tests {
 
     #[test]
     fn test_water_fraction_extremes() {
-        let full = alpha_boat_water_fraction(0.0, 62.0, 0.0, 2.0, 63.0, 2.0, Some(wet_everywhere));
+        let full = boat_water_fraction(0.0, 62.0, 0.0, 2.0, 63.0, 2.0, Some(wet_everywhere));
         assert!((full - 1.0).abs() < 1e-9);
-        let dry = alpha_boat_water_fraction(0.0, 62.0, 0.0, 2.0, 63.0, 2.0, Some(dry_everywhere));
+        let dry = boat_water_fraction(0.0, 62.0, 0.0, 2.0, 63.0, 2.0, Some(dry_everywhere));
         assert_eq!(dry, 0.0);
-        assert_eq!(alpha_boat_water_fraction(0.0, 62.0, 0.0, 2.0, 63.0, 2.0, None), 0.0);
+        assert_eq!(boat_water_fraction(0.0, 62.0, 0.0, 2.0, 63.0, 2.0, None), 0.0);
     }
 
     #[test]
     fn test_boat_steer() {
         let mut yaw = 0.0f32;
         // Still: no update.
-        assert!(!alpha_boat_steer(0.0, 0.0, 10.0, &mut yaw));
+        assert!(!boat_steer(0.0, 0.0, 10.0, &mut yaw));
         assert_eq!(yaw, 0.0);
         // Eastward motion from yaw 0: target -90, clamped to -20.
-        assert!(alpha_boat_steer(1.0, 0.0, 0.0, &mut yaw));
+        assert!(boat_steer(1.0, 0.0, 0.0, &mut yaw));
         assert_eq!(yaw, -20.0);
     }
 
     #[test]
     fn test_rider_offset() {
         let (mut ox, mut oz) = (0.0f64, 0.0f64);
-        assert!(alpha_boat_rider_offset(0.0, &mut ox, &mut oz));
+        assert!(boat_rider_offset(0.0, &mut ox, &mut oz));
         assert!((ox - 0.4).abs() < 1e-9);
         assert!(oz.abs() < 1e-9);
     }
@@ -303,7 +302,7 @@ mod tests {
     #[test]
     fn test_arrow_face_velocity() {
         let (mut yaw, mut pitch) = (0.0f32, 0.0f32);
-        assert!(alpha_arrow_face_velocity(0.0, 0.0, 2.0, &mut yaw, &mut pitch));
+        assert!(arrow_face_velocity(0.0, 0.0, 2.0, &mut yaw, &mut pitch));
         assert!(yaw.abs() < 1e-6);
         assert!(pitch.abs() < 1e-6);
     }

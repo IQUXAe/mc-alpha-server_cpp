@@ -3,9 +3,9 @@
 //! Split out of `session.rs`; behavior unchanged.
 
 use crate::entity::table::Entity;
-use crate::inventory::FfiItemStack;
-use crate::item_data::{alpha_item_food_heal, alpha_item_max_damage};
-use crate::item_use::alpha_item_food_bite;
+use crate::inventory::ItemStack;
+use crate::item_data::{item_food_heal, item_max_damage};
+use crate::item_use::item_food_bite;
 use crate::item_verbs::{
     BoatThrow, FlintOut, ItemUseWorld, item_block_use, item_boat_aim, item_boat_throw,
     item_flint_use, item_hoe_use, item_seeds_use, item_sign_use,
@@ -16,7 +16,7 @@ use crate::session_packets::pkt_health;
 
 impl PlaySession {
     /// Write a mutated stack into the real current slot (air-use path).
-    fn write_back_current(&mut self, ctx: &mut SessionCtx, s: FfiItemStack) {
+    fn write_back_current(&mut self, ctx: &mut SessionCtx, s: ItemStack) {
         let live = s.stack_size > 0 && s.item_id > 0;
         // Ghost fallback shadows the current slot while active.
         if self.held_fallback.is_some() {
@@ -76,7 +76,7 @@ impl PlaySession {
             self.send_tile(ctx.world, x, y, z);
         }
         // Find the stack: selected if it matches, else first main match.
-        let mut stack: Option<FfiItemStack> = None;
+        let mut stack: Option<ItemStack> = None;
         let mut stack_slot: Option<usize> = None;
         if item_id >= 0 {
             if let Some(s) = self.selected_stack(ctx.world) {
@@ -163,7 +163,7 @@ impl PlaySession {
 
     /// Write a mutated held stack back to its slot (or the fallback copy
     /// while a ghost is active, so real slot contents are never shadowed).
-    fn write_stack_slot(&mut self, ctx: &mut SessionCtx, slot: Option<usize>, s: FfiItemStack) {
+    fn write_stack_slot(&mut self, ctx: &mut SessionCtx, slot: Option<usize>, s: ItemStack) {
         let live = s.stack_size > 0 && s.item_id > 0;
         if self.held_fallback.is_some() {
             self.held_fallback = if live { Some(s) } else { None };
@@ -211,7 +211,7 @@ impl PlaySession {
     fn active_block_or_use(
         &mut self,
         ctx: &mut SessionCtx,
-        s: &mut FfiItemStack,
+        s: &mut ItemStack,
         x: i32,
         y: i32,
         z: i32,
@@ -227,14 +227,14 @@ impl PlaySession {
         let me = self.player;
         let yaw = ctx.world.entities.get(me).map(|e| e.body().yaw).unwrap_or(0.0);
         // Explicit borrow split: the world and the session reborrowed into
-        // the verb context (this replaces the old USE_CTX thread-local).
+        // the verb context.
         let mut u = ItemUseWorld { world: &mut *ctx.world, session: &mut *self };
         let used = match s.item_id {
             290..=294 => {
                 if !item_hoe_use(&mut u, 295, x, y, z) {
                     false
                 } else {
-                    let max = alpha_item_max_damage(s.item_id);
+                    let max = item_max_damage(s.item_id);
                     crate::inventory::item_stack_damage(&mut *s, 1, max);
                     true
                 }
@@ -252,7 +252,7 @@ impl PlaySession {
                 }
             }
             259 => {
-                let max = alpha_item_max_damage(s.item_id);
+                let max = item_max_damage(s.item_id);
                 let mut out = FlintOut { placed: false, new_damage: 0, broke: false };
                 if !item_flint_use(&mut u, s.item_damage, max, x, y, z, side, &mut out) {
                     false
@@ -294,11 +294,11 @@ impl PlaySession {
 
     /// Right-click in air (mirrors `useItem`: food bites with heal,
     /// soup to bowl, boats via aim+throw).
-    pub(crate) fn use_item_air(&mut self, ctx: &mut SessionCtx, mut s: FfiItemStack) -> bool {
+    pub(crate) fn use_item_air(&mut self, ctx: &mut SessionCtx, mut s: ItemStack) -> bool {
         let me = self.player;
-        let heal = alpha_item_food_heal(s.item_id);
+        let heal = item_food_heal(s.item_id);
         if heal > 0 {
-            let bite = alpha_item_food_bite(s.stack_size, heal);
+            let bite = item_food_bite(s.stack_size, heal);
             if s.item_id == 282 {
                 s.item_id = 281;
                 s.stack_size = 1;
@@ -312,7 +312,7 @@ impl PlaySession {
                     if bite.heal > 0 && !p.living.body.dead && p.living.health > 0 {
                         p.living.hurt_resist = p.living.max_hurt_resist / 2;
                     }
-                    p.living.health = crate::entity::living::alpha_living_heal(
+                    p.living.health = crate::entity::living::living_heal(
                         p.living.health,
                         p.living.max_health,
                         bite.heal,

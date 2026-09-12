@@ -2,7 +2,7 @@
 //! Split out of `session.rs`; behavior unchanged.
 
 use crate::entity::table::Entity;
-use crate::inventory::FfiItemStack;
+use crate::inventory::ItemStack;
 use crate::session::play::PlaySession;
 use crate::session::{SessionBroadcast, SessionCtx};
 use crate::world::tiles::TileData;
@@ -11,29 +11,29 @@ impl PlaySession {
     /// Ghost fallback for a held item id the server cannot find in any
     /// real slot (desync/creative): a 1-count copy that shadows slot 35
     /// without touching real contents, like vanilla's `field_10_k`.
-    pub(crate) fn ghost_stack(held_id: i32) -> FfiItemStack {
-        FfiItemStack { stack_size: 1, animations_to_go: 0, item_id: held_id, item_damage: 0 }
+    pub(crate) fn ghost_stack(held_id: i32) -> ItemStack {
+        ItemStack { stack_size: 1, animations_to_go: 0, item_id: held_id, item_damage: 0 }
     }
 
     pub(crate) fn apply_inventory(
         &mut self,
         ctx: &mut SessionCtx,
         inv_type: i32,
-        slots: &[crate::network::FfiSlotData],
+        slots: &[crate::network::SlotData],
     ) {
-        fn apply(bank: &mut [Option<FfiItemStack>], slots: &[crate::network::FfiSlotData]) {
+        fn apply(bank: &mut [Option<ItemStack>], slots: &[crate::network::SlotData]) {
             let n = slots.len().min(bank.len());
             for i in 0..n {
                 let id = slots[i].item_id as i32;
                 if id >= 0 && id < 32000 {
-                    let dmg = if crate::item_data::alpha_item_max_damage(id) > 0 {
+                    let dmg = if crate::item_data::item_max_damage(id) > 0 {
                         slots[i].damage as i32
                     } else {
                         0
                     };
                     let count = slots[i].count as i32;
                     bank[i] = if count > 0 {
-                        Some(FfiItemStack {
+                        Some(ItemStack {
                             stack_size: count,
                             animations_to_go: 0,
                             item_id: id,

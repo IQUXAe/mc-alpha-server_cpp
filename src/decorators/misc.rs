@@ -1,5 +1,5 @@
 use crate::random::JavaRandom;
-use crate::block::table::alpha_block_properties_get;
+use crate::block::table::block_properties_get;
 use crate::world::material_of;
 use super::BlockAccess;
 
@@ -8,7 +8,7 @@ use super::BlockAccess;
 fn cactus_blocked(accessor: &mut dyn BlockAccess, x: i32, y: i32, z: i32) -> bool {
     for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
         let id = accessor.get_block_id(x + dx, y, z + dz);
-        if material_of(alpha_block_properties_get(id as u32).material).is_solid() {
+        if material_of(block_properties_get(id as u32).material).is_solid() {
             return true;
         }
     }
@@ -167,7 +167,7 @@ fn flower_soil_ok(accessor: &mut dyn BlockAccess, plant_id: u8, x: i32, y: i32, 
     match plant_id {
         37 | 38 => below == 2 || below == 3 || below == 60,
         39 | 40 => {
-            if below == 0 || !alpha_block_properties_get(below as u32).allows_attachment {
+            if below == 0 || !block_properties_get(below as u32).allows_attachment {
                 return false;
             }
             y < accessor.get_height_value(x, z)

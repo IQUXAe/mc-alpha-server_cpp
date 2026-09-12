@@ -1229,7 +1229,7 @@ mod tests {
         let mut comp = NbtCompound::new();
         comp.set_string("LevelName", "test");
         comp.set_long("Time", 999);
-        let path = std::path::PathBuf::from("/tmp/alpha_nbt_gzip_test.dat");
+        let path = std::path::PathBuf::from("/tmp/nbt_gzip_test.dat");
         write_gzip_file(&path, "", &comp).unwrap();
         let (_, back) = read_gzip_file(&path).unwrap();
         assert_eq!(back.get_string("LevelName"), "test");

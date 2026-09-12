@@ -12,7 +12,6 @@
 /// Death-drop velocities (mirrors the `onDeath` drop loop:
 /// `(rand - 0.5) * 0.2` sideways, `0.2 + rand * 0.1` up). Draws stay in
 /// C++ (`rngNextDouble`); this owns the shape.
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct DropVelocity {
     pub mx: f64,
@@ -20,7 +19,7 @@ pub struct DropVelocity {
     pub mz: f64,
 }
 
-pub fn alpha_player_drop_velocity(ra: f64, rb: f64, rc: f64) -> DropVelocity {
+pub fn player_drop_velocity(ra: f64, rb: f64, rc: f64) -> DropVelocity {
     DropVelocity { mx: (ra - 0.5) * 0.2, my: 0.2 + rb * 0.1, mz: (rc - 0.5) * 0.2 }
 }
 
@@ -30,9 +29,9 @@ mod tests {
 
     #[test]
     fn test_drop_velocity_shape() {
-        let v = alpha_player_drop_velocity(0.5, 0.5, 0.5);
+        let v = player_drop_velocity(0.5, 0.5, 0.5);
         assert_eq!((v.mx, v.my, v.mz), (0.0, 0.25, 0.0));
-        let v = alpha_player_drop_velocity(0.0, 0.0, 1.0);
+        let v = player_drop_velocity(0.0, 0.0, 1.0);
         assert_eq!((v.mx, v.my, v.mz), (-0.1, 0.2, 0.1));
     }
 }

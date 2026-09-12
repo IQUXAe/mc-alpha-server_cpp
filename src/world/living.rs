@@ -231,9 +231,9 @@ impl World {
         amount: i32,
         attacker: Option<EntityId>,
     ) -> Option<i32> {
-        use crate::inventory::FfiItemStack;
-        use crate::player::combat::alpha_combat_calculate_damage;
-        use crate::player::inventory::{inventory_armor_value, inventory_damage_armor};
+        use crate::inventory::ItemStack;
+        use crate::player::combat::combat_calculate_damage;
+        use crate::player::inventory::{inventory_calc_armor, inventory_damage_armor};
         let attacker_is_player = attacker
             .and_then(|a| self.entities.get(a))
             .map(|e| matches!(e, Entity::Player(_)))
@@ -242,7 +242,7 @@ impl World {
         // Environmental damage (fall/drown/fire/cactus, attacker=None) must
         // NOT scale — otherwise peaceful zeroes falls and easy nerfs them.
         let skip_difficulty_scale = attacker.is_none() || attacker_is_player;
-        let mut tmp = [FfiItemStack {
+        let mut tmp = [ItemStack {
             stack_size: 0,
             animations_to_go: 0,
             item_id: 0,
@@ -257,11 +257,11 @@ impl World {
             }
             _ => return Some(amount),
         };
-        let res = alpha_combat_calculate_damage(
+        let res = combat_calculate_damage(
             amount,
             skip_difficulty_scale,
             self.difficulty,
-            inventory_armor_value(&tmp),
+            inventory_calc_armor(&tmp),
             carry,
         );
         if res.scaled_damage <= 0 {
@@ -287,8 +287,8 @@ impl World {
     /// `playerDropVelocity` call) and a 40-tick pickup delay; all banks
     /// clear. The inventory-resend packet is the network slice's.
     fn scatter_player_inventory(&mut self, id: EntityId, px: f64, py: f64, pz: f64) {
-        use crate::entity::player::alpha_player_drop_velocity;
-        let stacks: Vec<crate::inventory::FfiItemStack> = match self.entities.get(id) {
+        use crate::entity::player::player_drop_velocity;
+        let stacks: Vec<crate::inventory::ItemStack> = match self.entities.get(id) {
             Some(Entity::Player(p)) => p
                 .inventory
                 .main
@@ -310,7 +310,7 @@ impl World {
             }
             let (ra, rb, rc) =
                 (self.rng.next_double(), self.rng.next_double(), self.rng.next_double());
-            let v = alpha_player_drop_velocity(ra, rb, rc);
+            let v = player_drop_velocity(ra, rb, rc);
             let eid = self.spawn_item_entity(s.item_id, s.stack_size, s.item_damage, px, py + 0.5, pz);
             if let Some(Entity::Item(e)) = self.entities.get_mut(eid) {
                 e.body.motion = [v.mx, v.my, v.mz];
@@ -325,10 +325,10 @@ impl World {
     pub fn player_add_item(
         &mut self,
         id: EntityId,
-        mut stack: crate::inventory::FfiItemStack,
+        mut stack: crate::inventory::ItemStack,
     ) -> i32 {
-        use crate::inventory::FfiItemStack;
-        use crate::player::inventory::inventory_add_item_to;
+        use crate::inventory::ItemStack;
+        use crate::player::inventory::inventory_add_item;
         if stack.stack_size <= 0 {
             return 0;
         }
@@ -337,7 +337,7 @@ impl World {
         }
         match self.entities.get_mut(id) {
             Some(Entity::Player(p)) => {
-                let mut tmp = [FfiItemStack {
+                let mut tmp = [ItemStack {
                     stack_size: 0,
                     animations_to_go: 0,
                     item_id: 0,
@@ -346,7 +346,7 @@ impl World {
                 for (i, slot) in p.inventory.main.iter().enumerate() {
                     tmp[i] = slot.unwrap_or(tmp[i]);
                 }
-                let rem = inventory_add_item_to(&mut tmp, &mut stack, 64);
+                let rem = inventory_add_item(&mut tmp, &mut stack, 64);
                 for (i, slot) in p.inventory.main.iter_mut().enumerate() {
                     *slot = if tmp[i].item_id > 0 && tmp[i].stack_size > 0 {
                         Some(tmp[i])
@@ -361,7 +361,7 @@ impl World {
     }
 
     /// Held stack (mirrors `getCurrentItem`).
-    pub fn player_held(&self, id: EntityId) -> Option<crate::inventory::FfiItemStack> {
+    pub fn player_held(&self, id: EntityId) -> Option<crate::inventory::ItemStack> {
         match self.entities.get(id) {
             Some(Entity::Player(p)) => p.inventory.held(),
             _ => None,
@@ -507,7 +507,7 @@ impl World {
             }
             _ => return,
         };
-        let t = crate::entity::living::alpha_living_tick(alive, opaque, water, air, hurt, attack, resist);
+        let t = crate::entity::living::living_tick(alive, opaque, water, air, hurt, attack, resist);
         match self.entities.get_mut(id) {
             Some(Entity::Mob(m)) => {
                 m.living.body.air = t.air;

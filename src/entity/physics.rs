@@ -13,10 +13,9 @@
 use crate::aabb::AxisAlignedBB;
 use crate::math_helper::{abs_max, sqrt_double};
 
-/// Plain box for FFI (mirrors `AxisAlignedBB` field order).
-#[repr(C)]
+/// Plain box copy of `AxisAlignedBB` fields.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FfiAabb {
+pub struct Aabb {
     pub min_x: f64,
     pub min_y: f64,
     pub min_z: f64,
@@ -25,7 +24,7 @@ pub struct FfiAabb {
     pub max_z: f64,
 }
 
-impl From<AxisAlignedBB> for FfiAabb {
+impl From<AxisAlignedBB> for Aabb {
     fn from(b: AxisAlignedBB) -> Self {
         Self {
             min_x: b.min_x,
@@ -38,13 +37,13 @@ impl From<AxisAlignedBB> for FfiAabb {
     }
 }
 
-impl From<FfiAabb> for AxisAlignedBB {
-    fn from(b: FfiAabb) -> Self {
+impl From<Aabb> for AxisAlignedBB {
+    fn from(b: Aabb) -> Self {
         Self::get_bounding_box(b.min_x, b.min_y, b.min_z, b.max_x, b.max_y, b.max_z)
     }
 }
 
-// NOTE: the old Y-X-Z `alpha_entity_resolve_move` helper was removed —
+// NOTE: the old Y-X-Z `entity_resolve_move` helper was removed —
 // `World::move_body` owns the single collision+step implementation now
 // (a second copy had already drifted: no step height here). The axis
 // order is covered by move_body's behavior.
@@ -53,7 +52,7 @@ impl From<FfiAabb> for AxisAlignedBB {
 /// `fallDistance`; when landing with accumulated distance it also writes
 /// that distance to `out_fall_event` (C++ fires `onFall` for it, `-1.0`
 /// means no event).
-pub fn alpha_entity_fall_step(
+pub fn entity_fall_step(
     on_ground: bool,
     dy: f64,
     fall_distance: f32,
@@ -79,7 +78,6 @@ pub fn alpha_entity_fall_step(
 /// after the identity/pushable guards, which stay in C++). Writes both
 /// velocity deltas; C++ applies them via `addVelocity`. Returns false when
 /// the pair is too close to push.
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct PushOut {
     pub dvx1: f64,
@@ -88,7 +86,7 @@ pub struct PushOut {
     pub dvz2: f64,
 }
 
-pub fn alpha_entity_push(
+pub fn entity_push(
     x1: f64,
     z1: f64,
     x2: f64,
@@ -121,22 +119,22 @@ pub fn alpha_entity_push(
 mod tests {
     use super::*;
 
-    fn box_ffi(x0: f64, y0: f64, z0: f64, x1: f64, y1: f64, z1: f64) -> FfiAabb {
-        FfiAabb { min_x: x0, min_y: y0, min_z: z0, max_x: x1, max_y: y1, max_z: z1 }
+    fn make_box(x0: f64, y0: f64, z0: f64, x1: f64, y1: f64, z1: f64) -> Aabb {
+        Aabb { min_x: x0, min_y: y0, min_z: z0, max_x: x1, max_y: y1, max_z: z1 }
     }
 
     #[test]
-    fn test_ffi_roundtrip() {
-        let b = box_ffi(-0.3, 2.0, -0.3, 0.3, 3.8, 0.3);
+    fn test_box_roundtrip() {
+        let b = make_box(-0.3, 2.0, -0.3, 0.3, 3.8, 0.3);
         let back: AxisAlignedBB = b.into();
-        let fwd = FfiAabb::from(back);
+        let fwd = Aabb::from(back);
         assert_eq!(b, fwd);
     }
 
     #[test]
     fn test_fall_step_landing_fires_event() {
         let mut ev = -1.0f32;
-        let next = alpha_entity_fall_step(true, -3.0, 3.5, &mut ev);
+        let next = entity_fall_step(true, -3.0, 3.5, &mut ev);
         assert_eq!(next, 0.0);
         assert_eq!(ev, 3.5);
     }
@@ -144,7 +142,7 @@ mod tests {
     #[test]
     fn test_fall_step_accumulates_in_air() {
         let mut ev = -1.0f32;
-        let next = alpha_entity_fall_step(false, -2.0, 1.5, &mut ev);
+        let next = entity_fall_step(false, -2.0, 1.5, &mut ev);
         assert_eq!(ev, -1.0);
         assert!((next - 3.5).abs() < 1e-6);
     }
@@ -152,7 +150,7 @@ mod tests {
     #[test]
     fn test_fall_step_rising_keeps_distance() {
         let mut ev = -1.0f32;
-        let next = alpha_entity_fall_step(false, 1.0, 2.0, &mut ev);
+        let next = entity_fall_step(false, 1.0, 2.0, &mut ev);
         assert_eq!((next, ev), (2.0, -1.0));
     }
 
@@ -161,7 +159,7 @@ mod tests {
         // e1 at origin, e2 at (3,4): matches the C++ formula by hand
         // (norm 2, scale 1/4, factor 0.05).
         let mut out = PushOut { dvx1: 0.0, dvz1: 0.0, dvx2: 0.0, dvz2: 0.0 };
-        assert!(alpha_entity_push(0.0, 0.0, 3.0, 4.0, true, true, &mut out));
+        assert!(entity_push(0.0, 0.0, 3.0, 4.0, true, true, &mut out));
         assert!((out.dvx2 - 0.01875).abs() < 1e-9);
         assert!((out.dvz2 - 0.025).abs() < 1e-9);
         assert!((out.dvx1 + 0.01875).abs() < 1e-9);
@@ -171,7 +169,7 @@ mod tests {
     #[test]
     fn test_push_too_close_or_locked() {
         let mut out = PushOut { dvx1: 0.0, dvz1: 0.0, dvx2: 0.0, dvz2: 0.0 };
-        assert!(!alpha_entity_push(0.0, 0.0, 0.005, 0.0, true, true, &mut out));
-        assert!(!alpha_entity_push(0.0, 0.0, 3.0, 4.0, false, true, &mut out));
+        assert!(!entity_push(0.0, 0.0, 0.005, 0.0, true, true, &mut out));
+        assert!(!entity_push(0.0, 0.0, 3.0, 4.0, false, true, &mut out));
     }
 }

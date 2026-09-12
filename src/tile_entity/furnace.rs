@@ -1,27 +1,25 @@
-use crate::block::table::{BlockMaterial, alpha_block_properties_get};
-use crate::inventory::FfiItemStack;
+use crate::block::table::{BlockMaterial, block_properties_get};
+use crate::inventory::ItemStack;
 
 pub const SLOT_INPUT: usize = 0;
 pub const SLOT_FUEL: usize = 1;
 pub const SLOT_OUTPUT: usize = 2;
 pub const FURNACE_SIZE: usize = 3;
 
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct FfiFurnaceState {
-    pub slots: [FfiItemStack; FURNACE_SIZE],
+pub struct FurnaceState {
+    pub slots: [ItemStack; FURNACE_SIZE],
     pub burn_time: i16,
     pub cook_time: i16,
     pub current_item_burn_time: i16,
 }
 
-#[repr(C)]
 pub struct FurnaceTickResult {
     pub changed: bool,
     pub needs_block_update: bool,
 }
 
-fn slot_empty(s: &FfiItemStack) -> bool {
+fn slot_empty(s: &ItemStack) -> bool {
     s.item_id < 0 || s.stack_size <= 0
 }
 
@@ -39,9 +37,9 @@ fn get_smelting_result(item_id: i32) -> i32 {
     }
 }
 
-pub fn furnace_create() -> FfiFurnaceState {
-    FfiFurnaceState {
-        slots: [FfiItemStack { stack_size: 0, animations_to_go: 0, item_id: -1, item_damage: 0 }; FURNACE_SIZE],
+pub fn furnace_create() -> FurnaceState {
+    FurnaceState {
+        slots: [ItemStack { stack_size: 0, animations_to_go: 0, item_id: -1, item_damage: 0 }; FURNACE_SIZE],
         burn_time: 0,
         cook_time: 0,
         current_item_burn_time: 0,
@@ -56,7 +54,7 @@ pub fn furnace_create() -> FfiFurnaceState {
 /// empty-slot id, which observably yields 0 there too.)
 pub fn fuel_burn_time(item_id: i32) -> i32 {
     if item_id >= 0 && item_id < 256 {
-        if alpha_block_properties_get(item_id as u32).material == BlockMaterial::Wood as u8 {
+        if block_properties_get(item_id as u32).material == BlockMaterial::Wood as u8 {
             return 300;
         }
     }
@@ -68,15 +66,14 @@ pub fn fuel_burn_time(item_id: i32) -> i32 {
     }
 }
 
-/// Native tick (mirrors the `TileEntityFurnace::updateEntity` head): the
-/// fuel burn time is looked up from the fuel slot, then the shared core
-/// runs (C++ keeps passing it in from the Block/Item tables).
-pub fn furnace_tick_native(state: &mut FfiFurnaceState) -> FurnaceTickResult {
+/// Native tick: the fuel burn time is looked up from the fuel slot,
+/// then the shared core runs.
+pub fn furnace_tick_native(state: &mut FurnaceState) -> FurnaceTickResult {
     let fuel = fuel_burn_time(state.slots[SLOT_FUEL].item_id);
     tick_core(state, fuel)
 }
 
-fn tick_core(state: &mut FfiFurnaceState, fuel_burn_time_from_cpp: i32) -> FurnaceTickResult {
+fn tick_core(state: &mut FurnaceState, fuel: i32) -> FurnaceTickResult {
     let mut changed = false;
 
     let was_burning = state.burn_time > 0;
@@ -87,16 +84,16 @@ fn tick_core(state: &mut FfiFurnaceState, fuel_burn_time_from_cpp: i32) -> Furna
 
     // Try to start burning new fuel
     if state.burn_time == 0 && can_smelt(state) {
-        if fuel_burn_time_from_cpp > 0 {
-            state.current_item_burn_time = fuel_burn_time_from_cpp as i16;
-            state.burn_time = fuel_burn_time_from_cpp as i16;
+        if fuel > 0 {
+            state.current_item_burn_time = fuel as i16;
+            state.burn_time = fuel as i16;
             changed = true;
-            let fuel = &mut state.slots[SLOT_FUEL];
-            fuel.stack_size -= 1;
-            if fuel.stack_size <= 0 {
-                fuel.item_id = -1;
-                fuel.stack_size = 0;
-                fuel.item_damage = 0;
+            let fuel_slot = &mut state.slots[SLOT_FUEL];
+            fuel_slot.stack_size -= 1;
+            if fuel_slot.stack_size <= 0 {
+                fuel_slot.item_id = -1;
+                fuel_slot.stack_size = 0;
+                fuel_slot.item_damage = 0;
             }
         }
     }
@@ -120,7 +117,7 @@ fn tick_core(state: &mut FfiFurnaceState, fuel_burn_time_from_cpp: i32) -> Furna
     }
 }
 
-fn can_smelt(state: &FfiFurnaceState) -> bool {
+fn can_smelt(state: &FurnaceState) -> bool {
     let input = &state.slots[SLOT_INPUT];
     if slot_empty(input) {
         return false;
@@ -140,7 +137,7 @@ fn can_smelt(state: &FfiFurnaceState) -> bool {
     output.stack_size < 64
 }
 
-fn smelt_item(state: &mut FfiFurnaceState) {
+fn smelt_item(state: &mut FurnaceState) {
     let result_id = get_smelting_result(state.slots[SLOT_INPUT].item_id);
     if result_id < 0 {
         return;
@@ -172,16 +169,16 @@ fn smelt_item(state: &mut FfiFurnaceState) {
 mod tests {
     use super::*;
 
-    fn stack(item_id: i32, count: i32) -> FfiItemStack {
-        FfiItemStack { stack_size: count, animations_to_go: 0, item_id, item_damage: 0 }
+    fn stack(item_id: i32, count: i32) -> ItemStack {
+        ItemStack { stack_size: count, animations_to_go: 0, item_id, item_damage: 0 }
     }
 
-    fn empty() -> FfiItemStack {
-        FfiItemStack { stack_size: 0, animations_to_go: 0, item_id: -1, item_damage: 0 }
+    fn empty() -> ItemStack {
+        ItemStack { stack_size: 0, animations_to_go: 0, item_id: -1, item_damage: 0 }
     }
 
-    fn state_with(input: FfiItemStack, fuel: FfiItemStack) -> FfiFurnaceState {
-        FfiFurnaceState {
+    fn state_with(input: ItemStack, fuel: ItemStack) -> FurnaceState {
+        FurnaceState {
             slots: [input, fuel, empty()],
             burn_time: 0,
             cook_time: 0,
@@ -190,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn fuel_table_matches_cpp() {
+    fn fuel_table() {
         // Wood-material blocks burn 300 (planks, log, bookshelf, workbench...).
         // 25 is null in vanilla (no fuel).
         for id in [5, 17, 47, 53, 54, 58, 63, 64, 65, 68, 72, 84, 85] {

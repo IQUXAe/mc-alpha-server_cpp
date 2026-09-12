@@ -2,9 +2,9 @@
 //! Split out of `session.rs`; behavior unchanged.
 
 use crate::entity::table::{AnimalKind, Entity};
-use crate::inventory::FfiItemStack;
-use crate::item_data::{alpha_item_max_damage, alpha_item_tool_kind};
-use crate::player::combat::alpha_combat_get_weapon_damage;
+use crate::inventory::ItemStack;
+use crate::item_data::{item_max_damage, item_tool_kind};
+use crate::player::combat::combat_get_weapon_damage;
 use crate::server_admin::chat_command;
 use crate::session::play::PlaySession;
 use crate::session::{SessionBroadcast, SessionCtx, SessionOutcome};
@@ -80,7 +80,7 @@ impl PlaySession {
                         );
                     if bucket {
                         if let Some(Entity::Player(p)) = ctx.world.entities.get_mut(me) {
-                            p.inventory.main[cur as usize] = Some(FfiItemStack {
+                            p.inventory.main[cur as usize] = Some(ItemStack {
                                 stack_size: 1,
                                 animations_to_go: 0,
                                 item_id: 335,
@@ -130,7 +130,7 @@ impl PlaySession {
             return None;
         }
         let held = self.selected_stack(ctx.world);
-        let damage = held.map(|s| alpha_combat_get_weapon_damage(s.item_id).max(1)).unwrap_or(1);
+        let damage = held.map(|s| combat_get_weapon_damage(s.item_id).max(1)).unwrap_or(1);
         if damage <= 0 {
             return None;
         }
@@ -142,7 +142,7 @@ impl PlaySession {
         );
         if let Some(mut s) = held {
             if living_target {
-                let kind = alpha_item_tool_kind(s.item_id);
+                let kind = item_tool_kind(s.item_id);
                 let wear = if kind == crate::item_data::ItemToolKind::Pickaxe as i32
                     || kind == crate::item_data::ItemToolKind::Spade as i32
                     || kind == crate::item_data::ItemToolKind::Axe as i32
@@ -154,7 +154,7 @@ impl PlaySession {
                     0
                 };
                 if wear > 0 {
-                    let max = alpha_item_max_damage(s.item_id);
+                    let max = item_max_damage(s.item_id);
                     crate::inventory::item_stack_damage(&mut s, wear, max);
                     if s.stack_size <= 0 {
                         // A spent ghost clears the fallback (and the held

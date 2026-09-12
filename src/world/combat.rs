@@ -2,7 +2,7 @@
 //! Split out of `world.rs`; behavior unchanged.
 
 use crate::aabb::AxisAlignedBB;
-use crate::block::table::{BlockType, alpha_block_properties_get};
+use crate::block::table::{BlockType, block_properties_get};
 use crate::entity::table::{Body, Entity, EntityId, MobKind};
 use crate::material::Material;
 use crate::math_helper::{floor_double, sqrt_float};
@@ -97,7 +97,7 @@ impl World {
             if bid == 0 {
                 continue;
             }
-            if alpha_block_properties_get(bid as u32).block_type == BlockType::Fluid as u8 {
+            if block_properties_get(bid as u32).block_type == BlockType::Fluid as u8 {
                 continue;
             }
             return false;
@@ -186,7 +186,7 @@ impl World {
             if bid == 0 {
                 continue;
             }
-            if alpha_block_properties_get(bid as u32).block_type == BlockType::Fluid as u8 {
+            if block_properties_get(bid as u32).block_type == BlockType::Fluid as u8 {
                 // canCollideCheck(meta, true): falling (8+) reads as still,
                 // still (0) blocks, flowing (1..7) lets the ray through.
                 let mut meta = self.get_block_meta(ccx, ccy, ccz);
@@ -254,7 +254,7 @@ impl World {
                     if bid == 0 {
                         continue;
                     }
-                    let props = alpha_block_properties_get(bid as u32);
+                    let props = block_properties_get(bid as u32);
                     if !has_collision_box(props.block_type) || !has_collision_id(bid) {
                         continue;
                     }
@@ -379,7 +379,7 @@ impl World {
         };
         let motion = motion.or(ctor_motion).unwrap_or([0.0, 0.0, 0.0]);
         let (mut fy, mut fp) = (yaw, pitch);
-        crate::entity::misc::alpha_arrow_face_velocity(motion[0], motion[1], motion[2], &mut fy, &mut fp);
+        crate::entity::misc::arrow_face_velocity(motion[0], motion[1], motion[2], &mut fy, &mut fp);
         let nid = self.entities.alloc_id();
         let mut b = Body::new(nid, 0.5, 0.5, 0.0);
         b.set_position(ax, ay, az);
@@ -575,7 +575,7 @@ impl World {
                     if bid == 0 {
                         continue;
                     }
-                    if alpha_block_properties_get(bid as u32).hardness < 0.0 {
+                    if block_properties_get(bid as u32).hardness < 0.0 {
                         continue;
                     }
                     if bid == 46 {
@@ -690,7 +690,7 @@ impl World {
         if bid == 0 {
             return false;
         }
-        let mat = material_of(alpha_block_properties_get(bid as u32).material);
+        let mat = material_of(block_properties_get(bid as u32).material);
         mat.is_solid() && mat.blocks_movement()
     }
 
@@ -716,7 +716,7 @@ impl World {
         if ppitch == 0.0 && pyaw == 0.0 {
             let (mut fy, mut fp) = (yaw, pitch);
             let faced =
-                crate::entity::misc::alpha_arrow_face_velocity(mx, my, mz, &mut fy, &mut fp);
+                crate::entity::misc::arrow_face_velocity(mx, my, mz, &mut fy, &mut fp);
             if faced {
                 if let Some(Entity::Arrow(a)) = self.entities.get_mut(id) {
                     a.body.prev_yaw = fy;
@@ -791,7 +791,7 @@ impl World {
                     if bid == 0 {
                         continue;
                     }
-                    let props = alpha_block_properties_get(bid as u32);
+                    let props = block_properties_get(bid as u32);
                     if !has_collision_box(props.block_type) || !has_collision_id(bid) {
                         continue;
                     }

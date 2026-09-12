@@ -7,7 +7,7 @@ use crate::chunk::Chunk;
 use crate::random::JavaRandom;
 use crate::noise::NoiseGeneratorOctaves;
 use crate::biome::BiomeType;
-use crate::block::table::alpha_block_properties_get;
+use crate::block::table::block_properties_get;
 use crate::world::material_of;
 use crate::world::{World, is_air_material};
 
@@ -15,8 +15,7 @@ use ores::{WorldGenMinable, WorldGenClay};
 use trees::{WorldGenTrees, WorldGenBigTree};
 use misc::{WorldGenLakes, WorldGenFlowers, WorldGenReed, WorldGenCactus, WorldGenPumpkin, WorldGenLiquids, WorldGenDungeons};
 
-/// Block access for decoration, as an explicit trait (no thread-local
-/// bridge). The populate canvas and the live world are the two backends;
+/// Block access for decoration. The populate canvas and the live world are the two backends;
 ///
 /// tests implement it on a scripted fake.
 pub trait BlockAccess {
@@ -59,7 +58,7 @@ impl<'a> BlockAccess for WorldAccess<'a> {
         let bid = self.get_block_id(x, y, z);
         bid != 0
             && !is_air_material(bid)
-            && crate::block::table::alpha_block_properties_get(bid as u32).allows_attachment
+            && crate::block::table::block_properties_get(bid as u32).allows_attachment
     }
     fn is_block_solid(&mut self, x: i32, y: i32, z: i32) -> bool {
         World::is_solid_in(self.chunks, x, y, z)
@@ -71,11 +70,10 @@ impl<'a> BlockAccess for WorldAccess<'a> {
 
 /// Canvas backend for chunk population: the 2x2 decorate arrays with a
 /// live fallback for out-of-canvas reads (and chest/spawner writes, which
-/// need live TileEntities). Array math mirrors the old `local_*` shims
-/// exactly, including nibble-packed metadata.
+/// need live TileEntities).
 pub struct CanvasAccess<'a> {
-    blocks: [&'a mut [u8; 32768]; 4],
-    metadata: [&'a mut [u8; 32768]; 4],
+    blocks: &'a mut [[[u8; 32768]; 2]; 2],
+    metadata: &'a mut [[[u8; 32768]; 2]; 2],
     chunk_x: i32,
     chunk_z: i32,
     fallback: &'a mut dyn BlockAccess,
@@ -83,36 +81,15 @@ pub struct CanvasAccess<'a> {
 }
 
 impl<'a> CanvasAccess<'a> {
-    /// Build over populate-batch arrays. SAFETY: caller guarantees every
-    /// array lives 32768 bytes for the returned lifetime (true for the
-    /// stack canvas in `populate_batch`, the only caller).
+    /// Build over populate-batch arrays.
     pub fn new(
-        blocks: [*mut u8; 4],
-        metadata: [*mut u8; 4],
+        blocks: &'a mut [[[u8; 32768]; 2]; 2],
+        metadata: &'a mut [[[u8; 32768]; 2]; 2],
         chunk_x: i32,
         chunk_z: i32,
         fallback: &'a mut dyn BlockAccess,
     ) -> Self {
-        unsafe {
-            Self {
-                blocks: [
-                    &mut *(blocks[0] as *mut [u8; 32768]),
-                    &mut *(blocks[1] as *mut [u8; 32768]),
-                    &mut *(blocks[2] as *mut [u8; 32768]),
-                    &mut *(blocks[3] as *mut [u8; 32768]),
-                ],
-                metadata: [
-                    &mut *(metadata[0] as *mut [u8; 32768]),
-                    &mut *(metadata[1] as *mut [u8; 32768]),
-                    &mut *(metadata[2] as *mut [u8; 32768]),
-                    &mut *(metadata[3] as *mut [u8; 32768]),
-                ],
-                chunk_x,
-                chunk_z,
-                fallback,
-                loot: Vec::new(),
-            }
-        }
+        Self { blocks, metadata, chunk_x, chunk_z, fallback, loot: Vec::new() }
     }
 
     /// Drain the dungeon-chest loot queued during decoration (the canvas
@@ -121,22 +98,27 @@ impl<'a> CanvasAccess<'a> {
         std::mem::take(&mut self.loot)
     }
 
-    /// (array slot, local x, local z) for in-canvas columns.
-    fn canvas_slot(&self, x: i32, z: i32) -> Option<(usize, usize, usize)> {
+    /// (dx, dz, local x, local z) for in-canvas columns.
+    fn canvas_slot(&self, x: i32, z: i32) -> Option<(usize, usize, usize, usize)> {
         let rel_x = x - self.chunk_x * 16;
         let rel_z = z - self.chunk_z * 16;
         if rel_x < 0 || rel_x >= 32 || rel_z < 0 || rel_z >= 32 {
             return None;
         }
-        Some(((rel_x >> 4) as usize * 2 + (rel_z >> 4) as usize, (rel_x & 15) as usize, (rel_z & 15) as usize))
+        Some((
+            (rel_x >> 4) as usize,
+            (rel_z >> 4) as usize,
+            (rel_x & 15) as usize,
+            (rel_z & 15) as usize,
+        ))
     }
 }
 
 impl<'a> BlockAccess for CanvasAccess<'a> {
     fn get_block_id(&mut self, x: i32, y: i32, z: i32) -> u8 {
         match self.canvas_slot(x, z) {
-            Some((slot, lx, lz)) if y >= 0 && y < 128 => {
-                self.blocks[slot][(lx << 11) | (lz << 7) | (y as usize)]
+            Some((dx, dz, lx, lz)) if y >= 0 && y < 128 => {
+                self.blocks[dx][dz][(lx << 11) | (lz << 7) | (y as usize)]
             }
             _ => self.fallback.get_block_id(x, y, z),
         }
@@ -148,17 +130,17 @@ impl<'a> BlockAccess for CanvasAccess<'a> {
             return;
         }
         match self.canvas_slot(x, z) {
-            Some((slot, lx, lz)) if y >= 0 && y < 128 => {
-                self.blocks[slot][(lx << 11) | (lz << 7) | (y as usize)] = id;
+            Some((dx, dz, lx, lz)) if y >= 0 && y < 128 => {
+                self.blocks[dx][dz][(lx << 11) | (lz << 7) | (y as usize)] = id;
             }
             _ => self.fallback.set_block_id(x, y, z, id),
         }
     }
     fn get_block_meta(&mut self, x: i32, y: i32, z: i32) -> u8 {
         match self.canvas_slot(x, z) {
-            Some((slot, lx, lz)) if y >= 0 && y < 128 => {
+            Some((dx, dz, lx, lz)) if y >= 0 && y < 128 => {
                 let idx = (lx << 11) | (lz << 7) | (y as usize);
-                let byte = self.metadata[slot][idx >> 1];
+                let byte = self.metadata[dx][dz][idx >> 1];
                 if (idx & 1) != 0 {
                     (byte >> 4) & 0xF
                 } else {
@@ -170,9 +152,9 @@ impl<'a> BlockAccess for CanvasAccess<'a> {
     }
     fn set_block_meta(&mut self, x: i32, y: i32, z: i32, meta: u8) {
         match self.canvas_slot(x, z) {
-            Some((slot, lx, lz)) if y >= 0 && y < 128 => {
+            Some((dx, dz, lx, lz)) if y >= 0 && y < 128 => {
                 let idx = (lx << 11) | (lz << 7) | (y as usize);
-                let cell = &mut self.metadata[slot][idx >> 1];
+                let cell = &mut self.metadata[dx][dz][idx >> 1];
                 if (idx & 1) != 0 {
                     *cell = (*cell & 0x0F) | ((meta & 0xF) << 4);
                 } else {
@@ -190,9 +172,9 @@ impl<'a> BlockAccess for CanvasAccess<'a> {
     }
     fn get_height_value(&mut self, x: i32, z: i32) -> i32 {
         match self.canvas_slot(x, z) {
-            Some((slot, lx, lz)) => {
+            Some((dx, dz, lx, lz)) => {
                 for y in (0..128).rev() {
-                    if self.blocks[slot][(lx << 11) | (lz << 7) | y] != 0 {
+                    if self.blocks[dx][dz][(lx << 11) | (lz << 7) | y] != 0 {
                         return (y + 1) as i32;
                     }
                 }
@@ -213,7 +195,7 @@ impl<'a> BlockAccess for CanvasAccess<'a> {
 fn snow_top_y(accessor: &mut dyn BlockAccess, x: i32, z: i32) -> i32 {
     let mut mat_at = |y: i32| {
         let id = accessor.get_block_id(x, y, z);
-        (id, material_of(alpha_block_properties_get(id as u32).material))
+        (id, material_of(block_properties_get(id as u32).material))
     };
     let mut y = 127;
     while y > 0 && mat_at(y).1.is_solid() {
@@ -229,33 +211,17 @@ fn snow_top_y(accessor: &mut dyn BlockAccess, x: i32, z: i32) -> i32 {
     -1
 }
 
-pub fn alpha_decorate_chunk(
+pub fn decorate_chunk(
     accessor: &mut dyn BlockAccess,
     seed: i64,
     chunk_x: i32,
     chunk_z: i32,
-    biome_type_raw: i32,
+    biome_type: BiomeType,
     noise_gen_713: &mut NoiseGeneratorOctaves,
     temperatures: &[f64],
 ) {
     let var4 = chunk_x * 16;
     let var5 = chunk_z * 16;
-
-    let biome_type = match biome_type_raw {
-        0 => BiomeType::Rainforest,
-        1 => BiomeType::Swampland,
-        2 => BiomeType::SeasonalForest,
-        3 => BiomeType::Forest,
-        4 => BiomeType::Savanna,
-        5 => BiomeType::Shrubland,
-        6 => BiomeType::Taiga,
-        7 => BiomeType::Desert,
-        8 => BiomeType::Plains,
-        9 => BiomeType::IceDesert,
-        10 => BiomeType::Tundra,
-        11 => BiomeType::Hell,
-        _ => BiomeType::Plains,
-    };
 
     let mut rand = JavaRandom::new(seed);
     let var7 = rand.next_long() / 2 * 2 + 1;
@@ -508,7 +474,7 @@ pub fn alpha_decorate_chunk(
                     // Short-circuit above guarantees var21 - 1 >= 0.
                     let below_id = accessor.get_block_id(var17, var21 - 1, var18);
                     let below_mat =
-                        material_of(alpha_block_properties_get(below_id as u32).material);
+                        material_of(block_properties_get(below_id as u32).material);
                     if below_mat.is_solid() && below_id != 79 {
                         // occluding ground that is not ice
                         accessor.set_block_id(var17, var21, var18, 78); // snow layer

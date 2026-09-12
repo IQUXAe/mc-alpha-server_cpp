@@ -1,13 +1,13 @@
-use crate::block::table::{alpha_block_properties_get, BlockMaterial};
+use crate::block::table::{block_properties_get, BlockMaterial};
 
 /// Checks if a player holding `held_item_id` can harvest drops from `block_id`.
 /// Follows Minecraft Alpha 1.2.6 rules.
-pub fn alpha_mining_can_harvest(block_id: i32, held_item_id: i32) -> bool {
+pub fn mining_can_harvest(block_id: i32, held_item_id: i32) -> bool {
     if block_id <= 0 || block_id >= 256 {
         return false;
     }
 
-    let props = alpha_block_properties_get(block_id as u32);
+    let props = block_properties_get(block_id as u32);
     let mat = props.material;
 
     // Blocks not requiring tools to drop
@@ -64,7 +64,7 @@ pub fn alpha_mining_can_harvest(block_id: i32, held_item_id: i32) -> bool {
 }
 
 /// Returns digging speed multiplier for a held item against a specific block.
-pub fn alpha_mining_get_str_vs_block(block_id: i32, held_item_id: i32) -> f32 {
+pub fn mining_get_str_vs_block(block_id: i32, held_item_id: i32) -> f32 {
     if block_id <= 0 || block_id >= 256 {
         return 1.0;
     }
@@ -134,7 +134,7 @@ pub fn alpha_mining_get_str_vs_block(block_id: i32, held_item_id: i32) -> f32 {
 }
 
 /// Returns block hardness progress per tick applied by player.
-pub fn alpha_mining_check_hardness(
+pub fn mining_check_hardness(
     block_id: i32,
     held_item_id: i32,
     in_water: bool,
@@ -144,7 +144,7 @@ pub fn alpha_mining_check_hardness(
         return 0.0;
     }
 
-    let props = alpha_block_properties_get(block_id as u32);
+    let props = block_properties_get(block_id as u32);
     if props.hardness < 0.0 {
         return 0.0; // Bedrock / unbreakable
     }
@@ -153,7 +153,7 @@ pub fn alpha_mining_check_hardness(
         return 1.0; // Instant break (e.g. torch, redstone, sapling)
     }
 
-    let mut str_val = alpha_mining_get_str_vs_block(block_id, held_item_id);
+    let mut str_val = mining_get_str_vs_block(block_id, held_item_id);
     if in_water {
         str_val /= 5.0;
     }
@@ -161,7 +161,7 @@ pub fn alpha_mining_check_hardness(
         str_val /= 5.0;
     }
 
-    let can_harvest = alpha_mining_can_harvest(block_id, held_item_id);
+    let can_harvest = mining_can_harvest(block_id, held_item_id);
     if can_harvest {
         str_val / props.hardness / 30.0
     } else {
@@ -170,7 +170,7 @@ pub fn alpha_mining_check_hardness(
 }
 
 /// Returns number of ticks required to break a block, or -1 if unbreakable.
-pub fn alpha_mining_get_destroy_ticks(
+pub fn mining_get_destroy_ticks(
     block_id: i32,
     held_item_id: i32,
     in_water: bool,
@@ -180,12 +180,12 @@ pub fn alpha_mining_get_destroy_ticks(
         return -1;
     }
 
-    let props = alpha_block_properties_get(block_id as u32);
+    let props = block_properties_get(block_id as u32);
     if props.hardness < 0.0 {
         return -1;
     }
 
-    let hardness_per_tick = alpha_mining_check_hardness(block_id, held_item_id, in_water, on_ground);
+    let hardness_per_tick = mining_check_hardness(block_id, held_item_id, in_water, on_ground);
     if hardness_per_tick >= 1.0 {
         return 0; // Instant
     }
@@ -200,62 +200,62 @@ mod tests {
     #[test]
     fn test_harvestability() {
         // Dirt (3) can be harvested by hand
-        assert!(alpha_mining_can_harvest(3, 0));
+        assert!(mining_can_harvest(3, 0));
 
         // Stone (1) cannot be harvested by hand
-        assert!(!alpha_mining_can_harvest(1, 0));
+        assert!(!mining_can_harvest(1, 0));
         // Stone (1) can be harvested by wood pickaxe (270)
-        assert!(alpha_mining_can_harvest(1, 270));
+        assert!(mining_can_harvest(1, 270));
 
         // Iron ore (15) cannot be harvested by wood pickaxe (270)
-        assert!(!alpha_mining_can_harvest(15, 270));
+        assert!(!mining_can_harvest(15, 270));
         // Iron ore (15) can be harvested by stone pickaxe (274)
-        assert!(alpha_mining_can_harvest(15, 274));
+        assert!(mining_can_harvest(15, 274));
 
         // Diamond ore (56) requires iron pickaxe (257) or diamond pickaxe (278)
-        assert!(!alpha_mining_can_harvest(56, 274)); // stone fails
-        assert!(alpha_mining_can_harvest(56, 257));  // iron succeeds
-        assert!(alpha_mining_can_harvest(56, 278));  // diamond succeeds
+        assert!(!mining_can_harvest(56, 274)); // stone fails
+        assert!(mining_can_harvest(56, 257));  // iron succeeds
+        assert!(mining_can_harvest(56, 278));  // diamond succeeds
 
         // Obsidian (49) requires diamond pickaxe (278)
-        assert!(!alpha_mining_can_harvest(49, 257)); // iron fails
-        assert!(alpha_mining_can_harvest(49, 278));  // diamond succeeds
+        assert!(!mining_can_harvest(49, 257)); // iron fails
+        assert!(mining_can_harvest(49, 278));  // diamond succeeds
     }
 
     #[test]
     fn test_tool_speed_multipliers() {
         // Bare hand vs stone = 1.0
-        assert_eq!(alpha_mining_get_str_vs_block(1, 0), 1.0);
+        assert_eq!(mining_get_str_vs_block(1, 0), 1.0);
 
         // Diamond pickaxe (278) vs stone (1) = 8.0
-        assert_eq!(alpha_mining_get_str_vs_block(1, 278), 8.0);
+        assert_eq!(mining_get_str_vs_block(1, 278), 8.0);
 
         // Diamond axe (279) vs wood log (17) = 8.0
-        assert_eq!(alpha_mining_get_str_vs_block(17, 279), 8.0);
+        assert_eq!(mining_get_str_vs_block(17, 279), 8.0);
 
         // Diamond spade (277) vs dirt (3) = 8.0
-        assert_eq!(alpha_mining_get_str_vs_block(3, 277), 8.0);
+        assert_eq!(mining_get_str_vs_block(3, 277), 8.0);
 
         // Sword vs stone = 1.5
-        assert_eq!(alpha_mining_get_str_vs_block(1, 276), 1.5);
+        assert_eq!(mining_get_str_vs_block(1, 276), 1.5);
     }
 
     #[test]
     fn test_destroy_ticks() {
         // Bedrock (7) -> unbreakable (-1)
-        assert_eq!(alpha_mining_get_destroy_ticks(7, 278, false, true), -1);
+        assert_eq!(mining_get_destroy_ticks(7, 278, false, true), -1);
 
         // Torch (50) -> instant (0 ticks)
-        assert_eq!(alpha_mining_get_destroy_ticks(50, 0, false, true), 0);
+        assert_eq!(mining_get_destroy_ticks(50, 0, false, true), 0);
 
         // Stone (1, hardness 1.5) with diamond pickaxe (str 8.0, can harvest):
         // hardness_per_tick = 8.0 / 1.5 / 30.0 = 0.177777...
         // destroy_ticks = ceil(1.0 / 0.177777) = 6 ticks
-        let ticks = alpha_mining_get_destroy_ticks(1, 278, false, true);
+        let ticks = mining_get_destroy_ticks(1, 278, false, true);
         assert_eq!(ticks, 6);
 
         // Submerged in water and in air reduces speed by 5x each (25x total)
-        let ticks_water_air = alpha_mining_get_destroy_ticks(1, 278, true, false);
+        let ticks_water_air = mining_get_destroy_ticks(1, 278, true, false);
         assert!(ticks_water_air > ticks * 20);
     }
 }

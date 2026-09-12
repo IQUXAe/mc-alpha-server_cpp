@@ -2,7 +2,7 @@
 //! Split out of `server.rs`; behavior unchanged.
 
 use std::collections::BTreeSet;
-use crate::commands::{ConsoleCommandTag, FfiString, rust_parse_console_command};
+use crate::commands::{ConsoleCommandTag, parse_console_command};
 use crate::entity::table::{AnimalEnt, AnimalKind, Entity, EntityId, MobEnt, MobKind};
 use crate::server::sessions::SessionState;
 use crate::server::settings::write_list;
@@ -234,14 +234,14 @@ impl Server {
                 return;
             }
         };
-        if !crate::item_data::alpha_item_is_valid(id) {
+        if !crate::item_data::item_is_valid(id) {
             log::info(&format!("Invalid item id {id}."));
             return;
         }
         let count = count.clamp(1, 64);
         let rem = self.world.player_add_item(
             eid,
-            crate::inventory::FfiItemStack {
+            crate::inventory::ItemStack {
                 stack_size: count,
                 animations_to_go: 0,
                 item_id: id,
@@ -343,16 +343,6 @@ impl Server {
 }
 
 fn parse_console(line: &str) -> (ConsoleCommandTag, String, String, i32) {
-    fn take(f: FfiString) -> String {
-        if f.ptr.is_null() || f.len == 0 {
-            return String::new();
-        }
-        // SAFETY: `FfiString` borrows from `line`, which outlives `parsed`
-        // below; `take` copies out before `line` is dropped.
-        let bytes =
-            unsafe { std::slice::from_raw_parts(f.ptr as *const u8, f.len as usize) };
-        String::from_utf8_lossy(bytes).into_owned()
-    }
-    let parsed = rust_parse_console_command(line);
-    (parsed.tag, take(parsed.arg1), take(parsed.arg2), parsed.count)
+    let parsed = parse_console_command(line);
+    (parsed.tag, parsed.arg1, parsed.arg2, parsed.count)
 }

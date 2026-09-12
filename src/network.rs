@@ -1,9 +1,8 @@
 use std::net::TcpStream;
 use std::io::Read;
 
-#[repr(C)]
 #[derive(Clone, Copy)]
-pub struct FfiSlotData {
+pub struct SlotData {
     pub item_id: i16,
     pub count: i8,
     pub damage: i16,
@@ -26,7 +25,7 @@ pub enum PacketData {
     },
     PlayerInventory {
         inventory_type: i32,
-        slots: Vec<FfiSlotData>,
+        slots: Vec<SlotData>,
     },
     UseEntity {
         player_entity_id: i32,
@@ -102,11 +101,9 @@ pub enum PacketData {
     },
 }
 
-/// Outbound tracker packet (safe replacement for the old C packet
-/// union: only the kinds the tracker emits, with owned payloads, so
-/// encoding needs no unsafe at all).
+/// Outbound tracker packet: only the kinds the tracker emits, with owned payloads.
 #[derive(Clone, Debug)]
-pub enum RustPacket {
+pub enum Packet {
     BlockItemSwitch { entity_id: i32, item_id: i16 },
     ArmAnimation { entity_id: i32, animate: i8 },
     NamedEntitySpawn {
@@ -250,7 +247,7 @@ pub(crate) fn read_packet_payload(stream: &mut TcpStream, packet_id: u8) -> std:
             let mut slots = Vec::with_capacity(item_count as usize);
             for _ in 0..item_count {
                 let item_id = read_u16(stream)? as i16;
-                let mut slot = FfiSlotData { item_id, count: 0, damage: 0 };
+                let mut slot = SlotData { item_id, count: 0, damage: 0 };
                 if item_id >= 0 {
                     slot.count = read_u8(stream)? as i8;
                     slot.damage = read_u16(stream)? as i16;
@@ -426,19 +423,19 @@ pub(crate) fn put_str(buf: &mut Vec<u8>, s: &str) {
 }
 /// Encode one outbound tracker packet (field order mirrors the vanilla
 /// readers byte-for-byte; see the audit against the java/ sources).
-pub fn encode_packet(pkt: &RustPacket, buf: &mut Vec<u8>) {
+pub fn encode_packet(pkt: &Packet, buf: &mut Vec<u8>) {
     match pkt {
-        RustPacket::BlockItemSwitch { entity_id, item_id } => {
+        Packet::BlockItemSwitch { entity_id, item_id } => {
             put_u8(buf, 16);
             put_i32(buf, *entity_id);
             put_i16(buf, *item_id);
         }
-        RustPacket::ArmAnimation { entity_id, animate } => {
+        Packet::ArmAnimation { entity_id, animate } => {
             put_u8(buf, 18);
             put_i32(buf, *entity_id);
             put_i8(buf, *animate);
         }
-        RustPacket::NamedEntitySpawn {
+        Packet::NamedEntitySpawn {
             entity_id,
             username,
             x,
@@ -458,7 +455,7 @@ pub fn encode_packet(pkt: &RustPacket, buf: &mut Vec<u8>) {
             put_i8(buf, *pitch);
             put_i16(buf, *current_item);
         }
-        RustPacket::PickupSpawn {
+        Packet::PickupSpawn {
             entity_id,
             item_id,
             count,
@@ -480,7 +477,7 @@ pub fn encode_packet(pkt: &RustPacket, buf: &mut Vec<u8>) {
             put_i8(buf, *pitch);
             put_i8(buf, *roll);
         }
-        RustPacket::VehicleSpawn { entity_id, vehicle_type, x, y, z } => {
+        Packet::VehicleSpawn { entity_id, vehicle_type, x, y, z } => {
             put_u8(buf, 23);
             put_i32(buf, *entity_id);
             put_i8(buf, *vehicle_type);
@@ -488,12 +485,12 @@ pub fn encode_packet(pkt: &RustPacket, buf: &mut Vec<u8>) {
             put_i32(buf, *y);
             put_i32(buf, *z);
         }
-        RustPacket::Collect { collected_id, collector_id } => {
+        Packet::Collect { collected_id, collector_id } => {
             put_u8(buf, 22);
             put_i32(buf, *collected_id);
             put_i32(buf, *collector_id);
         }
-        RustPacket::MobSpawn { entity_id, mob_type, x, y, z, yaw, pitch } => {
+        Packet::MobSpawn { entity_id, mob_type, x, y, z, yaw, pitch } => {
             put_u8(buf, 24);
             put_i32(buf, *entity_id);
             put_u8(buf, *mob_type);
@@ -503,35 +500,35 @@ pub fn encode_packet(pkt: &RustPacket, buf: &mut Vec<u8>) {
             put_i8(buf, *yaw);
             put_i8(buf, *pitch);
         }
-        RustPacket::EntityVelocity { entity_id, motion_x, motion_y, motion_z } => {
+        Packet::EntityVelocity { entity_id, motion_x, motion_y, motion_z } => {
             put_u8(buf, 28);
             put_i32(buf, *entity_id);
             put_i16(buf, *motion_x);
             put_i16(buf, *motion_y);
             put_i16(buf, *motion_z);
         }
-        RustPacket::DestroyEntity { entity_id } => {
+        Packet::DestroyEntity { entity_id } => {
             put_u8(buf, 29);
             put_i32(buf, *entity_id);
         }
-        RustPacket::Entity { entity_id } => {
+        Packet::Entity { entity_id } => {
             put_u8(buf, 30);
             put_i32(buf, *entity_id);
         }
-        RustPacket::RelEntityMove { entity_id, dx, dy, dz } => {
+        Packet::RelEntityMove { entity_id, dx, dy, dz } => {
             put_u8(buf, 31);
             put_i32(buf, *entity_id);
             put_i8(buf, *dx);
             put_i8(buf, *dy);
             put_i8(buf, *dz);
         }
-        RustPacket::EntityLook { entity_id, yaw, pitch } => {
+        Packet::EntityLook { entity_id, yaw, pitch } => {
             put_u8(buf, 32);
             put_i32(buf, *entity_id);
             put_i8(buf, *yaw);
             put_i8(buf, *pitch);
         }
-        RustPacket::RelEntityMoveLook { entity_id, dx, dy, dz, yaw, pitch } => {
+        Packet::RelEntityMoveLook { entity_id, dx, dy, dz, yaw, pitch } => {
             put_u8(buf, 33);
             put_i32(buf, *entity_id);
             put_i8(buf, *dx);
@@ -540,7 +537,7 @@ pub fn encode_packet(pkt: &RustPacket, buf: &mut Vec<u8>) {
             put_i8(buf, *yaw);
             put_i8(buf, *pitch);
         }
-        RustPacket::EntityTeleport { entity_id, x, y, z, yaw, pitch } => {
+        Packet::EntityTeleport { entity_id, x, y, z, yaw, pitch } => {
             put_u8(buf, 34);
             put_i32(buf, *entity_id);
             put_i32(buf, *x);
@@ -549,12 +546,12 @@ pub fn encode_packet(pkt: &RustPacket, buf: &mut Vec<u8>) {
             put_i8(buf, *yaw);
             put_i8(buf, *pitch);
         }
-        RustPacket::EntityStatus { entity_id, status } => {
+        Packet::EntityStatus { entity_id, status } => {
             put_u8(buf, 38);
             put_i32(buf, *entity_id);
             put_i8(buf, *status);
         }
-        RustPacket::AttachEntity { entity_id, vehicle_id } => {
+        Packet::AttachEntity { entity_id, vehicle_id } => {
             put_u8(buf, 39);
             put_i32(buf, *entity_id);
             put_i32(buf, *vehicle_id);
@@ -568,7 +565,7 @@ mod tests {
 
     #[test]
     fn test_encode_named_spawn_roundtrip() {
-        let pkt = RustPacket::NamedEntitySpawn {
+        let pkt = Packet::NamedEntitySpawn {
             entity_id: 7,
             username: "steve".to_string(),
             x: 160,
@@ -588,7 +585,7 @@ mod tests {
 
     #[test]
     fn test_encode_mob_spawn_roundtrip() {
-        let pkt = RustPacket::MobSpawn {
+        let pkt = Packet::MobSpawn {
             entity_id: 9,
             mob_type: 50,
             x: 1,
@@ -607,7 +604,7 @@ mod tests {
 
     #[test]
     fn test_encode_collect_roundtrip() {
-        let pkt = RustPacket::Collect { collected_id: 9, collector_id: 1 };
+        let pkt = Packet::Collect { collected_id: 9, collector_id: 1 };
         let mut buf = Vec::new();
         encode_packet(&pkt, &mut buf);
         assert_eq!(buf, vec![22, 0, 0, 0, 9, 0, 0, 0, 1]);

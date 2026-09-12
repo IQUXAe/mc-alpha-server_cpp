@@ -147,7 +147,7 @@
         let player = spawn_player(&mut w, "Steve", 3.5, 64.0, 6.5);
         w.set_block_id(3, 64, 4, 1);
         if let Some(Entity::Player(p)) = w.entities.get_mut(player) {
-            p.inventory.main[0] = Some(FfiItemStack {
+            p.inventory.main[0] = Some(ItemStack {
                 stack_size: 1, animations_to_go: 0, item_id: 270, item_damage: 0,
             });
         }
@@ -216,7 +216,7 @@
         let ops = no_ops();
         let player = spawn_player(&mut w, "Steve", 3.5, 64.0, 6.5);
         if let Some(Entity::Player(p)) = w.entities.get_mut(player) {
-            p.inventory.main[0] = Some(FfiItemStack {
+            p.inventory.main[0] = Some(ItemStack {
                 stack_size: 10, animations_to_go: 0, item_id: 3, item_damage: 0,
             });
         }
@@ -245,7 +245,7 @@
         w.attack_living(player, 5, None);
         assert_eq!(health_of(&w, player), 15);
         if let Some(Entity::Player(p)) = w.entities.get_mut(player) {
-            p.inventory.main[0] = Some(FfiItemStack {
+            p.inventory.main[0] = Some(ItemStack {
                 stack_size: 3, animations_to_go: 0, item_id: 260, item_damage: 0,
             });
         }
@@ -284,7 +284,7 @@
         cow.living.body.set_position(4.5, 64.0, 5.5);
         w.entities.insert(Entity::Animal(cow));
         if let Some(Entity::Player(p)) = w.entities.get_mut(player) {
-            p.inventory.main[0] = Some(FfiItemStack {
+            p.inventory.main[0] = Some(ItemStack {
                 stack_size: 1, animations_to_go: 0, item_id: 325, item_damage: 0,
             });
         }
@@ -469,7 +469,7 @@
         }
         let mut sess = PlaySession::new(player);
         let mut bc = Vec::new();
-        let pork = crate::inventory::FfiItemStack {
+        let pork = crate::inventory::ItemStack {
             stack_size: 1,
             animations_to_go: 0,
             item_id: ITEM_PORK_RAW,
@@ -486,7 +486,7 @@
         let ops = no_ops();
         let player = spawn_player(&mut w, "Steve", 3.5, 64.0, 4.5);
         if let Some(Entity::Player(p)) = w.entities.get_mut(player) {
-            p.inventory.main[2] = Some(FfiItemStack {
+            p.inventory.main[2] = Some(ItemStack {
                 stack_size: 4, animations_to_go: 0, item_id: 5, item_damage: 0,
             });
         }
@@ -560,15 +560,15 @@
         let ops = no_ops();
         let player = spawn_player(&mut w, "Steve", 3.5, 64.0, 4.5);
         if let Some(Entity::Player(p)) = w.entities.get_mut(player) {
-            p.inventory.main[35] = Some(crate::inventory::FfiItemStack {
+            p.inventory.main[35] = Some(crate::inventory::ItemStack {
                 stack_size: 5, animations_to_go: 0, item_id: 3, item_damage: 0,
             });
         }
         let mut sess = PlaySession::new(player);
         let mut bc = Vec::new();
         let mut slots =
-            vec![crate::network::FfiSlotData { item_id: -1, count: 0, damage: 0 }; 36];
-        slots[35] = crate::network::FfiSlotData { item_id: 3, count: 5, damage: 0 };
+            vec![crate::network::SlotData { item_id: -1, count: 0, damage: 0 }; 36];
+        slots[35] = crate::network::SlotData { item_id: 3, count: 5, damage: 0 };
         assert!(sess
             .pump(&mut ctx(&mut w, &ops, &mut bc), PacketData::PlayerInventory {
                 inventory_type: -1,
@@ -590,7 +590,7 @@
         let ops = no_ops();
         let player = spawn_player(&mut w, "Steve", 3.5, 64.0, 4.5);
         if let Some(Entity::Player(p)) = w.entities.get_mut(player) {
-            p.inventory.main[35] = Some(crate::inventory::FfiItemStack {
+            p.inventory.main[35] = Some(crate::inventory::ItemStack {
                 stack_size: 1, animations_to_go: 0, item_id: 323, item_damage: 0,
             });
         }
@@ -664,11 +664,11 @@
 
     #[test]
     fn test_restore_held_selects_slot_or_fallback() {
-        use crate::inventory::FfiItemStack;
+        use crate::inventory::ItemStack;
         let mut w = floor_world();
         let player = spawn_player(&mut w, "Steve", 3.5, 64.0, 4.5);
         if let Some(Entity::Player(p)) = w.entities.get_mut(player) {
-            p.inventory.main[2] = Some(FfiItemStack {
+            p.inventory.main[2] = Some(ItemStack {
                 stack_size: 5,
                 animations_to_go: 0,
                 item_id: 3,
@@ -722,8 +722,8 @@
 
     #[test]
     fn test_inventory_section_empty_slots_are_bare() {
-        use crate::inventory::FfiItemStack;
-        let dirt = Some(FfiItemStack {
+        use crate::inventory::ItemStack;
+        let dirt = Some(ItemStack {
             stack_size: 5,
             animations_to_go: 0,
             item_id: 3,

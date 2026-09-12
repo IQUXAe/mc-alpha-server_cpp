@@ -2,10 +2,10 @@
 //! Split out of `session.rs`; behavior unchanged.
 
 use crate::entity::table::{Entity, EntityId};
-use crate::inventory::FfiItemStack;
+use crate::inventory::ItemStack;
 use crate::math_helper::floor_double;
 use crate::network::PacketData;
-use crate::player::digging::{FfiDigState, alpha_dig_state_new};
+use crate::player::digging::{DigState, dig_state_new};
 use crate::session::{SessionCtx, SessionOutcome};
 use crate::session_packets::{
     pkt_block_change, pkt_inventory_section, pkt_keepalive, pkt_kick, pkt_teleport, tile_packet,
@@ -22,11 +22,11 @@ use crate::world::World;
 pub struct PlaySession {
     pub player: EntityId,
     pub outbox: Vec<Vec<u8>>,
-    pub dig: FfiDigState,
+    pub dig: DigState,
     pub has_moved: bool,
     pub last: [f64; 3],
     pub held_id: i32,
-    pub held_fallback: Option<FfiItemStack>,
+    pub held_fallback: Option<ItemStack>,
     pub keepalive_tick: u32,
     pub gone: bool,
     /// Last health byte sent as 0x08 (mirrors the `Packet8` diff-check in
@@ -44,7 +44,7 @@ impl PlaySession {
         Self {
             player,
             outbox: Vec::new(),
-            dig: alpha_dig_state_new(),
+            dig: dig_state_new(),
             has_moved: false,
             last: [0.0; 3],
             held_id: 0,
@@ -179,7 +179,7 @@ impl PlaySession {
     /// Selected stack (mirrors `getSelectedItemStack`): ghost fallback
     /// first while active (its slot-35 shadow holds real content that must
     /// not be consumed as the held item), else the real current slot.
-    pub(crate) fn selected_stack(&self, world: &World) -> Option<FfiItemStack> {
+    pub(crate) fn selected_stack(&self, world: &World) -> Option<ItemStack> {
         if let Some(s) = self.held_fallback {
             if self.held_id > 0 && s.item_id == self.held_id {
                 return Some(s);

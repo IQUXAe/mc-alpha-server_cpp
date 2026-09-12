@@ -643,13 +643,13 @@
         let (fx, fz) = (srv.world.spawn[0], srv.world.spawn[2]);
         srv.world.set_block_id(fx, 64, fz, 61);
         let mut f = crate::tile_entity::furnace::furnace_create();
-        f.slots[0] = crate::inventory::FfiItemStack {
+        f.slots[0] = crate::inventory::ItemStack {
             stack_size: 1,
             animations_to_go: 0,
             item_id: 4,
             item_damage: 0,
         };
-        f.slots[1] = crate::inventory::FfiItemStack {
+        f.slots[1] = crate::inventory::ItemStack {
             stack_size: 1,
             animations_to_go: 0,
             item_id: 5,

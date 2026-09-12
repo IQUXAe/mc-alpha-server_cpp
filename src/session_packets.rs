@@ -1,7 +1,7 @@
 //! Play-packet constructors, split out of `session.rs`.
 //! Re-exported from `session` so `crate::session::pkt_*` keeps working.
 
-use crate::inventory::FfiItemStack;
+use crate::inventory::ItemStack;
 use crate::network::{put_f32, put_f64, put_i16, put_i32, put_i64, put_i8, put_str, put_u8};
 use crate::world::TileData;
 
@@ -84,7 +84,7 @@ pub fn pkt_block_change(x: i32, y: i32, z: i32, block_type: u8, meta: u8) -> Vec
     b
 }
 
-fn put_slot(buf: &mut Vec<u8>, s: Option<FfiItemStack>) {
+fn put_slot(buf: &mut Vec<u8>, s: Option<ItemStack>) {
     match s {
         Some(v) if v.stack_size > 0 => {
             put_i16(buf, v.item_id as i16);
@@ -103,7 +103,7 @@ fn put_slot(buf: &mut Vec<u8>, s: Option<FfiItemStack>) {
     }
 }
 
-pub fn pkt_inventory_section(inv_type: i32, slots: &[Option<FfiItemStack>]) -> Vec<u8> {
+pub fn pkt_inventory_section(inv_type: i32, slots: &[Option<ItemStack>]) -> Vec<u8> {
     let mut b = Vec::with_capacity(7 + slots.len() * 5);
     put_u8(&mut b, 5);
     crate::network::put_i32(&mut b, inv_type);

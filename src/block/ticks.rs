@@ -1,4 +1,4 @@
-//! Block behavior ported from C++ `Block.cpp` (which mirrors Java `Block*`).
+//! Block behavior (mirrors Java `Block*`).
 //!
 //! Every per-block event (`onBlockAdded`, `onNeighborBlockChange`,
 //! `updateTick`, `canBlockStay`, drops) lives here. C++ keeps the `Block`
@@ -30,7 +30,6 @@ pub enum SaplingAction {
     GrowTree = 1,
 }
 
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct TickAction {
     pub kind: u8,
@@ -88,9 +87,9 @@ fn q_water(w: &mut World, x: i32, y: i32, z: i32) -> bool {
 fn q_collidable(w: &mut World, x: i32, y: i32, z: i32) -> bool {
     let bid = w.get_block_id(x, y, z);
     bid != 0
-        && crate::block::table::alpha_block_properties_get(bid as u32).block_type
+        && crate::block::table::block_properties_get(bid as u32).block_type
             != crate::block::table::BlockType::Fluid as u8
-        && has_collision_box(crate::block::table::alpha_block_properties_get(bid as u32).block_type)
+        && has_collision_box(crate::block::table::block_properties_get(bid as u32).block_type)
         && has_collision_id(bid)
 }
 fn u_set_meta(w: &mut World, x: i32, y: i32, z: i32, meta: u8) {
@@ -862,7 +861,7 @@ fn block_crops_drop(w: &mut World, wheat_id: i32, seeds_id: i32, x: i32, y: i32,
     }
 }
 
-pub fn block_crops_drop_ffi(
+pub fn block_crops_drop_harvest(
     w: &mut World,
     wheat_id: i32,
     seeds_id: i32,
@@ -1110,7 +1109,7 @@ mod tests {
         // rand(15) <= 7 seeds on destroy; the wheat drop's motion draws
         // sit between the rolls, so the seed accounts for them).
         let mut w = harness(1);
-        block_crops_drop_ffi(&mut w, 296, 295, 0, 5, 0, 7, 1.0);
+        block_crops_drop_harvest(&mut w, 296, 295, 0, 5, 0, 7, 1.0);
         let wheat = items_at(&w, 296);
         assert_eq!(wheat.len(), 1, "{wheat:?}");
         assert_eq!(wheat[0].1, 1);

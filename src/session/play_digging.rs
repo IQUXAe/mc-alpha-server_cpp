@@ -2,9 +2,9 @@
 //! Split out of `session.rs`; behavior unchanged.
 
 use crate::entity::table::Entity;
-use crate::item_data::{alpha_item_max_damage, alpha_item_tool_kind};
-use crate::player::digging::{FfiDigInput, alpha_dig_on_click, alpha_dig_on_tick};
-use crate::player::mining::alpha_mining_can_harvest;
+use crate::item_data::{item_max_damage, item_tool_kind};
+use crate::player::digging::{DigInput, dig_on_click, dig_on_tick};
+use crate::player::mining::mining_can_harvest;
 use crate::session::play::PlaySession;
 use crate::session::{SessionCtx, SessionOutcome};
 use crate::session_packets::tile_packet;
@@ -56,17 +56,17 @@ impl PlaySession {
                     return None;
                 }
                 let input = self.dig_input(ctx, bid as i32);
-                if alpha_dig_on_click(input) {
+                if dig_on_click(input) {
                     self.harvest(ctx, x, y, z);
                 }
             }
         } else if status == 2 {
-            crate::player::digging::alpha_dig_cancel(&mut self.dig);
+            crate::player::digging::dig_cancel(&mut self.dig);
         } else if status == 1 {
             if !protected || self.is_op(ctx) {
                 let bid = ctx.world.get_block_id(x, y, z);
                 let input = self.dig_input(ctx, bid as i32);
-                let done = alpha_dig_on_tick(&mut self.dig, x, y, z, input);
+                let done = dig_on_tick(&mut self.dig, x, y, z, input);
                 if done {
                     self.harvest(ctx, x, y, z);
                 }
@@ -79,13 +79,13 @@ impl PlaySession {
         None
     }
 
-    fn dig_input(&self, ctx: &SessionCtx, block_id: i32) -> FfiDigInput {
+    fn dig_input(&self, ctx: &SessionCtx, block_id: i32) -> DigInput {
         let held = self.selected_stack(ctx.world).map(|s| s.item_id).unwrap_or(0);
         let (in_water, on_ground) = match ctx.world.entities.get(self.player) {
             Some(e) => (Self::in_water(ctx.world, self.player), e.body().on_ground),
             None => (false, false),
         };
-        FfiDigInput { block_id, held_item_id: held, in_water, on_ground }
+        DigInput { block_id, held_item_id: held, in_water, on_ground }
     }
 
     /// Break a block (mirrors `harvestBlock` + `removeBlock`): container
@@ -117,7 +117,7 @@ impl PlaySession {
             };
             if let Some(mut s) = slot {
                 if s.item_id > 0 && s.item_id < 32000 {
-                    let kind = alpha_item_tool_kind(s.item_id);
+                    let kind = item_tool_kind(s.item_id);
                     // Java ItemTool.hitBlock 1, ItemSword.hitBlock 2.
                     let wear = if kind == crate::item_data::ItemToolKind::Pickaxe as i32
                         || kind == crate::item_data::ItemToolKind::Spade as i32
@@ -130,7 +130,7 @@ impl PlaySession {
                         0
                     };
                     if wear > 0 {
-                        let max = alpha_item_max_damage(s.item_id);
+                        let max = item_max_damage(s.item_id);
                         crate::inventory::item_stack_damage(&mut s, wear, max);
                         if s.stack_size <= 0 || s.item_damage > max {
                             slot = None;
@@ -166,7 +166,7 @@ impl PlaySession {
                 }
             }
             let held_id = self.selected_stack(ctx.world).map(|s| s.item_id).unwrap_or(0);
-            if alpha_mining_can_harvest(bid as i32, held_id) {
+            if mining_can_harvest(bid as i32, held_id) {
                 ctx.world.drop_block_for(bid, meta, x, y, z);
             }
         }

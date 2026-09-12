@@ -7,9 +7,9 @@ use crate::entity::table::{AnimalKind, LivingBody, MobKind};
 /// objects, stored flat until the tile tick slice needs behavior).
 #[derive(Clone, Copy, Debug)]
 pub enum TileData {
-    Furnace(crate::tile_entity::furnace::FfiFurnaceState),
-    Chest(crate::tile_entity::chest::FfiChestState),
-    Sign(crate::tile_entity::sign::FfiSignState),
+    Furnace(crate::tile_entity::furnace::FurnaceState),
+    Chest(crate::tile_entity::chest::ChestState),
+    Sign(crate::tile_entity::sign::SignState),
 }
 
 /// String id for spill/restore (mirrors `getEntityStringId`).

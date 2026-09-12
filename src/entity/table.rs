@@ -389,9 +389,9 @@ pub struct PlayerEnt {
 /// the C++ null `unique_ptr` slots.
 #[derive(Clone, Debug)]
 pub struct PlayerInventory {
-    pub main: [Option<crate::inventory::FfiItemStack>; 36],
-    pub armor: [Option<crate::inventory::FfiItemStack>; 4],
-    pub crafting: [Option<crate::inventory::FfiItemStack>; 4],
+    pub main: [Option<crate::inventory::ItemStack>; 36],
+    pub armor: [Option<crate::inventory::ItemStack>; 4],
+    pub crafting: [Option<crate::inventory::ItemStack>; 4],
     pub current: i32,
 }
 
@@ -408,7 +408,7 @@ impl Default for PlayerInventory {
 
 impl PlayerInventory {
     /// Held stack (`getCurrentItem`): `None` out of range or empty.
-    pub fn held(&self) -> Option<crate::inventory::FfiItemStack> {
+    pub fn held(&self) -> Option<crate::inventory::ItemStack> {
         if self.current >= 0 && (self.current as usize) < self.main.len() {
             self.main[self.current as usize]
         } else {

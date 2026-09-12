@@ -3,7 +3,7 @@
 //! `NetLoginHandler`), and the play packet dispatch (`NetServerHandler`).
 //! The server tick owns the session set, broadcast, and config.
 //!
-//! Wire protocol bytes mirror `RustPackets.h` field-for-field; inbound
+//! Wire protocol bytes mirror the vanilla Alpha 1.2.6 layout field-for-field; inbound
 //! packets reuse the owned `PacketData` enum from `network.rs`.
 //!
 //! MAP OF THE SESSION MODULE TREE:

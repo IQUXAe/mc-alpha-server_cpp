@@ -2,11 +2,11 @@
 //! Split out of `world.rs`; behavior unchanged.
 
 use crate::entity::ai::{
-     alpha_ai_animal_path_weight, alpha_ai_mob_path_weight, chase_speed, face_run, steer_run,
+     ai_animal_path_weight, ai_mob_path_weight, chase_speed, face_run, steer_run,
      wander_pick,
 };
-use crate::entity::living::{HeadingIo, MoveFeedback, alpha_living_fall_damage, living_heading_run};
-use crate::entity::physics::{PushOut, alpha_entity_push};
+use crate::entity::living::{HeadingIo, MoveFeedback, living_fall_damage, living_heading_run};
+use crate::entity::physics::{PushOut, entity_push};
 use crate::entity::table::{
     AnimalKind, Entity, EntityId, MobKind, mob_attack_reach, mob_burns_in_daylight,
 };
@@ -245,16 +245,16 @@ impl World {
     /// Wander destination (mirrors `pickWanderDestination`) through the
     /// shared [`wander_pick`] kernel. The chunk map and the RNG are
     /// disjoint field borrows, so the closures share the exact selection
-    /// flow with the FFI path.
+    /// flow.
     fn wander_destination(&mut self, rule: WeightRule, base: [i32; 3]) -> Option<[i32; 3]> {
         let rng = &mut self.rng;
         let chunks = &self.chunks;
         let mut next = |bound: i32| rng.next_int_bound(bound);
         let mut weight = |x: i32, y: i32, z: i32| match rule {
             WeightRule::Mob => {
-                alpha_ai_mob_path_weight(World::block_light_in(chunks, x, y, z) as f32 / 15.0)
+                ai_mob_path_weight(World::block_light_in(chunks, x, y, z) as f32 / 15.0)
             }
-            WeightRule::Animal => alpha_ai_animal_path_weight(
+            WeightRule::Animal => ai_animal_path_weight(
                 World::block_id_in(chunks, x, y - 1, z) == GRASS_BLOCK_ID,
                 World::block_light_in(chunks, x, y, z) as f32 / 15.0,
             ),
@@ -263,7 +263,7 @@ impl World {
     }
 
     /// A* over the native chunk map through the shared [`find_path_native`]
-    /// core (liquid/movement answers mirror the C++ pathfinder shims).
+    /// core.
     fn path_points(
         &self,
         start: (f64, f64, f64),
@@ -627,7 +627,7 @@ impl World {
                 None => (self_pos[0], self_pos[2]),
             };
             let mut push = PushOut { dvx1: 0.0, dvz1: 0.0, dvx2: 0.0, dvz2: 0.0 };
-            let ok = alpha_entity_push(ox, oz, sx, sz, true, self_pushable, &mut push);
+            let ok = entity_push(ox, oz, sx, sz, true, self_pushable, &mut push);
             if !ok {
                 continue;
             }
@@ -839,7 +839,7 @@ impl World {
         let in_liquid = self.touching_liquid(id);
         let (strafe, forward) = self.update_mob_ai(id, kind, in_liquid);
         if let Some(dist) = self.move_creature_heading(id, strafe, forward) {
-            let damage = alpha_living_fall_damage(dist);
+            let damage = living_fall_damage(dist);
             if damage > 0 {
                 self.attack_living(id, damage, None);
             }
@@ -863,7 +863,7 @@ impl World {
         let (strafe, forward) = self.update_animal_ai(id, in_liquid);
         if let Some(dist) = self.move_creature_heading(id, strafe, forward) {
             if kind != AnimalKind::Chicken {
-                let damage = alpha_living_fall_damage(dist);
+                let damage = living_fall_damage(dist);
                 if damage > 0 {
                     self.attack_living(id, damage, None);
                 }

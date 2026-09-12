@@ -48,7 +48,6 @@ pub enum BlockType {
     Ore = 14,
 }
 
-#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct AlphaBlockProperties {
     pub hardness: f32,
@@ -216,7 +215,7 @@ static BLOCK_PROPS: [AlphaBlockProperties; 256] = {
     props
 };
 
-pub fn alpha_block_properties_get(id: u32) -> AlphaBlockProperties {
+pub fn block_properties_get(id: u32) -> AlphaBlockProperties {
     if id >= 256 {
         return AIR;
     }

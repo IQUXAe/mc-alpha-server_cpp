@@ -1,7 +1,7 @@
 //! Position/look validation on `PlaySession` (mirrors processMovement).
 //! Split out of `session.rs`; behavior unchanged.
 
-use crate::player::movement::{FfiMovementInput, alpha_movement_validate};
+use crate::player::movement::{MovementInput, movement_validate};
 use crate::session::play::PlaySession;
 use crate::session::{SessionCtx, SessionOutcome};
 
@@ -91,7 +91,7 @@ impl PlaySession {
             let in_water = Self::in_water(ctx.world, me);
             let fall =
                 ctx.world.entities.get(me).map(|e| e.body().fall_distance).unwrap_or(0.0);
-            let input = FfiMovementInput {
+            let input = MovementInput {
                 from_x: bx,
                 from_y: by,
                 from_z: bz,
@@ -103,7 +103,7 @@ impl PlaySession {
                 is_in_water: in_water,
                 fall_distance: fall,
             };
-            let res = alpha_movement_validate(&input);
+            let res = movement_validate(&input);
             if res.fall_damage > 0 {
                 ctx.world.attack_living(me, res.fall_damage, None);
             }
@@ -120,7 +120,7 @@ impl PlaySession {
             .get(me)
             .map(|e| e.body().fall_distance)
             .unwrap_or(0.0);
-        let input = FfiMovementInput {
+        let input = MovementInput {
             from_x: bx,
             from_y: by,
             from_z: bz,
@@ -132,7 +132,7 @@ impl PlaySession {
             is_in_water: in_water,
             fall_distance: fall,
         };
-        let res = alpha_movement_validate(&input);
+        let res = movement_validate(&input);
         match res.status {
             1 => return self.kick("Illegal stance"),
             2 => return self.kick("Illegal position"),
@@ -219,7 +219,7 @@ impl PlaySession {
             self.teleport_to(ctx.world, me, bx, by, bz, final_yaw, final_pitch);
             return None;
         }
-        let fall_input = FfiMovementInput {
+        let fall_input = MovementInput {
             from_x: bx,
             from_y: by,
             from_z: bz,
@@ -233,7 +233,7 @@ impl PlaySession {
             is_in_water: in_water,
             fall_distance: fall2,
         };
-        let fall_res = alpha_movement_validate(&fall_input);
+        let fall_res = movement_validate(&fall_input);
         if fall_res.fall_damage > 0 {
             ctx.world.attack_living(me, fall_res.fall_damage, None);
         }

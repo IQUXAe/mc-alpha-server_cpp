@@ -1,23 +1,20 @@
-//! Port of `src/core/Logger.h` + `src/core/Logger.cpp`.
+//! Simple timestamped logger.
 //!
-//! Levels, filtering and the timestamped format are 1:1 with C++:
-//! `YYYY-MM-DD HH:MM:SS.mmm [PREFIX] message` with prefixes `[D]`,
+//! Format: `YYYY-MM-DD HH:MM:SS.mmm [PREFIX] message` with prefixes `[D]`,
 //! `[INFO]`, `[WARNING]` and `[SEVERE]`. Messages below the static minimum
 //! level (default `INFO`) are dropped, and warnings/errors go to stderr
 //! while the rest goes to stdout.
 //!
-//! Differences: logging is synchronous (the C++ background flusher queue is
-//! omitted as trivial), and the console-line provider is an optional boxed
-//! closure re-printed after each line, without any extra dependencies.
+//! Logging is synchronous, and the console-line provider is an optional boxed
+//! closure re-printed after each line.
 
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::sync::{
     Mutex, OnceLock,
     atomic::{AtomicU8, Ordering},
 };
 
-/// Severity levels, ordered `DEBUG < INFO < WARNING < SEVERE` like the C++
-/// `enum class LogLevel` so `<` filtering matches.
+/// Severity levels, ordered `DEBUG < INFO < WARNING < SEVERE`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum LogLevel {
@@ -28,7 +25,7 @@ pub enum LogLevel {
 }
 
 impl LogLevel {
-    /// Wire prefix used in the formatted line (mirrors `formatMessage`).
+    /// Prefix used in the formatted line.
     pub const fn prefix(self) -> &'static str {
         match self {
             LogLevel::Debug => "[D]",
@@ -98,8 +95,7 @@ fn current_console_line() -> Option<String> {
 }
 
 fn stdout_is_tty() -> bool {
-    // SAFETY: `isatty` takes only an fd and touches no Rust state.
-    (unsafe { libc::isatty(libc::STDOUT_FILENO) }) != 0
+    std::io::stdout().is_terminal()
 }
 
 fn clear_console_line() {
@@ -116,32 +112,42 @@ fn print_console_line() {
     }
 }
 
-/// Local-time stamp in the C++ `put_time` layout `%Y-%m-%d %H:%M:%S.mmm`.
+/// UTC timestamp in `%Y-%m-%d %H:%M:%S.mmm` layout (pure std, no libc).
 fn current_timestamp() -> String {
     let now = std::time::SystemTime::now();
     let since_epoch = match now.duration_since(std::time::UNIX_EPOCH) {
         Ok(elapsed) => elapsed,
         Err(_) => std::time::Duration::ZERO,
     };
-    let secs: libc::time_t = since_epoch.as_secs() as libc::time_t;
+    let secs = since_epoch.as_secs() as i64;
     let millis = since_epoch.subsec_millis();
-    let mut broken = std::mem::MaybeUninit::<libc::tm>::uninit();
-    // SAFETY: `localtime_r` writes exactly one `tm` through the out-pointer
-    // on success; the null check below restricts `assume_init` to that path.
-    let filled = unsafe { libc::localtime_r(&secs, broken.as_mut_ptr()) };
-    if filled.is_null() {
-        return format!("1970-01-01 00:00:00.{millis:03} ");
-    }
-    // SAFETY: non-null `filled` means the `tm` above was fully written.
-    let tm = unsafe { broken.assume_init() };
-    format!(
-        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{millis:03} ",
-        tm.tm_year + 1900,
-        tm.tm_mon + 1,
-        tm.tm_mday,
-        tm.tm_hour,
-        tm.tm_min,
-        tm.tm_sec,
+    let (y, mo, d, h, mi, s) = unix_to_ymd_hms(secs);
+    format!("{y:04}-{mo:02}-{d:02} {h:02}:{mi:02}:{s:02}.{millis:03} ")
+}
+
+/// Convert unix seconds to (y, mo, d, h, mi, s) in UTC.
+/// Days part via Howard Hinnant's civil_from_days; time part by division.
+fn unix_to_ymd_hms(secs: i64) -> (i32, u32, u32, u32, u32, u32) {
+    let days = secs.div_euclid(86400);
+    let secs_of_day = secs.rem_euclid(86400) as u32;
+    // civil_from_days, Howard Hinnant algorithm.
+    let z = days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z.rem_euclid(146097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (
+        y as i32,
+        m as u32,
+        d as u32,
+        secs_of_day / 3600,
+        (secs_of_day % 3600) / 60,
+        secs_of_day % 60,
     )
 }
 
@@ -194,14 +200,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn levels_are_ordered_like_cpp_enum() {
+    fn levels_are_ordered() {
         assert!(LogLevel::Debug < LogLevel::Info);
         assert!(LogLevel::Info < LogLevel::Warning);
         assert!(LogLevel::Warning < LogLevel::Severe);
     }
 
     #[test]
-    fn prefixes_match_cpp_format_message() {
+    fn prefixes_match_format_message() {
         assert_eq!(LogLevel::Debug.prefix(), "[D]");
         assert_eq!(LogLevel::Info.prefix(), "[INFO]");
         assert_eq!(LogLevel::Warning.prefix(), "[WARNING]");

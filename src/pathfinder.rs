@@ -129,7 +129,7 @@ fn get_safe_point(
 /// Shared A* core (mirrors the C++ `Pathfinder` search): cheapest-first
 /// expansion over safe standing points, falling back to the closest reached
 /// point when the target is unreachable. World answers arrive as closures
-/// so the FFI shell and the native world share this exact flow. Empty means
+/// so all callers share this exact flow. Empty means
 /// "no path" (start == end included, like the C++ `nullptr`).
 pub fn find_path_native(
     is_liquid: &dyn Fn(i32, i32, i32) -> bool,

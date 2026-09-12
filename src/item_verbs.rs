@@ -10,14 +10,13 @@
 //! here so the six verbs share one tested source of truth.
 
 use crate::entity::table::Entity;
-use crate::item_use::{alpha_item_furnace_facing, alpha_item_sign_yaw_meta};
+use crate::item_use::{item_furnace_facing, item_sign_yaw_meta};
 use crate::math_helper::{cos, sin};
 use crate::session::play::PlaySession;
 use crate::world::World;
 
 /// Live world access for item verbs: the world plus the session whose
-/// outbox receives tile-entity packets. Built explicitly at each call
-/// site — no thread-local bridge (the old `USE_CTX` shim table is gone).
+/// outbox receives tile-entity packets. Built explicitly at each call site.
 pub struct ItemUseWorld<'a> {
     pub world: &'a mut World,
     pub session: &'a mut PlaySession,
@@ -48,19 +47,17 @@ fn rng_f64(u: &mut ItemUseWorld) -> f64 {
     u.world.rng_next_f64()
 }
 
-/// Collision-box check for cover/placement (mirrors the old
-/// `collidable_box` shim: fluids never collide, the rest follow the
-/// block-type table).
+/// Collision-box check for cover/placement: fluids never collide, the rest
+/// follow the block-type table.
 fn is_collidable(w: &World, x: i32, y: i32, z: i32) -> bool {
     let bid = w.get_block_id(x, y, z);
-    let props = crate::block::table::alpha_block_properties_get(bid as u32);
+    let props = crate::block::table::block_properties_get(bid as u32);
     bid != 0
         && props.block_type != crate::block::table::BlockType::Fluid as u8
         && crate::world::has_collision_box(props.block_type)
 }
 
-/// canBlockStay drivers run straight on the live world now (the old
-/// USE+TICK shim nesting is gone with the bridges).
+/// canBlockStay drivers run straight on the live world.
 fn can_stay(u: &mut ItemUseWorld, id: u8, x: i32, y: i32, z: i32) -> bool {
     let w = &mut *u.world;
     match id {
@@ -78,7 +75,7 @@ fn can_stay(u: &mut ItemUseWorld, id: u8, x: i32, y: i32, z: i32) -> bool {
 /// Placement volume check (mirrors `isPlacementVolumeClear`): no live
 /// boat/living intersecting the target box.
 fn placement_clear(u: &mut ItemUseWorld, id: u8, x: i32, y: i32, z: i32) -> bool {
-    let props = crate::block::table::alpha_block_properties_get(id as u32);
+    let props = crate::block::table::block_properties_get(id as u32);
     if !crate::world::has_collision_box(props.block_type) {
         return true;
     }
@@ -119,7 +116,7 @@ fn torch_placed(u: &mut ItemUseWorld, id: u8, x: i32, y: i32, z: i32, side: i32)
     w.set_block_meta(x, y, z, meta);
 }
 
-/// Loose-item spawn with motion (mirrors the old `spawn_item` shim).
+/// Loose-item spawn with motion.
 fn spawn_drop(
     u: &mut ItemUseWorld,
     item_id: i32,
@@ -145,8 +142,7 @@ fn send_te(u: &mut ItemUseWorld, x: i32, y: i32, z: i32) {
     }
 }
 
-/// Liquid-aware raycast with out-params (mirrors the old shim over
-/// `World::ray_trace_hit_liquids`).
+/// Liquid-aware raycast over `World::ray_trace_hit_liquids`.
 fn ray_hit(
     u: &mut ItemUseWorld,
     sx: f64,
@@ -220,7 +216,6 @@ pub fn item_seeds_use(w: &mut ItemUseWorld, x: i32, y: i32, z: i32, side: i32) -
 
 /// Flint and steel (mirrors `ItemFlintAndSteel::onItemUse`). On success
 /// writes the new damage; `broke` tells C++ to zero the stack.
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct FlintOut {
     pub placed: bool,
@@ -290,7 +285,7 @@ pub fn item_sign_use(
         return false;
     }
     if side == 1 {
-        let meta = alpha_item_sign_yaw_meta(yaw);
+        let meta = item_sign_yaw_meta(yaw);
         let ok = w.world.apply_set_meta_notify(tx, ty, tz, 63, meta);
         if !ok {
             return false;
@@ -345,7 +340,7 @@ pub fn item_block_use(
         return false;
     }
     if block_id == 61 || block_id == 62 {
-        let meta = alpha_item_furnace_facing(yaw);
+        let meta = item_furnace_facing(yaw);
         w.world.set_block_meta(tx, ty, tz, meta);
     }
     torch_placed(w, block_id, tx, ty, tz, side);
@@ -354,7 +349,6 @@ pub fn item_block_use(
 
 /// Boat look vector + eye start (mirrors `ItemBoat::onItemRightClick`
 /// interpolation with `partialTick = 1.0`, then the 5-block ray).
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct BoatThrow {
     pub lx: f64,

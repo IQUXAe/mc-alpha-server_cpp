@@ -205,7 +205,7 @@ mod tests {
     fn tmp_path(name: &str) -> PathBuf {
         let id = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!(
-            "alpha_server_{}_{}_{}.properties",
+            "server_{}_{}_{}.properties",
             name,
             std::process::id(),
             id

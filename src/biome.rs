@@ -17,7 +17,6 @@ pub enum BiomeType {
     Hell = 11,
 }
 
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct MobSpawnerBase {
     pub biome_type: BiomeType,

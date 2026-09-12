@@ -14,7 +14,6 @@ use crate::math_helper::{cos, sin};
 
 /// Result of one damage event. C++ applies fields, motion, the hurt status
 /// packet, and `onDeath` from these flags.
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct AttackResult {
     pub health: i16,
@@ -31,7 +30,7 @@ pub struct AttackResult {
 }
 
 /// Pure heal (mirrors `EntityLiving::heal`).
-pub fn alpha_living_heal(health: i16, max_health: i16, amount: i32, dead: bool) -> i16 {
+pub fn living_heal(health: i16, max_health: i16, amount: i32, dead: bool) -> i16 {
     if amount <= 0 || dead || health <= 0 {
         return health;
     }
@@ -137,7 +136,7 @@ pub fn living_attack_run(input: &AttackInput, next_f01: &mut dyn FnMut() -> f64)
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn alpha_living_attack(
+pub fn living_attack(
     next_f01: Option<fn() -> f64>,
     health: i16,
     hurt_resist: i32,
@@ -187,7 +186,6 @@ pub fn alpha_living_attack(
 
 /// Per-tick living state (mirrors `EntityLiving::tick` minus the virtual
 /// calls, which C++ fires from the flags).
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct LivingTick {
     pub air: i32,
@@ -198,7 +196,7 @@ pub struct LivingTick {
     pub drown: bool,
 }
 
-pub fn alpha_living_tick(
+pub fn living_tick(
     alive: bool,
     inside_opaque: bool,
     in_water: bool,
@@ -236,7 +234,7 @@ pub fn alpha_living_tick(
 
 /// Fall-damage amount for living entities (mirrors `EntityLiving::onFall`;
 // the `ceil(distance - 3)` Java formula). Zero means no damage.
-pub fn alpha_living_fall_damage(distance: f32) -> i32 {
+pub fn living_fall_damage(distance: f32) -> i32 {
     let damage = (distance - 3.0f32).ceil() as i32;
     if damage > 0 {
         damage
@@ -245,15 +243,14 @@ pub fn alpha_living_fall_damage(distance: f32) -> i32 {
     }
 }
 
-/// Steering delta produced by `fly_apply` (internal; crosses no FFI).
+/// Steering delta produced by `fly_apply`.
 #[derive(Clone, Copy, Debug)]
 struct FlyOut {
     dmx: f32,
     dmz: f32,
 }
 
-/// World access for the heading driver. `do_move` runs C++ `moveEntity`/// and reports the post-move ground/contact state plus position.
-#[repr(C)]
+/// World access for the heading driver. `do_move` moves and reports the post-move ground/contact state plus position.
 #[derive(Clone, Copy, Debug)]
 pub struct MoveFeedback {
     pub on_ground: bool,
@@ -262,7 +259,6 @@ pub struct MoveFeedback {
     pub pos_y: f64,
 }
 
-#[repr(C)]
 pub struct HeadingWorld {
     pub touching_liquid: Option<fn() -> bool>,
     pub on_ladder: Option<fn() -> bool>,
@@ -271,7 +267,6 @@ pub struct HeadingWorld {
 
 /// Full heading integration (mirrors `EntityLiving::moveEntityWithHeading`).
 /// Motion/fall state round-trips through `io`; exactly one `do_move` fires.
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct HeadingIo {
     pub motion_x: f64,
@@ -281,8 +276,7 @@ pub struct HeadingIo {
 }
 
 /// Shared heading core (mirrors `EntityLiving::moveEntityWithHeading`).
-/// World answers arrive as closures so both the FFI shell and the native
-/// world use this exact flow. Returns false when the move itself fails.
+/// World answers arrive as closures. Returns false when the move itself fails.
 ///
 /// Java reference (`EntityLiving.java:425-480`):
 /// - water branch: accel 0.02, damping 0.8, gravity -0.02;
@@ -367,7 +361,7 @@ pub fn living_heading_run(
     true
 }
 
-pub fn alpha_living_heading(
+pub fn living_heading(
     world: &HeadingWorld,
     strafe: f32,
     forward: f32,
@@ -384,7 +378,7 @@ pub fn alpha_living_heading(
         return false;
     };
     let mut mover = |dx: f64, dy: f64, dz: f64, fb: &mut MoveFeedback| do_move(dx, dy, dz, fb);
-    // FFI shell has no lava/friction context: assume water + default ground.
+    // No lava/friction context here: assume water + default ground.
     living_heading_run(strafe, forward, jumping, on_ground, yaw, io, liquid, false, 0.6, &mut ladder, &mut mover)
 }
 
@@ -433,7 +427,7 @@ mod tests {
             send_status: false,
             died: false,
         };
-        let ok = alpha_living_attack(
+        let ok = living_attack(
             None,
             health,
             resist,
@@ -458,11 +452,11 @@ mod tests {
 
     #[test]
     fn test_heal_clamps_and_guards() {
-        assert_eq!(alpha_living_heal(10, 20, 5, false), 15);
-        assert_eq!(alpha_living_heal(18, 20, 5, false), 20);
-        assert_eq!(alpha_living_heal(10, 20, 0, false), 10);
-        assert_eq!(alpha_living_heal(0, 20, 5, false), 0);
-        assert_eq!(alpha_living_heal(10, 20, 5, true), 10);
+        assert_eq!(living_heal(10, 20, 5, false), 15);
+        assert_eq!(living_heal(18, 20, 5, false), 20);
+        assert_eq!(living_heal(10, 20, 0, false), 10);
+        assert_eq!(living_heal(0, 20, 5, false), 0);
+        assert_eq!(living_heal(10, 20, 5, true), 10);
     }
 
     #[test]
@@ -513,28 +507,28 @@ mod tests {
     #[test]
     fn test_tick_timers_and_drown() {
         // Dry tick only decays timers.
-        let t = alpha_living_tick(true, false, false, 123, 5, 3, 9);
+        let t = living_tick(true, false, false, 123, 5, 3, 9);
         assert_eq!((t.air, t.hurt_time, t.attack_time, t.hurt_resist), (300, 4, 2, 8));
         assert!(!t.suffocate && !t.drown);
         // Suffocation flag.
-        let t = alpha_living_tick(true, true, false, 300, 0, 0, 0);
+        let t = living_tick(true, true, false, 300, 0, 0, 0);
         assert!(t.suffocate);
         // Drowning at the limit resets air and flags damage.
-        let t = alpha_living_tick(true, false, true, -19, 0, 0, 0);
+        let t = living_tick(true, false, true, -19, 0, 0, 0);
         assert_eq!(t.air, 0);
         assert!(t.drown);
         // Dead entity: timers still decay, no damage flags.
-        let t = alpha_living_tick(false, true, true, 10, 2, 2, 2);
+        let t = living_tick(false, true, true, 10, 2, 2, 2);
         assert!(!t.suffocate && !t.drown);
         assert_eq!((t.hurt_time, t.attack_time, t.hurt_resist), (1, 1, 1));
     }
 
     #[test]
     fn test_fall_damage_table() {
-        assert_eq!(alpha_living_fall_damage(2.9), 0);
-        assert_eq!(alpha_living_fall_damage(3.0), 0);
-        assert_eq!(alpha_living_fall_damage(3.5), 1);
-        assert_eq!(alpha_living_fall_damage(10.0), 7);
+        assert_eq!(living_fall_damage(2.9), 0);
+        assert_eq!(living_fall_damage(3.0), 0);
+        assert_eq!(living_fall_damage(3.5), 1);
+        assert_eq!(living_fall_damage(10.0), 7);
     }
 
     #[test]

@@ -1,18 +1,17 @@
 pub const SIGN_LINES: usize = 4;
 
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct FfiSignState {
+pub struct SignState {
     pub lines: [[u8; 16]; SIGN_LINES],
 }
 
-pub fn sign_create() -> FfiSignState {
-    FfiSignState {
+pub fn sign_create() -> SignState {
+    SignState {
         lines: [[0u8; 16]; SIGN_LINES],
     }
 }
 
-pub fn sign_set_line(state: &mut FfiSignState, line: i32, text: &str) {
+pub fn sign_set_line(state: &mut SignState, line: i32, text: &str) {
     if line < 0 || line as usize >= SIGN_LINES {
         return;
     }

@@ -1,25 +1,10 @@
 use crate::random::JavaRandom;
 use crate::noise::{NoiseGeneratorOctaves, NoiseGeneratorOctaves2};
-use crate::biome::{MobSpawnerBase, get_biome_from_lookup};
+use crate::biome::{BiomeType, MobSpawnerBase, get_biome_from_lookup};
 use crate::caves::MapGenCaves;
-use crate::decorators::{BlockAccess, CanvasAccess, alpha_decorate_chunk};
+use crate::decorators::{BlockAccess, CanvasAccess, decorate_chunk};
 
-
-#[repr(C)]
-pub struct RustChunkData {
-    pub blocks: *mut u8,
-    pub metadata: *mut u8,
-    pub x: i32,
-    pub z: i32,
-}
-
-#[repr(C)]
-pub struct RustChunkDataBatch {
-    pub chunks: [RustChunkData; 4],
-}
-
-
-pub struct RustChunkProviderGenerate {
+pub struct ChunkProvider {
     pub world_seed: i64,
     pub min_noise: Box<NoiseGeneratorOctaves>,
     pub max_noise: Box<NoiseGeneratorOctaves>,
@@ -36,7 +21,7 @@ pub struct RustChunkProviderGenerate {
     pub noise_gen3: Box<NoiseGeneratorOctaves2>,
 }
 
-impl RustChunkProviderGenerate {
+impl ChunkProvider {
     pub fn new(seed: i64) -> Self {
         let mut rand = JavaRandom::new(seed);
         let min_noise = Box::new(NoiseGeneratorOctaves::new(&mut rand, 16));
@@ -75,7 +60,7 @@ impl RustChunkProviderGenerate {
 /// The noise tables are pure in coordinates, so populate-time queries
 /// below evaluate bit-identical values at identical points.
 pub fn climate_into(
-    gen: &RustChunkProviderGenerate,
+    gen: &ChunkProvider,
     x0: i32,
     z0: i32,
     w: usize,
@@ -123,7 +108,7 @@ pub fn climate_into(
 /// evaluated at an arbitrary origin. Populate samples snow temperatures
 /// at `(var4 + 8, var5 + 8)`, reaching 8 blocks past the chunk corner.
 pub fn chunk_temperatures(
-    gen: &RustChunkProviderGenerate,
+    gen: &ChunkProvider,
     x0: i32,
     z0: i32,
     out: &mut [f64; 256],
@@ -142,7 +127,7 @@ pub fn chunk_temperatures(
 /// Single-point biome (mirrors `WorldChunkManager.func_4067_a`).
 /// Populate samples one biome for the whole chunk at its far corner
 /// `(var4 + 16, var5 + 16)`, not the center.
-pub fn point_biome(gen: &RustChunkProviderGenerate, x: i32, z: i32) -> MobSpawnerBase {
+pub fn point_biome(gen: &ChunkProvider, x: i32, z: i32) -> MobSpawnerBase {
     let mut biomes = [MobSpawnerBase::DEFAULT; 1];
     let mut temps = [0.0f64; 1];
     let mut humids = [0.0f64; 1];
@@ -150,8 +135,8 @@ pub fn point_biome(gen: &RustChunkProviderGenerate, x: i32, z: i32) -> MobSpawne
     biomes[0]
 }
 
-pub fn rust_chunk_provider_generate_chunk(
-    gen: &mut RustChunkProviderGenerate,
+pub fn generate_chunk(
+    gen: &mut ChunkProvider,
     chunk_x: i32,
     chunk_z: i32,
     blocks: &mut [u8; 32768],
@@ -177,7 +162,7 @@ pub fn rust_chunk_provider_generate_chunk(
     let var10 = var6 + 1;
 
     let mut density_field = vec![0.0; (var8 * var9 * var10) as usize];
-    crate::density::alpha_density_generate_field(
+    crate::density::density_generate_field(
         &mut density_field,
         chunk_x * var6,
         0,
@@ -324,43 +309,26 @@ pub fn rust_chunk_provider_generate_chunk(
     gen_caves.generate(gen.world_seed, chunk_x, chunk_z, blocks);
 }
 
-pub fn rust_chunk_provider_populate_batch(
-    generator: &mut RustChunkProviderGenerate,
-    batch: &RustChunkDataBatch,
+pub fn populate_batch(
+    generator: &mut ChunkProvider,
+    stage_blocks: &mut [[[u8; 32768]; 2]; 2],
+    stage_meta: &mut [[[u8; 32768]; 2]; 2],
     fallback: &mut dyn BlockAccess,
     chunk_x: i32,
     chunk_z: i32,
-    biome_type_raw: i32,
+    biome: BiomeType,
     temperatures: &[f64],
 ) -> Vec<(i32, i32, i32, i32, i32, i32)> {
-    // Canvas over the 2x2 batch arrays with the live world behind it
-    // (explicit borrows instead of the old thread-local state).
-    let mut canvas = CanvasAccess::new(
-        [
-            batch.chunks[0].blocks,
-            batch.chunks[1].blocks,
-            batch.chunks[2].blocks,
-            batch.chunks[3].blocks,
-        ],
-        [
-            batch.chunks[0].metadata,
-            batch.chunks[1].metadata,
-            batch.chunks[2].metadata,
-            batch.chunks[3].metadata,
-        ],
-        chunk_x,
-        chunk_z,
-        fallback,
-    );
+    let mut canvas = CanvasAccess::new(stage_blocks, stage_meta, chunk_x, chunk_z, fallback);
 
     // Call the existing decorator logic, then hand the queued
     // dungeon-chest loot back (the canvas holds no tiles).
-    alpha_decorate_chunk(
+    decorate_chunk(
         &mut canvas,
         generator.world_seed,
         chunk_x,
         chunk_z,
-        biome_type_raw,
+        biome,
         &mut generator.tree_noise,
         temperatures,
     );
@@ -377,13 +345,13 @@ mod tests {
         // with the terrain temperature slice on their 8x8 overlap, and
         // the corner biome must match the neighbor chunk's cell (0,0):
         // all three evaluate the same noise at the same coordinates.
-        let mut gen = RustChunkProviderGenerate::new(12345);
+        let mut gen = ChunkProvider::new(12345);
         let (cx, cz) = (3, -2);
         let mut blocks = [0u8; 32768];
         let mut biomes = [MobSpawnerBase::DEFAULT; 256];
         let mut temps = [0.0f64; 256];
         let mut humids = [0.0f64; 256];
-        rust_chunk_provider_generate_chunk(&mut gen, cx, cz, &mut blocks, &mut biomes, &mut temps, &mut humids);
+        generate_chunk(&mut gen, cx, cz, &mut blocks, &mut biomes, &mut temps, &mut humids);
 
         let mut snow = [0.0f64; 256];
         chunk_temperatures(&gen, cx * 16 + 8, cz * 16 + 8, &mut snow);

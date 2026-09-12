@@ -30,7 +30,7 @@ pub mod tiles;
 
 use std::collections::{BTreeMap, HashMap};
 use crate::aabb::AxisAlignedBB;
-use crate::block::table::{BlockMaterial, BlockType, alpha_block_properties_get};
+use crate::block::table::{BlockMaterial, BlockType, block_properties_get};
 use crate::chunk::Chunk;
 use crate::entity::table::{EntityId, EntityTable};
 use crate::material::Material;
@@ -71,7 +71,7 @@ pub(crate) fn has_collision_id(bid: u8) -> bool {
 /// materials like circuits would alias `Material::AIR` — compare the
 /// material id byte instead).
 pub(crate) fn is_air_material(bid: u8) -> bool {
-    alpha_block_properties_get(bid as u32).material == BlockMaterial::Air as u8
+    block_properties_get(bid as u32).material == BlockMaterial::Air as u8
 }
 
 /// Material for a block-table material id (mirrors `materialFromId`).
@@ -168,7 +168,7 @@ pub struct World {
     pub(crate) populating: bool,
     /// Terrain generator, built lazily (eleven octave tables; tests that
     /// never generate pay nothing; skipped in `Debug` dumps).
-    pub(crate) generator: Option<crate::generator::RustChunkProviderGenerate>,
+    pub(crate) generator: Option<crate::generator::ChunkProvider>,
     pub(crate) chunks: HashMap<(i32, i32), Chunk>,
     pub entities: EntityTable,
     pub tracker: Tracker,
@@ -405,7 +405,7 @@ impl World {
         if id == 0 {
             return Material::AIR;
         }
-        material_of(alpha_block_properties_get(id as u32).material)
+        material_of(block_properties_get(id as u32).material)
     }
 
     pub fn is_solid(&self, x: i32, y: i32, z: i32) -> bool {
@@ -478,7 +478,7 @@ impl World {
                     if id == 0 {
                         continue;
                     }
-                    let props = alpha_block_properties_get(id as u32);
+                    let props = block_properties_get(id as u32);
                     if !has_collision_box(props.block_type) || !has_collision_id(id) {
                         continue;
                     }
@@ -527,7 +527,7 @@ pub fn is_replaceable(block_id: u8) -> bool {
         return false;
     }
     matches!(
-        alpha_block_properties_get(block_id as u32).block_type,
+        block_properties_get(block_id as u32).block_type,
         x if x == BlockType::Flower as u8
             || x == BlockType::TallGrass as u8
             || x == BlockType::Torch as u8

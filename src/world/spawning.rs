@@ -1,6 +1,6 @@
 //! Spawn fitness, hostile/passive spawn passes and the world tick.
 //! Split out of `world.rs`; behavior unchanged. `World` implements the
-//! `mob_spawning::SpawnerWorld` trait directly (explicit borrows, no bridge).
+//! `mob_spawning::SpawnerWorld` trait directly with explicit borrows.
 //!
 
 use crate::entity::table::{AnimalKind, Entity, EntityId, MobKind};
@@ -166,7 +166,7 @@ impl World {
         let (px, py, pz) = self.spawn_anchors();
         let count = self.entities.count_mobs() as i32;
         let (sx, sy, sz) = (self.spawn[0], self.spawn[1], self.spawn[2]);
-        crate::mob_spawning::rust_world_spawn_hostile(
+        crate::mob_spawning::spawn_hostile(
             self, &px, &py, &pz, count, sx, sy, sz, WORLD_HEIGHT,
         )
     }
@@ -179,7 +179,7 @@ impl World {
         let (px, py, pz) = self.spawn_anchors();
         let count = self.entities.count_animals() as i32;
         let (sx, sy, sz) = (self.spawn[0], self.spawn[1], self.spawn[2]);
-        crate::mob_spawning::rust_world_spawn_passive(
+        crate::mob_spawning::spawn_passive(
             self, &px, &py, &pz, count, sx, sy, sz, WORLD_HEIGHT,
         )
     }
@@ -235,7 +235,7 @@ impl World {
                 };
                 let rem = self.player_add_item(
                     *pid,
-                    crate::inventory::FfiItemStack {
+                    crate::inventory::ItemStack {
                         stack_size: count,
                         animations_to_go: 0,
                         item_id,

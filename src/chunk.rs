@@ -7,7 +7,7 @@
 //!   reuse [`crate::nibble::NibbleArray`] (16384 bytes each, 1:1 nibble layout).
 //! - `height_map` is an owned `[u8; 256]`, indexed `(z << 4) | x` like C++.
 //! - `lightOpacity` / `lightValue` are NOT duplicated here: they are read from
-//!   [`crate::block`] via `alpha_block_properties_get` (single source of truth).
+//!   [`crate::block`] via `block_properties_get` (single source of truth).
 //! - Out-of-range policy: reads return `0`, writes are no-ops returning
 //!   `false` where the C++ signature returns `bool`. This mirrors the safe
 //!   `nibble.rs` behaviour. Note the C++ `setBlockID` family performs no
@@ -26,7 +26,7 @@
 //!   `TestChunk.cpp` — it is skipped, same as here where the caller decides)
 //! - `isTerrainPopulated` is stored but never acted on (needs generator).
 
-use crate::block::table::alpha_block_properties_get;
+use crate::block::table::block_properties_get;
 use crate::nibble::NibbleArray;
 use std::collections::VecDeque;
 
@@ -48,11 +48,11 @@ pub const SKY_LIGHT: i32 = 0;
 pub const BLOCK_LIGHT: i32 = 1;
 
 fn light_opacity(id: u8) -> i32 {
-    alpha_block_properties_get(u32::from(id)).light_opacity
+    block_properties_get(u32::from(id)).light_opacity
 }
 
 fn light_value(id: u8) -> i32 {
-    alpha_block_properties_get(u32::from(id)).light_value
+    block_properties_get(u32::from(id)).light_value
 }
 
 fn is_transparent(id: u8) -> bool {
@@ -382,7 +382,7 @@ impl Chunk {
     }
 
     /// zlib-compressed map payload at level 1 (mirrors the
-    /// `RustBridge::zlibCompress(rawData, 1)` tail of `getChunkData`;
+    /// Compressed tail of chunk data;
     /// empty on I/O failure like the other codecs here).
     pub fn map_compressed(&self) -> Vec<u8> {
         use std::io::Read;
@@ -909,7 +909,7 @@ mod tests {
     // ---- Packet51 map payload (mirrors Chunk::getChunkData) ----
 
     #[test]
-    fn map_raw_layout_matches_cpp_copy_order() {
+    fn map_raw_layout_order() {
         let mut chunk = Chunk::new(0, 0);
         // (0,0,0) -> flat index 0, meta low nibble of byte 0.
         chunk.set_block_id_with_metadata(0, 0, 0, 7, 0xA);

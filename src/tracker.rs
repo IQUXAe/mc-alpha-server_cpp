@@ -16,10 +16,10 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::entity::table::{Entity, EntityId, MobKind, NO_ENTITY, animal_type_id, mob_type_id};
-use crate::network::{RustPacket, encode_packet};
+use crate::network::{Packet, encode_packet};
 use crate::tracker_math::{
-    alpha_tracker_encode_pos, alpha_tracker_encode_rot, alpha_tracker_encode_rot_spawn,
-    alpha_tracker_in_range, alpha_tracker_move_kind, alpha_tracker_velocity_changed,
+    tracker_encode_pos, tracker_encode_rot, tracker_encode_rot_spawn,
+    tracker_in_range, tracker_move_kind, tracker_velocity_changed,
 };
 
 /// Tracked kind with the fields its spawn packet needs.
@@ -174,17 +174,17 @@ struct Entry {
 impl Entry {
     fn new(e: &TrackedEntity) -> Self {
         let (fx, fy, fz) = (
-            alpha_tracker_encode_pos(e.pos[0]),
-            alpha_tracker_encode_pos(e.pos[1]),
-            alpha_tracker_encode_pos(e.pos[2]),
+            tracker_encode_pos(e.pos[0]),
+            tracker_encode_pos(e.pos[1]),
+            tracker_encode_pos(e.pos[2]),
         );
         Entry {
             range: e.range,
             rate: e.rate.max(1),
             send_velocity: e.send_velocity,
             last_fixed: [fx, fy, fz],
-            last_yaw: alpha_tracker_encode_rot(e.yaw),
-            last_pitch: alpha_tracker_encode_rot(e.pitch),
+            last_yaw: tracker_encode_rot(e.yaw),
+            last_pitch: tracker_encode_rot(e.pitch),
             last_held: 0,
             last_sneaking: false,
             last_burning: false,
@@ -197,16 +197,16 @@ impl Entry {
     }
 }
 
-fn encode(pkt: RustPacket) -> Vec<u8> {
+fn encode(pkt: Packet) -> Vec<u8> {
     let mut buf = Vec::new();
     encode_packet(&pkt, &mut buf);
     buf
 }
 
 fn encode_velocity(id: EntityId, m: [f64; 3]) -> Vec<u8> {
-    // Mirrors RustPackets::velocity: clamp to ±3.9, scale by 8000.
+    // Vanilla velocity: clamp to ±3.9, scale by 8000.
     let enc = |v: f64| (v.clamp(-3.9, 3.9) * 8000.0) as i16;
-    encode(RustPacket::EntityVelocity {
+    encode(Packet::EntityVelocity {
         entity_id: id,
         motion_x: enc(m[0]),
         motion_y: enc(m[1]),
@@ -215,14 +215,14 @@ fn encode_velocity(id: EntityId, m: [f64; 3]) -> Vec<u8> {
 }
 
 fn encode_spawn(e: &TrackedEntity) -> Vec<u8> {
-    let fx = alpha_tracker_encode_pos(e.pos[0]);
-    let fy = alpha_tracker_encode_pos(e.pos[1]);
-    let fz = alpha_tracker_encode_pos(e.pos[2]);
+    let fx = tracker_encode_pos(e.pos[0]);
+    let fy = tracker_encode_pos(e.pos[1]);
+    let fz = tracker_encode_pos(e.pos[2]);
     // Spawn packets use truncating (int) cast (Packet20/24), not floor.
-    let yaw = alpha_tracker_encode_rot_spawn(e.yaw);
-    let pitch = alpha_tracker_encode_rot_spawn(e.pitch);
+    let yaw = tracker_encode_rot_spawn(e.yaw);
+    let pitch = tracker_encode_rot_spawn(e.pitch);
     match &e.kind {
-        TrackKind::Player { username, held } => encode(RustPacket::NamedEntitySpawn {
+        TrackKind::Player { username, held } => encode(Packet::NamedEntitySpawn {
             entity_id: e.id,
             username: username.clone(),
             x: fx,
@@ -232,7 +232,7 @@ fn encode_spawn(e: &TrackedEntity) -> Vec<u8> {
             pitch,
             current_item: *held,
         }),
-        TrackKind::Item { item_id, count } => encode(RustPacket::PickupSpawn {
+        TrackKind::Item { item_id, count } => encode(Packet::PickupSpawn {
             entity_id: e.id,
             item_id: *item_id,
             count: *count,
@@ -243,21 +243,21 @@ fn encode_spawn(e: &TrackedEntity) -> Vec<u8> {
             pitch: 0,
             roll: 0,
         }),
-        TrackKind::Arrow => encode(RustPacket::VehicleSpawn {
+        TrackKind::Arrow => encode(Packet::VehicleSpawn {
             entity_id: e.id,
             vehicle_type: 60,
             x: fx,
             y: fy,
             z: fz,
         }),
-        TrackKind::Boat => encode(RustPacket::VehicleSpawn {
+        TrackKind::Boat => encode(Packet::VehicleSpawn {
             entity_id: e.id,
             vehicle_type: 1,
             x: fx,
             y: fy,
             z: fz,
         }),
-        TrackKind::Mob { mob_type } => encode(RustPacket::MobSpawn {
+        TrackKind::Mob { mob_type } => encode(Packet::MobSpawn {
             entity_id: e.id,
             mob_type: *mob_type,
             x: fx,
@@ -288,7 +288,7 @@ impl Tracker {
     /// Remove an entry, emitting destroy packets to current watchers.
     pub fn remove(&mut self, id: EntityId, out: &mut Vec<Outbox>) {
         if let Some(entry) = self.entries.remove(&id) {
-            let bytes = encode(RustPacket::DestroyEntity { entity_id: id });
+            let bytes = encode(Packet::DestroyEntity { entity_id: id });
             for watcher in entry.tracking {
                 out.push(Outbox { to: watcher, bytes: bytes.clone() });
             }
@@ -317,7 +317,7 @@ impl Tracker {
         if e.riding >= 0 {
             out.push(Outbox {
                 to: player,
-                bytes: encode(RustPacket::AttachEntity { entity_id: id, vehicle_id: e.riding }),
+                bytes: encode(Packet::AttachEntity { entity_id: id, vehicle_id: e.riding }),
             });
         }
         if e.send_velocity && (e.motion[0] != 0.0 || e.motion[1] != 0.0 || e.motion[2] != 0.0) {
@@ -326,23 +326,23 @@ impl Tracker {
         if e.sneaking {
             out.push(Outbox {
                 to: player,
-                bytes: encode(RustPacket::ArmAnimation { entity_id: id, animate: 104 }),
+                bytes: encode(Packet::ArmAnimation { entity_id: id, animate: 104 }),
             });
         }
         if e.fire_ticks > 0 {
             out.push(Outbox {
                 to: player,
-                bytes: encode(RustPacket::ArmAnimation { entity_id: id, animate: 102 }),
+                bytes: encode(Packet::ArmAnimation { entity_id: id, animate: 102 }),
             });
         }
         if let Some(entry) = self.entries.get_mut(&id) {
             entry.last_fixed = [
-                alpha_tracker_encode_pos(e.pos[0]),
-                alpha_tracker_encode_pos(e.pos[1]),
-                alpha_tracker_encode_pos(e.pos[2]),
+                tracker_encode_pos(e.pos[0]),
+                tracker_encode_pos(e.pos[1]),
+                tracker_encode_pos(e.pos[2]),
             ];
-            entry.last_yaw = alpha_tracker_encode_rot(e.yaw);
-            entry.last_pitch = alpha_tracker_encode_rot(e.pitch);
+            entry.last_yaw = tracker_encode_rot(e.yaw);
+            entry.last_pitch = tracker_encode_rot(e.pitch);
             if let Some(h) = e.health {
                 entry.last_health = h;
             }
@@ -369,7 +369,7 @@ impl Tracker {
     /// itself get `Packet22Collect`, so the client plays `random.pop`,
     /// flies the item to the player and removes it.
     pub fn collect_fx(&self, item_id: EntityId, picker_id: EntityId, out: &mut Vec<Outbox>) {
-        let bytes = encode(RustPacket::Collect { collected_id: item_id, collector_id: picker_id });
+        let bytes = encode(Packet::Collect { collected_id: item_id, collector_id: picker_id });
         self.send_to_watchers(item_id, bytes.clone(), out);
         if !self.is_tracking(item_id, picker_id) {
             out.push(Outbox { to: picker_id, bytes });
@@ -379,13 +379,13 @@ impl Tracker {
     /// Death animation (mirrors the `Packet38` status-3 broadcast in
     /// `EntityLiving.onDeath` via `WorldServer.func_9206_a`).
     pub fn death_fx(&self, id: EntityId, out: &mut Vec<Outbox>) {
-        let bytes = encode(RustPacket::EntityStatus { entity_id: id, status: 3 });
+        let bytes = encode(Packet::EntityStatus { entity_id: id, status: 3 });
         self.send_to_watchers(id, bytes, out);
     }
 
     /// Generic status broadcast (creeper 4/5, etc.).
     pub fn status_fx(&self, id: EntityId, status: i8, out: &mut Vec<Outbox>) {
-        let bytes = encode(RustPacket::EntityStatus { entity_id: id, status });
+        let bytes = encode(Packet::EntityStatus { entity_id: id, status });
         self.send_to_watchers(id, bytes, out);
     }
 
@@ -409,12 +409,12 @@ impl Tracker {
             if !o.alive {
                 continue;
             }
-            let in_range = alpha_tracker_in_range(o.pos[0], o.pos[2], self.entries[&e.id].last_fixed[0], self.entries[&e.id].last_fixed[2], self.entries[&e.id].range);
+            let in_range = tracker_in_range(o.pos[0], o.pos[2], self.entries[&e.id].last_fixed[0], self.entries[&e.id].last_fixed[2], self.entries[&e.id].range);
             let seen = chunk_visible(o.id, e.id);
             let already = watching.contains(&o.id);
             if in_range && seen && !already && o.id != e.id {
                 fresh.push(o.id);
-            } else if ((!in_range || !seen) && already) {
+            } else if (!in_range || !seen) && already {
                 gone.push(o.id);
             }
         }
@@ -430,7 +430,7 @@ impl Tracker {
             }
             out.push(Outbox {
                 to: pid,
-                bytes: encode(RustPacket::DestroyEntity { entity_id: e.id }),
+                bytes: encode(Packet::DestroyEntity { entity_id: e.id }),
             });
         }
 
@@ -443,18 +443,18 @@ impl Tracker {
         if (entry.tick - 1) % (entry.rate as u64) != 0 {
             return;
         }
-        let fx = alpha_tracker_encode_pos(e.pos[0]);
-        let fy = alpha_tracker_encode_pos(e.pos[1]);
-        let fz = alpha_tracker_encode_pos(e.pos[2]);
-        let yaw = alpha_tracker_encode_rot(e.yaw);
-        let pitch = alpha_tracker_encode_rot(e.pitch);
+        let fx = tracker_encode_pos(e.pos[0]);
+        let fy = tracker_encode_pos(e.pos[1]);
+        let fz = tracker_encode_pos(e.pos[2]);
+        let yaw = tracker_encode_rot(e.yaw);
+        let pitch = tracker_encode_rot(e.pitch);
         let dx = fx - entry.last_fixed[0];
         let dy = fy - entry.last_fixed[1];
         let dz = fz - entry.last_fixed[2];
         let moved = dx != 0 || dy != 0 || dz != 0;
         let turned = yaw != entry.last_yaw || pitch != entry.last_pitch;
 
-        if alpha_tracker_velocity_changed(
+        if tracker_velocity_changed(
             e.motion[0], e.motion[1], e.motion[2],
             entry.last_motion[0], entry.last_motion[1], entry.last_motion[2],
             entry.send_velocity,
@@ -465,9 +465,9 @@ impl Tracker {
             self.send_to_watchers(e.id, bytes, out);
         }
 
-        let kind = alpha_tracker_move_kind(dx, dy, dz, moved, turned);
+        let kind = tracker_move_kind(dx, dy, dz, moved, turned);
         let move_bytes = match kind {
-            3 => encode(RustPacket::RelEntityMoveLook {
+            3 => encode(Packet::RelEntityMoveLook {
                 entity_id: e.id,
                 dx: dx as i8,
                 dy: dy as i8,
@@ -475,17 +475,17 @@ impl Tracker {
                 yaw,
                 pitch,
             }),
-            1 => encode(RustPacket::RelEntityMove {
+            1 => encode(Packet::RelEntityMove {
                 entity_id: e.id,
                 dx: dx as i8,
                 dy: dy as i8,
                 dz: dz as i8,
             }),
-            2 => encode(RustPacket::EntityLook { entity_id: e.id, yaw, pitch }),
+            2 => encode(Packet::EntityLook { entity_id: e.id, yaw, pitch }),
             // Tracker teleport (EntityTrackerEntry:86 → Packet34) reuses the
             // floor-encoded yaw/pitch, NOT the spawn trunc form. Using trunc
             // here skewed negative angles by 1 unit (0.35°).
-            4 => encode(RustPacket::EntityTeleport {
+            4 => encode(Packet::EntityTeleport {
                 entity_id: e.id,
                 x: fx,
                 y: fy,
@@ -493,7 +493,7 @@ impl Tracker {
                 yaw,
                 pitch,
             }),
-            _ => encode(RustPacket::Entity { entity_id: e.id }),
+            _ => encode(Packet::Entity { entity_id: e.id }),
         };
         self.send_to_watchers(e.id, move_bytes, out);
 
@@ -514,7 +514,7 @@ impl Tracker {
                 }
                 self.send_to_watchers(
                     e.id,
-                    encode(RustPacket::BlockItemSwitch { entity_id: e.id, item_id: *held }),
+                    encode(Packet::BlockItemSwitch { entity_id: e.id, item_id: *held }),
                     out,
                 );
             }
@@ -530,7 +530,7 @@ impl Tracker {
                 if health < last {
                     self.send_to_watchers(
                         e.id,
-                        encode(RustPacket::EntityStatus { entity_id: e.id, status: 2 }),
+                        encode(Packet::EntityStatus { entity_id: e.id, status: 2 }),
                         out,
                     );
                 }
@@ -545,7 +545,7 @@ impl Tracker {
                 }
                 self.send_to_watchers_and_self(
                     e,
-                    encode(RustPacket::ArmAnimation {
+                    encode(Packet::ArmAnimation {
                         entity_id: e.id,
                         animate: if e.sneaking { 104 } else { 105 },
                     }),
@@ -560,7 +560,7 @@ impl Tracker {
                 }
                 self.send_to_watchers_and_self(
                     e,
-                    encode(RustPacket::ArmAnimation {
+                    encode(Packet::ArmAnimation {
                         entity_id: e.id,
                         animate: if burning { 102 } else { 103 },
                     }),
@@ -577,7 +577,7 @@ impl Tracker {
             }
             self.send_to_watchers_and_self(
                 e,
-                encode(RustPacket::AttachEntity { entity_id: e.id, vehicle_id: e.riding }),
+                encode(Packet::AttachEntity { entity_id: e.id, vehicle_id: e.riding }),
                 out,
             );
         }

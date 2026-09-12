@@ -1,5 +1,4 @@
-//! Native server binary (mirrors `src/main.cpp` + the `MinecraftServer`
-//! run loop): properties, world open, socket bind, console thread, 20
+//! Server binary: properties, world open, socket bind, console thread, 20
 //! TPS tick loop with lag accounting, graceful shutdown on stop/signal.
 //!
 //! Usage: `alpha_server [server.properties] [world-dir] [port]`
@@ -18,7 +17,7 @@ static STOP: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn signal_handler(signum: libc::c_int) {
     if STOP.swap(true, Ordering::SeqCst) {
-        // Second signal: C++ force-kills here; exit without saving.
+        // Second signal: exit without saving.
         std::process::exit(128 + signum);
     }
 }

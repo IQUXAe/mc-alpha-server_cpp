@@ -1,6 +1,6 @@
 
     use super::*;
-    use crate::entity::table::{Body, LivingBody, MobEnt, PlayerEnt};
+    use crate::entity::table::{Body, MobEnt, PlayerEnt};
 
     fn world_with_floor() -> World {
         let mut w = World::new(1234);
@@ -103,7 +103,7 @@
     }
 
     #[test]
-    fn test_light_defaults_match_cpp() {
+    fn test_light_defaults() {
         let w = world_with_floor();
         assert_eq!(w.saved_light_value(0, 1000, 64, 1000), 0);
         assert_eq!(w.saved_light_value(1, 1000, 64, 1000), 0);
@@ -745,15 +745,15 @@
     }
 
     fn furnace_tile_with(input: (i32, i32), fuel: (i32, i32)) -> TileData {
-        use crate::inventory::FfiItemStack;
+        use crate::inventory::ItemStack;
         let mut s = crate::tile_entity::furnace::furnace_create();
-        s.slots[0] = FfiItemStack {
+        s.slots[0] = ItemStack {
             stack_size: input.1,
             animations_to_go: 0,
             item_id: input.0,
             item_damage: 0,
         };
-        s.slots[1] = FfiItemStack {
+        s.slots[1] = ItemStack {
             stack_size: fuel.1,
             animations_to_go: 0,
             item_id: fuel.0,
@@ -1384,8 +1384,8 @@
         assert_eq!(w.entities.len(), before);
     }
 
-    fn stk(item_id: i32, count: i32, damage: i32) -> crate::inventory::FfiItemStack {
-        crate::inventory::FfiItemStack {
+    fn stk(item_id: i32, count: i32, damage: i32) -> crate::inventory::ItemStack {
+        crate::inventory::ItemStack {
             stack_size: count,
             animations_to_go: 0,
             item_id,
@@ -1393,7 +1393,7 @@
         }
     }
 
-    fn set_slot(w: &mut World, id: EntityId, bank: u8, slot: usize, s: crate::inventory::FfiItemStack) {
+    fn set_slot(w: &mut World, id: EntityId, bank: u8, slot: usize, s: crate::inventory::ItemStack) {
         if let Some(crate::entity::table::Entity::Player(p)) = w.entities.get_mut(id) {
             let bank = match bank {
                 0 => &mut p.inventory.main[..],

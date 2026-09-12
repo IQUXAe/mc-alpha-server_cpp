@@ -10,14 +10,14 @@
 //! - a small pure stack value (`PureItemStack`) with world-free helpers.
 //!
 //! Reused, not duplicated:
-//! - `FfiItemStack` comes from `crate::inventory`,
+//! - `ItemStack` comes from `crate::inventory`,
 //! - `max_stack_size` comes from
-//!   `crate::player::inventory::alpha_inventory_max_stack_size`,
+//!   `crate::player::inventory::inventory_max_stack_size`,
 //! - armor durability comes from
-//!   `crate::player::inventory::alpha_armor_max_damage`,
+//!   `crate::player::inventory::armor_max_damage`,
 //! - degrade-on-hit logic stays in `crate::inventory::item_stack_damage`,
 //! - weapon-vs-entity numbers stay in
-//!   `crate::player::combat::alpha_combat_get_weapon_damage`,
+//!   `crate::player::combat::combat_get_weapon_damage`,
 //! - full `getStrVsBlock` / `canHarvestBlock` with material fallback stay in
 //!   `crate::player::mining`.
 //!
@@ -25,8 +25,8 @@
 //! hoe/seed/flint/sign/block placement, soup/food healing via player,
 //! `hitEntity` via entity) are NOT ported here.
 
-use crate::inventory::FfiItemStack;
-use crate::player::inventory::{alpha_armor_max_damage, alpha_inventory_max_stack_size};
+use crate::inventory::ItemStack;
+use crate::player::inventory::{armor_max_damage, inventory_max_stack_size};
 
 // ---------------------------------------------------------------------------
 // Id table (final `itemID` values, see `Item::initItems` in Item.cpp)
@@ -135,7 +135,7 @@ pub const ITEM_FISH_COOKED: i32 = 350;
 
 /// True for ids that can appear in `Item::itemsList` after `initItems`:
 /// block ids 1..=255 plus item ids 256..=350.
-pub fn alpha_item_is_valid(item_id: i32) -> bool {
+pub fn item_is_valid(item_id: i32) -> bool {
     item_id >= 1 && item_id <= LAST_ITEM_ID
 }
 
@@ -153,14 +153,14 @@ pub fn alpha_item_is_valid(item_id: i32) -> bool {
 //   diamond 256. (The old 59/131/250/1561 table was Beta values.)
 // - `flintAndSteel` 64, `bow` 32 (default Item.maxDamage, only stackSize=1),
 //   `fishingRod` 64, saddle/sign/door/bucket/painting 64.
-// - armor via `setMaxDamage`, reused through `alpha_armor_max_damage`.
+// - armor via `setMaxDamage`, reused through `armor_max_damage`.
 // - everything else keeps the `Item` default `maxDamage = 32`, but for
 //   non-damageable stacks the damage field is unused (vanilla still stores
 //   32 as the cap).
 
 /// Unified durability table. Armor range 298..=317 is served by the
-/// existing `alpha_armor_max_damage` helper (no second table here).
-pub fn alpha_item_max_damage(item_id: i32) -> i32 {
+/// existing `armor_max_damage` helper (no second table here).
+pub fn item_max_damage(item_id: i32) -> i32 {
     match item_id {
         ITEM_SHOVEL_WOOD | ITEM_PICKAXE_WOOD | ITEM_AXE_WOOD | ITEM_SWORD_WOOD
         | ITEM_SHOVEL_GOLD | ITEM_PICKAXE_GOLD | ITEM_AXE_GOLD | ITEM_SWORD_GOLD => 32,
@@ -178,7 +178,7 @@ pub fn alpha_item_max_damage(item_id: i32) -> i32 {
         ITEM_SADDLE | ITEM_SIGN | ITEM_DOOR_WOOD | ITEM_DOOR_STEEL | ITEM_BUCKET_EMPTY
         | ITEM_BUCKET_WATER | ITEM_BUCKET_LAVA | ITEM_BUCKET_MILK | ITEM_PAINTING
         | ITEM_MINECART_EMPTY | ITEM_MINECART_CRATE | ITEM_MINECART_POWERED | ITEM_BOAT => 64,
-        298..=317 => alpha_armor_max_damage(item_id),
+        298..=317 => armor_max_damage(item_id),
         _ => 0,
     }
 }
@@ -191,7 +191,7 @@ pub fn alpha_item_max_damage(item_id: i32) -> i32 {
 /// Heal amount for food items, 0 for non-food.
 /// Values: apple 4, soup 10, bread 5, pork raw 3, pork cooked 8,
 /// golden apple 42, fish raw 2, fish cooked 5.
-pub fn alpha_item_food_heal(item_id: i32) -> i32 {
+pub fn item_food_heal(item_id: i32) -> i32 {
     match item_id {
         ITEM_APPLE_RED => 4,
         ITEM_BOWL_SOUP => 10,
@@ -206,15 +206,15 @@ pub fn alpha_item_food_heal(item_id: i32) -> i32 {
 }
 
 /// True for the eight `ItemFood` / `ItemSoup` ids listed above.
-pub fn alpha_item_is_food(item_id: i32) -> bool {
-    alpha_item_food_heal(item_id) > 0
+pub fn item_is_food(item_id: i32) -> bool {
+    item_food_heal(item_id) > 0
 }
 
 // ---------------------------------------------------------------------------
 // Tool data (`ItemTool` / `ItemSword` in `Item.h`)
 // ---------------------------------------------------------------------------
 
-/// Tool family. Values are stable for FFI use.
+/// Tool family.
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ItemToolKind {
@@ -228,7 +228,7 @@ pub enum ItemToolKind {
 
 /// Family lookup. Hoes (290..=294) report `Hoe`; everything that is not a
 /// pick/spade/axe/sword/hoe reports `Other`.
-pub fn alpha_item_tool_kind(item_id: i32) -> i32 {
+pub fn item_tool_kind(item_id: i32) -> i32 {
     match item_id {
         ITEM_PICKAXE_STEEL | ITEM_PICKAXE_WOOD | ITEM_PICKAXE_STONE | ITEM_PICKAXE_DIAMOND
         | ITEM_PICKAXE_GOLD => ItemToolKind::Pickaxe as i32,
@@ -262,7 +262,7 @@ fn tool_tier_opt(item_id: i32) -> Option<i32> {
 /// Harvest level from `Item.h` (`0=wood, 1=stone, 2=steel, 3=diamond`).
 /// Gold tools were built with level 0 in `Item.cpp`, so they yield 0.
 /// Returns -1 for non-tiered ids (hoes, armor, misc).
-pub fn alpha_item_tool_tier(item_id: i32) -> i32 {
+pub fn item_tool_tier(item_id: i32) -> i32 {
     match tool_tier_opt(item_id) {
         Some(t) => t,
         None => -1,
@@ -273,7 +273,7 @@ pub fn alpha_item_tool_tier(item_id: i32) -> i32 {
 /// Wood/gold 2.0, stone 4.0, steel 6.0, diamond 8.0.
 /// Returns 1.0 for ids without a tier (matches the `getStrVsBlock`
 /// fallback in `Item.cpp:459-467`).
-pub fn alpha_item_tool_speed(item_id: i32) -> f32 {
+pub fn item_tool_speed(item_id: i32) -> f32 {
     match tool_tier_opt(item_id) {
         Some(0) => 2.0,
         Some(1) => 4.0,
@@ -303,11 +303,11 @@ fn list_has(hay: &[i32], needle: i32) -> bool {
 /// True when `block_id` is in the explicit ctor list for the tool family.
 /// This is only the first half of `ItemTool::getStrVsBlock`; the
 /// material-based fallback lives in `player_mining` and is reused there.
-pub fn alpha_item_is_effective_explicit(item_id: i32, block_id: i32) -> bool {
+pub fn item_is_effective_explicit(item_id: i32, block_id: i32) -> bool {
     if block_id <= 0 || block_id >= 256 {
         return false;
     }
-    match alpha_item_tool_kind(item_id) {
+    match item_tool_kind(item_id) {
         x if x == ItemToolKind::Pickaxe as i32 => list_has(&PICKAXE_EFFECTIVE_BLOCKS, block_id),
         x if x == ItemToolKind::Spade as i32 => list_has(&SPADE_EFFECTIVE_BLOCKS, block_id),
         x if x == ItemToolKind::Axe as i32 => list_has(&AXE_EFFECTIVE_BLOCKS, block_id),
@@ -322,15 +322,14 @@ pub fn alpha_item_is_effective_explicit(item_id: i32, block_id: i32) -> bool {
 // Mirrors the data layout of `ItemStack` (`ItemStack.h:14-17`):
 // `stackSize / animationsToGo / itemID / itemDamage`.
 // `animationsToGo` is a client render timer and is not modelled here;
-// use `FfiItemStack` when the timer must cross FFI.
+// `ItemStack.animations_to_go` is the client render timer, unused here.
 //
 // C++ has no split/merge/can-stack helpers on `ItemStack` itself, so the
 // helpers below are new pure utilities built on the reused
-// `alpha_inventory_max_stack_size` table (same match rule as
-// `alpha_inventory_add_item`: same id + same damage + room left).
+// `inventory_max_stack_size` table (same match rule as
+// `inventory_add_item`: same id + same damage + room left).
 
 /// World-free copy of `ItemStack` fields.
-#[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PureItemStack {
     pub item_id: i32,
@@ -374,7 +373,7 @@ impl PureItemStack {
         self.damage = 0;
     }
 
-    pub fn from_ffi(s: &FfiItemStack) -> Self {
+    pub fn from_stack(s: &ItemStack) -> Self {
         Self {
             item_id: s.item_id,
             count: s.stack_size,
@@ -382,8 +381,8 @@ impl PureItemStack {
         }
     }
 
-    pub fn to_ffi(self) -> FfiItemStack {
-        FfiItemStack {
+    pub fn to_stack(self) -> ItemStack {
+        ItemStack {
             stack_size: self.count,
             animations_to_go: 0,
             item_id: self.item_id,
@@ -392,7 +391,7 @@ impl PureItemStack {
     }
 
     fn max_for(self) -> i32 {
-        alpha_inventory_max_stack_size(self.item_id)
+        inventory_max_stack_size(self.item_id)
     }
 
     /// Stacking rule used by inventory filling: same item, same damage,
@@ -494,7 +493,7 @@ impl PureItemStack {
 mod tests {
     use super::*;
     use crate::inventory::item_stack_damage;
-    use crate::player::mining::{alpha_mining_can_harvest, alpha_mining_get_str_vs_block};
+    use crate::player::mining::{mining_can_harvest, mining_get_str_vs_block};
 
     fn pure(id: i32, count: i32, damage: i32) -> PureItemStack {
         PureItemStack::new(id, count, damage)
@@ -537,13 +536,13 @@ mod tests {
     #[test]
     fn valid_and_invalid_ids() {
         // Mirrors GetItem / GetItemNullptrForInvalidId.
-        assert!(alpha_item_is_valid(ITEM_DIAMOND));
-        assert!(alpha_item_is_valid(1));
-        assert!(alpha_item_is_valid(ITEM_FISH_COOKED));
-        assert!(!alpha_item_is_valid(0));
-        assert!(!alpha_item_is_valid(9999));
-        assert!(!alpha_item_is_valid(-1));
-        assert!(!alpha_item_is_valid(351));
+        assert!(item_is_valid(ITEM_DIAMOND));
+        assert!(item_is_valid(1));
+        assert!(item_is_valid(ITEM_FISH_COOKED));
+        assert!(!item_is_valid(0));
+        assert!(!item_is_valid(9999));
+        assert!(!item_is_valid(-1));
+        assert!(!item_is_valid(351));
     }
 
     #[test]
@@ -582,69 +581,69 @@ mod tests {
         assert_eq!(c.item_id, 264);
         assert_eq!(c.count, 5);
         assert_eq!(c.damage, 2);
-        // FFI round trip keeps id/count/damage.
-        let ffi = s.to_ffi();
+        // Stack round trip keeps id/count/damage.
+        let ffi = s.to_stack();
         assert_eq!(ffi.item_id, 264);
         assert_eq!(ffi.stack_size, 5);
         assert_eq!(ffi.item_damage, 2);
-        let back = PureItemStack::from_ffi(&ffi);
+        let back = PureItemStack::from_stack(&ffi);
         assert_eq!(back, s);
     }
 
     #[test]
     fn max_stack_size_reused() {
         // Mirrors GetMaxStackSizeDefault / GetMaxStackSizeLimited.
-        assert_eq!(alpha_inventory_max_stack_size(264), 64);
-        assert_eq!(alpha_inventory_max_stack_size(325), 1);
-        assert_eq!(alpha_inventory_max_stack_size(332), 16);
-        assert_eq!(alpha_inventory_max_stack_size(344), 64);
-        assert_eq!(alpha_inventory_max_stack_size(276), 1);
+        assert_eq!(inventory_max_stack_size(264), 64);
+        assert_eq!(inventory_max_stack_size(325), 1);
+        assert_eq!(inventory_max_stack_size(332), 16);
+        assert_eq!(inventory_max_stack_size(344), 64);
+        assert_eq!(inventory_max_stack_size(276), 1);
     }
 
     #[test]
     fn max_damage_tools_follow_shift_formula() {
         // 32 << level, x4 for diamond (Item.h tool/sword ctors).
-        assert_eq!(alpha_item_max_damage(ITEM_SWORD_WOOD), 32);
-        assert_eq!(alpha_item_max_damage(ITEM_SHOVEL_WOOD), 32);
-        assert_eq!(alpha_item_max_damage(ITEM_PICKAXE_WOOD), 32);
-        assert_eq!(alpha_item_max_damage(ITEM_AXE_WOOD), 32);
-        assert_eq!(alpha_item_max_damage(ITEM_SWORD_GOLD), 32);
-        assert_eq!(alpha_item_max_damage(ITEM_SWORD_STONE), 64);
-        assert_eq!(alpha_item_max_damage(ITEM_PICKAXE_STONE), 64);
-        assert_eq!(alpha_item_max_damage(ITEM_SWORD_STEEL), 128);
-        assert_eq!(alpha_item_max_damage(ITEM_PICKAXE_STEEL), 128);
-        assert_eq!(alpha_item_max_damage(ITEM_AXE_STEEL), 128);
-        assert_eq!(alpha_item_max_damage(ITEM_SWORD_DIAMOND), 1024);
-        assert_eq!(alpha_item_max_damage(ITEM_PICKAXE_DIAMOND), 1024);
-        assert_eq!(alpha_item_max_damage(ITEM_SHOVEL_DIAMOND), 1024);
+        assert_eq!(item_max_damage(ITEM_SWORD_WOOD), 32);
+        assert_eq!(item_max_damage(ITEM_SHOVEL_WOOD), 32);
+        assert_eq!(item_max_damage(ITEM_PICKAXE_WOOD), 32);
+        assert_eq!(item_max_damage(ITEM_AXE_WOOD), 32);
+        assert_eq!(item_max_damage(ITEM_SWORD_GOLD), 32);
+        assert_eq!(item_max_damage(ITEM_SWORD_STONE), 64);
+        assert_eq!(item_max_damage(ITEM_PICKAXE_STONE), 64);
+        assert_eq!(item_max_damage(ITEM_SWORD_STEEL), 128);
+        assert_eq!(item_max_damage(ITEM_PICKAXE_STEEL), 128);
+        assert_eq!(item_max_damage(ITEM_AXE_STEEL), 128);
+        assert_eq!(item_max_damage(ITEM_SWORD_DIAMOND), 1024);
+        assert_eq!(item_max_damage(ITEM_PICKAXE_DIAMOND), 1024);
+        assert_eq!(item_max_damage(ITEM_SHOVEL_DIAMOND), 1024);
     }
 
     #[test]
     fn max_damage_special_and_armor() {
-        assert_eq!(alpha_item_max_damage(ITEM_FLINT_AND_STEEL), 64);
-        assert_eq!(alpha_item_max_damage(ITEM_BOW), 32);
-        assert_eq!(alpha_item_max_damage(ITEM_FISHING_ROD), 64);
-        assert_eq!(alpha_item_max_damage(ITEM_HOE_WOOD), 32);
-        assert_eq!(alpha_item_max_damage(ITEM_HOE_STONE), 64);
-        assert_eq!(alpha_item_max_damage(ITEM_HOE_STEEL), 128);
-        assert_eq!(alpha_item_max_damage(ITEM_HOE_DIAMOND), 256);
-        assert_eq!(alpha_item_max_damage(ITEM_HOE_GOLD), 64);
-        assert_eq!(alpha_item_max_damage(ITEM_HELMET_LEATHER), 33);
-        assert_eq!(alpha_item_max_damage(ITEM_PLATE_DIAMOND), 384);
-        assert_eq!(alpha_item_max_damage(ITEM_BOOTS_GOLD), 78);
-        assert_eq!(alpha_item_max_damage(ITEM_DIAMOND), 0);
-        assert_eq!(alpha_item_max_damage(ITEM_STICK), 0);
-        assert_eq!(alpha_item_max_damage(9999), 0);
-        assert_eq!(alpha_item_max_damage(0), 0);
+        assert_eq!(item_max_damage(ITEM_FLINT_AND_STEEL), 64);
+        assert_eq!(item_max_damage(ITEM_BOW), 32);
+        assert_eq!(item_max_damage(ITEM_FISHING_ROD), 64);
+        assert_eq!(item_max_damage(ITEM_HOE_WOOD), 32);
+        assert_eq!(item_max_damage(ITEM_HOE_STONE), 64);
+        assert_eq!(item_max_damage(ITEM_HOE_STEEL), 128);
+        assert_eq!(item_max_damage(ITEM_HOE_DIAMOND), 256);
+        assert_eq!(item_max_damage(ITEM_HOE_GOLD), 64);
+        assert_eq!(item_max_damage(ITEM_HELMET_LEATHER), 33);
+        assert_eq!(item_max_damage(ITEM_PLATE_DIAMOND), 384);
+        assert_eq!(item_max_damage(ITEM_BOOTS_GOLD), 78);
+        assert_eq!(item_max_damage(ITEM_DIAMOND), 0);
+        assert_eq!(item_max_damage(ITEM_STICK), 0);
+        assert_eq!(item_max_damage(9999), 0);
+        assert_eq!(item_max_damage(0), 0);
     }
 
     #[test]
     fn damage_item_break_uses_table() {
         // Mirrors DamageItemBreak / DamageItemNoDurability via the
         // existing item_stack_damage helper + our durability table.
-        let max = alpha_item_max_damage(ITEM_SWORD_WOOD);
+        let max = item_max_damage(ITEM_SWORD_WOOD);
         assert_eq!(max, 32);
-        let mut s = FfiItemStack {
+        let mut s = ItemStack {
             stack_size: 1,
             animations_to_go: 0,
             item_id: ITEM_SWORD_WOOD,
@@ -658,13 +657,13 @@ mod tests {
         assert_eq!(s.item_damage, 0);
         assert_eq!(s.stack_size, 0);
 
-        let mut plain = FfiItemStack {
+        let mut plain = ItemStack {
             stack_size: 1,
             animations_to_go: 0,
             item_id: ITEM_DIAMOND,
             item_damage: 0,
         };
-        let max_plain = alpha_item_max_damage(ITEM_DIAMOND);
+        let max_plain = item_max_damage(ITEM_DIAMOND);
         assert_eq!(max_plain, 0);
         let broke3 = item_stack_damage(&mut plain, 100, max_plain);
         assert!(!broke3);
@@ -673,63 +672,63 @@ mod tests {
 
     #[test]
     fn food_heal_values() {
-        assert_eq!(alpha_item_food_heal(ITEM_APPLE_RED), 4);
-        assert_eq!(alpha_item_food_heal(ITEM_BOWL_SOUP), 10);
-        assert_eq!(alpha_item_food_heal(ITEM_BREAD), 5);
-        assert_eq!(alpha_item_food_heal(ITEM_PORK_RAW), 3);
-        assert_eq!(alpha_item_food_heal(ITEM_PORK_COOKED), 8);
-        assert_eq!(alpha_item_food_heal(ITEM_APPLE_GOLD), 42);
-        assert_eq!(alpha_item_food_heal(ITEM_FISH_RAW), 2);
-        assert_eq!(alpha_item_food_heal(ITEM_FISH_COOKED), 5);
-        assert_eq!(alpha_item_food_heal(ITEM_DIAMOND), 0);
-        assert_eq!(alpha_item_food_heal(ITEM_STICK), 0);
-        assert!(alpha_item_is_food(ITEM_BREAD));
-        assert!(!alpha_item_is_food(ITEM_DIAMOND));
+        assert_eq!(item_food_heal(ITEM_APPLE_RED), 4);
+        assert_eq!(item_food_heal(ITEM_BOWL_SOUP), 10);
+        assert_eq!(item_food_heal(ITEM_BREAD), 5);
+        assert_eq!(item_food_heal(ITEM_PORK_RAW), 3);
+        assert_eq!(item_food_heal(ITEM_PORK_COOKED), 8);
+        assert_eq!(item_food_heal(ITEM_APPLE_GOLD), 42);
+        assert_eq!(item_food_heal(ITEM_FISH_RAW), 2);
+        assert_eq!(item_food_heal(ITEM_FISH_COOKED), 5);
+        assert_eq!(item_food_heal(ITEM_DIAMOND), 0);
+        assert_eq!(item_food_heal(ITEM_STICK), 0);
+        assert!(item_is_food(ITEM_BREAD));
+        assert!(!item_is_food(ITEM_DIAMOND));
     }
 
     #[test]
     fn tool_tier_and_speed() {
-        assert_eq!(alpha_item_tool_tier(ITEM_PICKAXE_WOOD), 0);
-        assert_eq!(alpha_item_tool_tier(ITEM_PICKAXE_GOLD), 0);
-        assert_eq!(alpha_item_tool_tier(ITEM_PICKAXE_STONE), 1);
-        assert_eq!(alpha_item_tool_tier(ITEM_PICKAXE_STEEL), 2);
-        assert_eq!(alpha_item_tool_tier(ITEM_PICKAXE_DIAMOND), 3);
-        assert_eq!(alpha_item_tool_tier(ITEM_HOE_STEEL), -1);
-        assert_eq!(alpha_item_tool_tier(ITEM_DIAMOND), -1);
-        assert_eq!(alpha_item_tool_tier(9999), -1);
+        assert_eq!(item_tool_tier(ITEM_PICKAXE_WOOD), 0);
+        assert_eq!(item_tool_tier(ITEM_PICKAXE_GOLD), 0);
+        assert_eq!(item_tool_tier(ITEM_PICKAXE_STONE), 1);
+        assert_eq!(item_tool_tier(ITEM_PICKAXE_STEEL), 2);
+        assert_eq!(item_tool_tier(ITEM_PICKAXE_DIAMOND), 3);
+        assert_eq!(item_tool_tier(ITEM_HOE_STEEL), -1);
+        assert_eq!(item_tool_tier(ITEM_DIAMOND), -1);
+        assert_eq!(item_tool_tier(9999), -1);
 
-        assert_eq!(alpha_item_tool_speed(ITEM_PICKAXE_STEEL), 6.0);
-        assert_eq!(alpha_item_tool_speed(ITEM_AXE_STEEL), 6.0);
-        assert_eq!(alpha_item_tool_speed(ITEM_SHOVEL_STEEL), 6.0);
-        assert_eq!(alpha_item_tool_speed(ITEM_PICKAXE_WOOD), 2.0);
-        assert_eq!(alpha_item_tool_speed(ITEM_PICKAXE_DIAMOND), 8.0);
-        assert_eq!(alpha_item_tool_speed(ITEM_DIAMOND), 1.0);
+        assert_eq!(item_tool_speed(ITEM_PICKAXE_STEEL), 6.0);
+        assert_eq!(item_tool_speed(ITEM_AXE_STEEL), 6.0);
+        assert_eq!(item_tool_speed(ITEM_SHOVEL_STEEL), 6.0);
+        assert_eq!(item_tool_speed(ITEM_PICKAXE_WOOD), 2.0);
+        assert_eq!(item_tool_speed(ITEM_PICKAXE_DIAMOND), 8.0);
+        assert_eq!(item_tool_speed(ITEM_DIAMOND), 1.0);
     }
 
     #[test]
     fn tool_kind_mapping() {
         assert_eq!(
-            alpha_item_tool_kind(ITEM_PICKAXE_STEEL),
+            item_tool_kind(ITEM_PICKAXE_STEEL),
             ItemToolKind::Pickaxe as i32
         );
         assert_eq!(
-            alpha_item_tool_kind(ITEM_SHOVEL_STEEL),
+            item_tool_kind(ITEM_SHOVEL_STEEL),
             ItemToolKind::Spade as i32
         );
         assert_eq!(
-            alpha_item_tool_kind(ITEM_AXE_STEEL),
+            item_tool_kind(ITEM_AXE_STEEL),
             ItemToolKind::Axe as i32
         );
         assert_eq!(
-            alpha_item_tool_kind(ITEM_SWORD_DIAMOND),
+            item_tool_kind(ITEM_SWORD_DIAMOND),
             ItemToolKind::Sword as i32
         );
         assert_eq!(
-            alpha_item_tool_kind(ITEM_HOE_DIAMOND),
+            item_tool_kind(ITEM_HOE_DIAMOND),
             ItemToolKind::Hoe as i32
         );
         assert_eq!(
-            alpha_item_tool_kind(ITEM_DIAMOND),
+            item_tool_kind(ITEM_DIAMOND),
             ItemToolKind::Other as i32
         );
     }
@@ -737,40 +736,40 @@ mod tests {
     #[test]
     fn explicit_effective_lists() {
         // Pickaxe list from Item.h ctor.
-        assert!(alpha_item_is_effective_explicit(ITEM_PICKAXE_STEEL, 1));
-        assert!(alpha_item_is_effective_explicit(ITEM_PICKAXE_STEEL, 4));
-        assert!(!alpha_item_is_effective_explicit(ITEM_PICKAXE_STEEL, 3));
+        assert!(item_is_effective_explicit(ITEM_PICKAXE_STEEL, 1));
+        assert!(item_is_effective_explicit(ITEM_PICKAXE_STEEL, 4));
+        assert!(!item_is_effective_explicit(ITEM_PICKAXE_STEEL, 3));
         // Spade list.
-        assert!(alpha_item_is_effective_explicit(ITEM_SHOVEL_STEEL, 3));
-        assert!(!alpha_item_is_effective_explicit(ITEM_SHOVEL_STEEL, 1));
+        assert!(item_is_effective_explicit(ITEM_SHOVEL_STEEL, 3));
+        assert!(!item_is_effective_explicit(ITEM_SHOVEL_STEEL, 1));
         // Axe list.
-        assert!(alpha_item_is_effective_explicit(ITEM_AXE_STEEL, 17));
-        assert!(!alpha_item_is_effective_explicit(ITEM_AXE_STEEL, 1));
+        assert!(item_is_effective_explicit(ITEM_AXE_STEEL, 17));
+        assert!(!item_is_effective_explicit(ITEM_AXE_STEEL, 1));
         // Swords / misc have no explicit list.
-        assert!(!alpha_item_is_effective_explicit(ITEM_SWORD_STEEL, 1));
-        assert!(!alpha_item_is_effective_explicit(ITEM_DIAMOND, 1));
+        assert!(!item_is_effective_explicit(ITEM_SWORD_STEEL, 1));
+        assert!(!item_is_effective_explicit(ITEM_DIAMOND, 1));
         // Boundary ids mirror ToolGetStrVsBlock* tests.
-        assert!(!alpha_item_is_effective_explicit(ITEM_PICKAXE_STEEL, -1));
-        assert!(!alpha_item_is_effective_explicit(ITEM_PICKAXE_STEEL, 0));
-        assert!(!alpha_item_is_effective_explicit(ITEM_PICKAXE_STEEL, 9999));
-        assert!(!alpha_item_is_effective_explicit(ITEM_PICKAXE_STEEL, 256));
+        assert!(!item_is_effective_explicit(ITEM_PICKAXE_STEEL, -1));
+        assert!(!item_is_effective_explicit(ITEM_PICKAXE_STEEL, 0));
+        assert!(!item_is_effective_explicit(ITEM_PICKAXE_STEEL, 9999));
+        assert!(!item_is_effective_explicit(ITEM_PICKAXE_STEEL, 256));
     }
 
     #[test]
     fn mining_module_agrees_with_tool_data() {
         // Mirrors PickaxeStrVsBlock / AxeEffectiveAgainstWood /
         // SpadeEffectiveAgainstDirt / harvest checks.
-        assert_eq!(alpha_mining_get_str_vs_block(1, ITEM_PICKAXE_STEEL), 6.0);
-        assert_eq!(alpha_mining_get_str_vs_block(17, ITEM_AXE_STEEL), 6.0);
-        assert_eq!(alpha_mining_get_str_vs_block(3, ITEM_SHOVEL_STEEL), 6.0);
-        assert_eq!(alpha_mining_get_str_vs_block(1, ITEM_DIAMOND), 1.0);
-        assert!(alpha_mining_can_harvest(1, ITEM_PICKAXE_STEEL));
-        assert!(!alpha_mining_can_harvest(1, ITEM_SHOVEL_WOOD));
-        assert!(alpha_mining_can_harvest(61, ITEM_PICKAXE_STEEL));
-        assert_eq!(alpha_mining_get_str_vs_block(-1, ITEM_PICKAXE_STEEL), 1.0);
-        assert_eq!(alpha_mining_get_str_vs_block(0, ITEM_PICKAXE_STEEL), 1.0);
-        assert_eq!(alpha_mining_get_str_vs_block(9999, ITEM_PICKAXE_STEEL), 1.0);
-        assert_eq!(alpha_mining_get_str_vs_block(256, ITEM_PICKAXE_STEEL), 1.0);
+        assert_eq!(mining_get_str_vs_block(1, ITEM_PICKAXE_STEEL), 6.0);
+        assert_eq!(mining_get_str_vs_block(17, ITEM_AXE_STEEL), 6.0);
+        assert_eq!(mining_get_str_vs_block(3, ITEM_SHOVEL_STEEL), 6.0);
+        assert_eq!(mining_get_str_vs_block(1, ITEM_DIAMOND), 1.0);
+        assert!(mining_can_harvest(1, ITEM_PICKAXE_STEEL));
+        assert!(!mining_can_harvest(1, ITEM_SHOVEL_WOOD));
+        assert!(mining_can_harvest(61, ITEM_PICKAXE_STEEL));
+        assert_eq!(mining_get_str_vs_block(-1, ITEM_PICKAXE_STEEL), 1.0);
+        assert_eq!(mining_get_str_vs_block(0, ITEM_PICKAXE_STEEL), 1.0);
+        assert_eq!(mining_get_str_vs_block(9999, ITEM_PICKAXE_STEEL), 1.0);
+        assert_eq!(mining_get_str_vs_block(256, ITEM_PICKAXE_STEEL), 1.0);
     }
 
     #[test]
